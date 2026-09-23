@@ -2,507 +2,747 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Shero Home Food — Order</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Shero Home Food</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = { theme: { extend: { colors: { brand: {
-      50:'#fdf5ef',100:'#fae6d6',300:'#e8b48a',500:'#c9743a',
-      600:'#b5622c',700:'#8f4a20' } } } } };
+    /* Warm, food-forward palette: deep cocoa surfaces, saffron accents and a
+       chilli-red call to action against cream. */
+    tailwind.config = { theme: { extend: {
+      colors: {
+        cream:   { 50:'#FDFBF7', 100:'#F7F1E8', 200:'#EDE2D3' },
+        cocoa:   { 700:'#3A2A22', 800:'#2B1E18', 900:'#1D1411' },
+        saffron: { 50:'#FEF7EA', 100:'#FDEBC9', 300:'#F6CE7E',
+                   500:'#EDA93C', 600:'#D9912A' },
+        chilli:  { 50:'#FDF0EC', 100:'#FADCD2', 300:'#EFA48C',
+                   500:'#D2542F', 600:'#B94525', 700:'#96361C' },
+        herb:    { 500:'#3E8E5A', 600:'#2F7549', 700:'#245C39' },
+      },
+      boxShadow: { card: '0 1px 2px rgba(29,20,17,.06), 0 4px 16px rgba(29,20,17,.05)' },
+    } } };
   </script>
+  <style>
+    /* Horizontal chip rail without a visible scrollbar. */
+    .no-bar::-webkit-scrollbar { display: none; }
+    .no-bar { -ms-overflow-style: none; scrollbar-width: none; }
+    @keyframes rise { from { transform: translateY(6px); opacity: 0 } to { transform: none; opacity: 1 } }
+    .rise { animation: rise .18s ease-out both }
+  </style>
 </head>
-<body class="bg-stone-100 text-stone-900">
+<body class="bg-cream-100 pb-28 text-cocoa-900">
 
-<header class="sticky top-0 z-20 border-b border-stone-200 bg-white/95 backdrop-blur">
-  <div class="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
-    <div class="min-w-0">
-      <div class="truncate text-base font-semibold">Shero Home Food</div>
-      <div class="truncate text-[11px] text-stone-500">
-        {% if customer.name %}Hi {{ customer.name }} — {% endif %}authentic home-style meals
+<!-- Brand header -->
+<header class="sticky top-0 z-30 bg-cocoa-800 text-white shadow-sm">
+  <div class="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6">
+    <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-lg">🍛</div>
+    <div class="min-w-0 flex-1">
+      <div class="truncate text-[15px] font-semibold leading-tight">Shero Home Food</div>
+      <div id="sub" class="truncate text-[11px] text-white/70">
+        {% if kitchen %}{{ kitchen.name }}{% else %}Loading menu…{% endif %}
       </div>
     </div>
-    <button id="cart-button"
-            class="relative shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-      Cart
-      <span id="cart-count"
-            class="ml-1 hidden rounded-full bg-white px-1.5 text-xs font-bold text-brand-700">0</span>
-    </button>
+    <span class="shrink-0 rounded-full bg-chilli-500 px-3 py-1 text-[11px] font-semibold">Delivery</span>
   </div>
 
-  <!-- Progress -->
-  <div class="mx-auto flex max-w-5xl gap-1 px-4 pb-2 text-[11px]">
-    {% for label in ['Menu', 'Cart', 'Address', 'Confirm'] %}
-      <div class="step-pill flex-1 rounded-full bg-stone-200 px-2 py-1 text-center font-medium text-stone-500"
-           data-step="{{ loop.index0 }}">{{ loop.index }}. {{ label }}</div>
-    {% endfor %}
+  <!-- Search -->
+  <div class="mx-auto max-w-6xl px-4 pb-3 sm:px-6">
+    <div class="flex items-center gap-2 rounded-xl bg-white px-3 py-2.5">
+      <svg class="h-4 w-4 shrink-0 text-cocoa-700/45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5" stroke-linecap="round"/>
+      </svg>
+      <input id="search" placeholder="Search dishes, categories…"
+             class="w-full bg-transparent text-sm text-cocoa-800 outline-none placeholder:text-cocoa-700/45">
+      <button id="clear-search" class="hidden text-cocoa-700/45 hover:text-cocoa-700/80" aria-label="Clear search">✕</button>
+    </div>
   </div>
 </header>
 
-<main class="mx-auto max-w-5xl px-4 py-5">
+<!-- Category rail -->
+<div class="sticky top-[108px] z-20 border-b border-cream-200 bg-cream-100/95 backdrop-blur">
+  <nav id="cuisines" class="no-bar mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 pt-2.5 sm:px-6"></nav>
+  <nav id="chips" class="no-bar mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 py-2.5 sm:px-6"></nav>
+</div>
 
-  <!-- 1. MENU -->
-  <section id="view-menu">
-    <div id="cuisine-tabs" class="mb-4 flex flex-wrap gap-2"></div>
-    <input id="search" placeholder="Search dishes…"
-           class="mb-4 w-full rounded-xl border border-stone-300 px-4 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-    <div id="menu-body" class="space-y-3">
-      <p class="py-16 text-center text-sm text-stone-500">Loading the menu…</p>
+<div class="mx-auto flex max-w-6xl gap-6 px-4 py-4 sm:px-6">
+  <main id="list" class="min-w-0 flex-1">
+    <div class="flex flex-col items-center py-24 text-cocoa-700/45">
+      <div class="h-8 w-8 animate-spin rounded-full border-2 border-cream-200 border-t-chilli-500"></div>
+      <p class="mt-3 text-sm">Loading delicious items…</p>
     </div>
+  </main>
+
+  <!-- Desktop only: the cart stays on screen instead of behind a bar. -->
+  <aside id="side-cart"
+         class="sticky top-[200px] hidden h-fit w-80 shrink-0 rounded-2xl border border-cream-200 bg-white p-4 shadow-card lg:block">
+    <h2 class="mb-2 text-sm font-semibold">Your cart</h2>
+    <div id="side-lines" class="max-h-[46vh] space-y-1 overflow-y-auto"></div>
+    <div id="side-foot" class="mt-3 border-t border-cream-200 pt-3"></div>
+  </aside>
+</div>
+
+<!-- Jump to a category -->
+<button id="index-btn"
+        class="fixed bottom-24 right-5 z-30 flex h-12 w-12 lg:hidden items-center justify-center rounded-full bg-cocoa-700 text-white shadow-lg hover:bg-cocoa-800"
+        aria-label="Jump to a category">
+  <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/>
+  </svg>
+</button>
+
+<!-- Cart bar -->
+<button id="cart-bar"
+        class="fixed inset-x-0 bottom-0 z-30 hidden items-center justify-between gap-3 bg-cocoa-800 px-5 py-3.5 text-white lg:!hidden shadow-[0_-2px_12px_rgba(0,0,0,.18)]">
+  <span class="flex items-center gap-2 text-sm">
+    <span id="bar-count" class="rounded-full bg-white/20 px-2.5 py-0.5 text-[12px] font-semibold">0 items</span>
+    <span id="bar-total" class="font-bold tabular-nums">$0.00</span>
+  </span>
+  <span class="flex items-center gap-1 text-sm font-semibold">View Cart
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+      <path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </span>
+</button>
+
+<!-- Sheet: cart / address / summary / done -->
+<div id="sheet" class="fixed inset-0 z-40 hidden">
+  <div id="scrim" class="absolute inset-0 bg-black/40"></div>
+  <section class="absolute inset-x-0 bottom-0 flex max-h-[92vh] flex-col rounded-t-2xl bg-white sm:inset-x-auto sm:left-1/2 sm:bottom-auto sm:top-1/2 sm:w-[32rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:shadow-2xl">
+    <header class="flex items-center justify-between border-b border-cream-200 px-4 py-3">
+      <h2 id="sheet-title" class="text-base font-semibold">Your cart</h2>
+      <button id="sheet-close" class="rounded-lg p-1 text-cocoa-700/45 hover:bg-cream-100" aria-label="Close">✕</button>
+    </header>
+    <div id="sheet-body" class="flex-1 overflow-y-auto px-4 py-4"></div>
+    <footer id="sheet-foot" class="border-t border-cream-200 bg-white px-4 py-3"></footer>
   </section>
+</div>
 
-  <!-- 2. CART -->
-  <section id="view-cart" class="hidden">
-    <h2 class="mb-3 text-lg font-semibold">Your cart</h2>
-    <div id="cart-body" class="space-y-2"></div>
-    <div id="cart-total" class="mt-4 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm"></div>
-    <div class="mt-4 flex gap-2">
-      <button data-goto="menu" class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium">Add more</button>
-      <button id="to-address" class="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
-        Continue to delivery
-      </button>
-    </div>
-  </section>
-
-  <!-- 3. ADDRESS -->
-  <section id="view-address" class="hidden">
-    <h2 class="mb-3 text-lg font-semibold">Where should we deliver?</h2>
-    <div class="space-y-3 rounded-xl border border-stone-200 bg-white p-4">
-      <div>
-        <label class="mb-1 block text-xs font-medium text-stone-600">Street address</label>
-        <input id="f-address" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-      </div>
-      <div class="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label class="mb-1 block text-xs font-medium text-stone-600">Apartment / unit</label>
-          <input id="f-apartment" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-        </div>
-        <div>
-          <label class="mb-1 block text-xs font-medium text-stone-600">ZIP code</label>
-          <input id="f-zip" inputmode="numeric" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-        </div>
-      </div>
-      <div class="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label class="mb-1 block text-xs font-medium text-stone-600">Contact number</label>
-          <input id="f-contact" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-        </div>
-        <div>
-          <label class="mb-1 block text-xs font-medium text-stone-600">Driver instructions</label>
-          <input id="f-instructions" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-        </div>
-      </div>
-      <button id="check-address" class="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
-        Check delivery &amp; show times
-      </button>
-    </div>
-
-    <div id="slots-wrap" class="mt-4 hidden">
-      <h3 class="mb-2 text-sm font-semibold">Pick a delivery time</h3>
-      <div id="slots" class="grid gap-2 sm:grid-cols-2"></div>
-    </div>
-
-    <div class="mt-4 flex gap-2">
-      <button data-goto="cart" class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium">Back</button>
-      <button id="to-summary" disabled
-              class="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40">
-        See the total
-      </button>
-    </div>
-  </section>
-
-  <!-- 4. SUMMARY -->
-  <section id="view-summary" class="hidden">
-    <h2 class="mb-3 text-lg font-semibold">Confirm your order</h2>
-    <div id="summary-body" class="rounded-xl border border-stone-200 bg-white p-4 text-sm"></div>
-    <div class="mt-4 flex gap-2">
-      <button data-goto="address" class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium">Back</button>
-      <button id="place-order" class="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
-        Confirm &amp; get payment link
-      </button>
-    </div>
-  </section>
-
-  <!-- 5. DONE -->
-  <section id="view-done" class="hidden">
-    <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center">
-      <h2 class="text-lg font-semibold text-emerald-900">Order placed</h2>
-      <p class="mt-1 text-sm text-emerald-800">
-        Order <strong id="done-number"></strong>. We have sent the payment link to your
-        WhatsApp — or pay right here.
-      </p>
-      <a id="done-pay" href="#" class="mt-4 inline-block rounded-xl bg-emerald-700 px-6 py-3 text-sm font-semibold text-white hover:bg-emerald-800">
-        Pay now
-      </a>
-      <p class="mt-3 text-[11px] text-emerald-700">
-        Your delivery slot is held for 30 minutes.
-      </p>
-    </div>
-  </section>
-
-  <p id="error" class="mt-4 hidden rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"></p>
-</main>
+<p id="toast" class="fixed inset-x-4 bottom-24 z-50 hidden rounded-xl bg-red-600 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
 
 <script>
 (function () {
   const TOKEN = {{ token | tojson }};
-  const BASE = '/order/' + TOKEN;
+  const BASE  = '/order/' + TOKEN;
   const $ = (id) => document.getElementById(id);
 
-  let MENU = [];          // [{name, slug, categories:[{name, items:[…]}]}]
-  let ITEMS = {};         // retailer_id -> item, for cart rendering
-  let cart = {};          // retailer_id -> quantity
+  let MENU = [];        // [{name, slug, categories:[{name, items:[...]}]}]
+  let ITEMS = {};       // retailer_id -> item
+  let CART = {};        // retailer_id -> quantity  (mirror of the server)
+  let activeCuisine = 'all';
+  let activeChip = 'all';
   let slotId = null;
-  let quote = null;
-  let activeCuisine = null;
 
-  const money = (n) => '$' + Number(n).toFixed(2);
+  const money = (n) => '$' + Number(n || 0).toFixed(2);
 
-  function showError(msg) {
-    const box = $('error');
-    if (!msg) { box.classList.add('hidden'); return; }
-    box.textContent = msg;
-    box.classList.remove('hidden');
-    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.remove('hidden');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
   }
 
-  const VIEWS = ['menu', 'cart', 'address', 'summary', 'done'];
-  function show(name) {
-    showError('');
-    VIEWS.forEach(v => $('view-' + v).classList.toggle('hidden', v !== name));
-    const idx = { menu: 0, cart: 1, address: 2, summary: 3, done: 3 }[name];
-    document.querySelectorAll('.step-pill').forEach((pill, i) => {
-      const done = i <= idx;
-      pill.className = 'step-pill flex-1 rounded-full px-2 py-1 text-center font-medium ' +
-        (done ? 'bg-brand-600 text-white' : 'bg-stone-200 text-stone-500');
-    });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  // --- cart ---------------------------------------------------------------
-  function cartLines() {
-    return Object.keys(cart)
-      .filter(id => cart[id] > 0)
-      .map(id => ({ retailer_id: id, quantity: cart[id] }));
-  }
-
-  function cartCount() {
-    return cartLines().reduce((n, l) => n + l.quantity, 0);
-  }
-
-  function setQty(id, qty) {
-    if (qty <= 0) delete cart[id]; else cart[id] = Math.min(qty, 20);
-    renderCartBadge();
-    renderMenu();
-  }
-
-  function renderCartBadge() {
-    const n = cartCount();
-    const badge = $('cart-count');
-    badge.textContent = n;
-    badge.classList.toggle('hidden', n === 0);
-  }
-
-  function renderCart() {
-    const lines = cartLines();
-    const body = $('cart-body');
-    body.innerHTML = '';
-    if (!lines.length) {
-      body.innerHTML = '<p class="py-10 text-center text-sm text-stone-500">Your cart is empty.</p>';
-      $('cart-total').textContent = '';
-      return;
-    }
-    let subtotal = 0;
-    lines.forEach(line => {
-      const item = ITEMS[line.retailer_id];
-      if (!item) return;
-      subtotal += item.price * line.quantity;
-      const row = document.createElement('div');
-      row.className = 'flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3';
-      row.innerHTML =
-        '<div class="min-w-0 flex-1">' +
-          '<div class="truncate text-sm font-medium"></div>' +
-          '<div class="text-xs text-stone-500">' + money(item.price) + ' each</div>' +
-        '</div>';
-      row.querySelector('.font-medium').textContent = item.name;
-      row.appendChild(stepper(line.retailer_id, line.quantity));
-      const total = document.createElement('div');
-      total.className = 'w-20 text-right text-sm font-semibold tabular-nums';
-      total.textContent = money(item.price * line.quantity);
-      row.appendChild(total);
-      body.appendChild(row);
-    });
-    $('cart-total').innerHTML =
-      '<div class="flex justify-between"><span>Subtotal</span>' +
-      '<span class="font-semibold tabular-nums">' + money(subtotal) + '</span></div>' +
-      '<p class="mt-1 text-[11px] text-stone-500">Delivery and taxes are added at the next step.</p>';
-  }
-
-  function stepper(id, qty) {
-    const wrap = document.createElement('div');
-    wrap.className = 'flex shrink-0 items-center gap-1';
-    const mk = (label, delta) => {
-      const b = document.createElement('button');
-      b.className = 'h-7 w-7 rounded-lg border border-stone-300 text-sm font-semibold hover:bg-stone-100';
-      b.textContent = label;
-      b.addEventListener('click', () => { setQty(id, (cart[id] || 0) + delta); renderCart(); });
-      return b;
-    };
-    const count = document.createElement('span');
-    count.className = 'w-6 text-center text-sm tabular-nums';
-    count.textContent = qty;
-    wrap.append(mk('−', -1), count, mk('+', 1));
-    return wrap;
-  }
-
-  // --- menu ---------------------------------------------------------------
-  function renderTabs() {
-    const tabs = $('cuisine-tabs');
-    tabs.innerHTML = '';
-    MENU.forEach(c => {
-      const b = document.createElement('button');
-      const on = c.slug === activeCuisine;
-      b.className = 'rounded-xl border px-4 py-2 text-sm font-medium ' +
-        (on ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-stone-300 bg-white text-stone-600');
-      b.textContent = c.name;
-      b.addEventListener('click', () => { activeCuisine = c.slug; renderTabs(); renderMenu(); });
-      tabs.appendChild(b);
-    });
-  }
-
-  function renderMenu() {
-    const term = $('search').value.trim().toLowerCase();
-    const body = $('menu-body');
-    body.innerHTML = '';
-
-    const cuisine = MENU.find(c => c.slug === activeCuisine);
-    if (!cuisine) return;
-
-    let shown = 0;
-    cuisine.categories.forEach(cat => {
-      const items = cat.items.filter(i => !term || i.name.toLowerCase().includes(term));
-      if (!items.length) return;
-      shown += items.length;
-
-      const box = document.createElement('details');
-      box.className = 'group overflow-hidden rounded-xl border border-stone-200 bg-white';
-      if (term) box.open = true;
-
-      const head = document.createElement('summary');
-      head.className = 'flex cursor-pointer list-none items-center justify-between px-4 py-3 hover:bg-stone-50 [&::-webkit-details-marker]:hidden';
-      head.innerHTML =
-        '<span class="text-sm font-semibold"></span>' +
-        '<span class="text-xs text-stone-500">' + items.length + ' item(s)</span>';
-      head.querySelector('span').textContent = cat.name;
-      box.appendChild(head);
-
-      const list = document.createElement('div');
-      list.className = 'divide-y divide-stone-100 border-t border-stone-100';
-      items.forEach(item => list.appendChild(itemRow(item)));
-      box.appendChild(list);
-      body.appendChild(box);
-    });
-
-    if (!shown) {
-      body.innerHTML = '<p class="py-16 text-center text-sm text-stone-500">No dishes match that search.</p>';
-    }
-  }
-
-  function itemRow(item) {
-    const row = document.createElement('div');
-    row.className = 'flex items-center gap-3 px-4 py-3';
-
-    const info = document.createElement('div');
-    info.className = 'min-w-0 flex-1';
-    const name = document.createElement('div');
-    name.className = 'truncate text-sm font-medium';
-    name.textContent = item.name;
-    const meta = document.createElement('div');
-    meta.className = 'truncate text-xs text-stone-500';
-    meta.textContent = [item.pack_size, item.serves].filter(Boolean).join(' · ');
-    info.append(name, meta);
-
-    const price = document.createElement('div');
-    price.className = 'w-16 shrink-0 text-right text-sm font-semibold tabular-nums';
-    price.textContent = money(item.price);
-
-    row.append(info, price);
-
-    const qty = cart[item.id] || 0;
-    if (qty > 0) {
-      row.appendChild(stepper(item.id, qty));
-    } else {
-      const add = document.createElement('button');
-      add.className = 'shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700';
-      add.textContent = 'Add';
-      add.addEventListener('click', () => setQty(item.id, 1));
-      row.appendChild(add);
-    }
-    return row;
-  }
-
-  // --- server -------------------------------------------------------------
   async function api(path, payload) {
     const res = await fetch(BASE + path, payload ? {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     } : undefined);
-    if (!res.ok) throw new Error('Server error ' + res.status);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     return res.json();
   }
 
-  function busy(btn, on, label) {
-    btn.disabled = on;
-    if (on) { btn.dataset.label = btn.textContent; btn.textContent = label; }
-    else if (btn.dataset.label) { btn.textContent = btn.dataset.label; }
+  // --- cart (server is the source of truth) -------------------------------
+  function applyCart(data) {
+    CART = {};
+    (data.cart || []).forEach(l => { CART[l.retailer_id] = l.quantity; });
+    $('bar-count').textContent = data.count + (data.count === 1 ? ' item' : ' items');
+    $('bar-total').textContent = money(data.subtotal);
+    $('cart-bar').classList.toggle('hidden', !data.count);
+    $('cart-bar').classList.toggle('flex', !!data.count);
+    renderSideCart(data);
+    renderList();
   }
 
-  async function load() {
+  async function setQty(id, qty) {
+    // Optimistic, so tapping + feels instant; the server reply is authoritative.
+    CART[id] = Math.max(0, qty);
+    if (!CART[id]) delete CART[id];
+    renderList();
     try {
-      const data = await api('/menu');
-      if (!data.ok) { showError(data.error); return; }
-      MENU = data.cuisines;
-      MENU.forEach(c => c.categories.forEach(cat => cat.items.forEach(i => { ITEMS[i.id] = i; })));
-      activeCuisine = MENU.length ? MENU[0].slug : null;
-
-      const s = data.saved || {};
-      $('f-address').value = s.address_line1 || '';
-      $('f-apartment').value = s.apartment_unit || '';
-      $('f-zip').value = s.postal_code || '';
-      $('f-contact').value = s.contact_number || '';
-      $('f-instructions').value = s.delivery_instructions || '';
-
-      renderTabs();
-      renderMenu();
+      const data = await api('/cart', { retailer_id: id, quantity: qty });
+      if (!data.ok) { toast(data.error); return; }
+      applyCart(data);
     } catch (err) {
-      showError('Could not load the menu: ' + err.message);
+      toast('Could not update your cart: ' + err.message);
     }
   }
 
-  function addressPayload() {
-    return {
-      address_line1: $('f-address').value.trim(),
-      apartment_unit: $('f-apartment').value.trim(),
-      postal_code: $('f-zip').value.trim(),
-      contact_number: $('f-contact').value.trim(),
-      delivery_instructions: $('f-instructions').value.trim(),
-    };
+  // The desktop panel mirrors the bar; both read the same server response.
+  function renderSideCart(data) {
+    const lines = $('side-lines');
+    const foot = $('side-foot');
+    if (!lines || !foot) return;
+
+    if (!data.count) {
+      lines.innerHTML = '<p class="py-6 text-center text-xs text-cocoa-700/45">Nothing added yet.</p>';
+      foot.innerHTML = '';
+      return;
+    }
+
+    lines.innerHTML = (data.cart || []).map(l =>
+      '<div class="border-b border-cream-200 py-2 last:border-0">' +
+        '<div class="flex items-start justify-between gap-2">' +
+          '<span class="min-w-0 text-sm [overflow-wrap:anywhere]">' + esc(l.name) + '</span>' +
+          '<button class="line-remove shrink-0 rounded p-0.5 text-cocoa-700/45 hover:bg-chilli-50 hover:text-chilli-600" ' +
+                  'data-id="' + esc(l.retailer_id) + '" aria-label="Remove ' + esc(l.name) + '">✕</button>' +
+        '</div>' +
+        '<div class="mt-1.5 flex items-center justify-between gap-2">' +
+          '<span class="flex items-center gap-1.5">' +
+            '<button class="line-minus flex h-7 w-7 items-center justify-center rounded-md border border-chilli-300 ' +
+                    'text-sm font-bold text-chilli-600 hover:bg-chilli-50" data-id="' + esc(l.retailer_id) + '" ' +
+                    'data-to="' + (l.quantity - 1) + '" aria-label="One fewer">−</button>' +
+            '<span class="w-5 text-center text-sm font-semibold tabular-nums">' + l.quantity + '</span>' +
+            '<button class="line-plus flex h-7 w-7 items-center justify-center rounded-md bg-chilli-500 ' +
+                    'text-sm font-bold text-white hover:bg-chilli-600" data-id="' + esc(l.retailer_id) + '" ' +
+                    'data-to="' + (l.quantity + 1) + '" aria-label="One more">+</button>' +
+          '</span>' +
+          '<span class="text-sm font-semibold tabular-nums">' +
+          money(Number(l.unit_price) * l.quantity) + '</span>' +
+        '</div>' +
+      '</div>').join('');
+
+    // Every control edits the same server-side cart as the menu list does.
+    lines.querySelectorAll('.line-remove').forEach(b =>
+      b.addEventListener('click', () => setQty(b.dataset.id, 0)));
+    lines.querySelectorAll('.line-minus, .line-plus').forEach(b =>
+      b.addEventListener('click', () => setQty(b.dataset.id, Number(b.dataset.to))));
+
+    foot.innerHTML =
+      '<div class="mb-2 flex justify-between text-sm"><span>Subtotal</span>' +
+      '<span class="font-semibold tabular-nums">' + money(data.subtotal) + '</span></div>' +
+      '<button id="side-checkout" class="w-full rounded-xl bg-chilli-500 py-2.5 text-sm font-semibold text-white hover:bg-chilli-600">Checkout</button>';
+    $('side-checkout').addEventListener('click', showCart);
   }
 
-  // --- wiring -------------------------------------------------------------
-  $('search').addEventListener('input', renderMenu);
-  $('cart-button').addEventListener('click', () => { renderCart(); show('cart'); });
-  document.querySelectorAll('[data-goto]').forEach(b =>
-    b.addEventListener('click', () => {
-      const target = b.dataset.goto;
-      if (target === 'cart') renderCart();
-      show(target);
+  // --- rendering ----------------------------------------------------------
+  function pickedCuisines() {
+    return activeCuisine === 'all'
+      ? MENU : MENU.filter(c => c.slug === activeCuisine);
+  }
+
+  function allCategories() {
+    // Scoped to the chosen cuisine, so switching cuisine does not leave a
+    // category selected that the new cuisine does not have.
+    const seen = [];
+    pickedCuisines().forEach(c => c.categories.forEach(cat => {
+      if (!seen.some(x => x.key === cat.name)) seen.push({ key: cat.name, label: cat.name });
     }));
-
-  $('to-address').addEventListener('click', () => {
-    if (!cartLines().length) { showError('Add at least one dish first.'); return; }
-    show('address');
-  });
-
-  $('check-address').addEventListener('click', async function () {
-    showError('');
-    const payload = addressPayload();
-    if (!payload.address_line1) { showError('Enter your street address.'); return; }
-    if (!payload.postal_code) { showError('Enter your ZIP code.'); return; }
-
-    busy(this, true, 'Checking…');
-    try {
-      const data = await api('/address', payload);
-      if (!data.ok) { showError(data.error); $('slots-wrap').classList.add('hidden'); return; }
-
-      const box = $('slots');
-      box.innerHTML = '';
-      slotId = null;
-      $('to-summary').disabled = true;
-
-      data.slots.forEach(s => {
-        const b = document.createElement('button');
-        b.className = 'slot rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm hover:border-brand-500';
-        b.textContent = s.label;
-        b.addEventListener('click', () => {
-          slotId = s.id;
-          document.querySelectorAll('.slot').forEach(x => {
-            x.className = 'slot rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm hover:border-brand-500';
-          });
-          b.className = 'slot rounded-xl border-2 border-brand-600 bg-brand-50 px-3 py-2.5 text-sm font-semibold text-brand-700';
-          $('to-summary').disabled = false;
-        });
-        box.appendChild(b);
-      });
-      $('slots-wrap').classList.remove('hidden');
-    } catch (err) {
-      showError('Could not check that address: ' + err.message);
-    } finally {
-      busy(this, false);
-    }
-  });
-
-  $('to-summary').addEventListener('click', async function () {
-    if (!slotId) { showError('Pick a delivery time.'); return; }
-    busy(this, true, 'Pricing…');
-    try {
-      const data = await api('/quote',
-        Object.assign({ cart: cartLines(), slot_id: slotId }, addressPayload()));
-      if (!data.ok) { showError(data.error); return; }
-      quote = data;
-
-      const rows = data.lines.map(l =>
-        '<div class="flex justify-between py-1"><span>' + l.quantity + ' × ' +
-        escapeHtml(l.name) + '</span><span class="tabular-nums">' + money(l.line_total) + '</span></div>'
-      ).join('');
-
-      $('summary-body').innerHTML =
-        rows +
-        '<hr class="my-2 border-stone-200">' +
-        line('Subtotal', data.dish_total) +
-        line('Delivery', data.delivery_fee) +
-        line('Taxes &amp; fees', Number(data.extra_fees) + Number(data.tax)) +
-        '<hr class="my-2 border-stone-200">' +
-        '<div class="flex justify-between text-base font-semibold"><span>Total</span>' +
-        '<span class="tabular-nums">' + money(data.total) + '</span></div>' +
-        '<p class="mt-3 text-xs text-stone-500">Delivery: ' + escapeHtml(data.slot_label) + '</p>';
-      show('summary');
-    } catch (err) {
-      showError('Could not price your order: ' + err.message);
-    } finally {
-      busy(this, false);
-    }
-  });
-
-  function line(label, value) {
-    return '<div class="flex justify-between py-0.5 text-stone-600"><span>' + label +
-           '</span><span class="tabular-nums">' + money(value) + '</span></div>';
+    return seen;
   }
 
-  function escapeHtml(s) {
+  function renderCuisines() {
+    const rail = $('cuisines');
+    rail.innerHTML = '';
+    if (MENU.length < 2) return;          // nothing to choose between
+
+    [{ slug: 'all', name: 'All cuisines' }].concat(MENU).forEach(c => {
+      const b = document.createElement('button');
+      const on = c.slug === activeCuisine;
+      b.className = 'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-semibold transition ' +
+        (on ? 'bg-cocoa-800 text-white shadow-sm'
+            : 'border border-cream-200 bg-white text-cocoa-700/80 hover:border-cocoa-700/30');
+      b.textContent = c.name;
+      b.addEventListener('click', () => {
+        activeCuisine = c.slug;
+        activeChip = 'all';               // the old category may not exist here
+        renderCuisines();
+        renderChips();
+        renderList();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      rail.appendChild(b);
+    });
+  }
+
+  function renderChips() {
+    const rail = $('chips');
+    rail.innerHTML = '';
+    const chips = [{ key: 'all', label: 'All Items' }].concat(allCategories());
+    chips.forEach(c => {
+      const b = document.createElement('button');
+      const on = c.key === activeChip;
+      b.className = 'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition ' +
+        (on ? 'bg-chilli-500 text-white shadow-sm' : 'border border-cream-200 bg-white text-cocoa-700');
+      b.textContent = c.label;
+      b.addEventListener('click', () => {
+        activeChip = c.key;
+        renderChips();
+        renderList();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      rail.appendChild(b);
+    });
+  }
+
+  function visibleGroups() {
+    const term = $('search').value.trim().toLowerCase();
+    const groups = [];
+    pickedCuisines().forEach(c => c.categories.forEach(cat => {
+      if (activeChip !== 'all' && cat.name !== activeChip) return;
+      const items = cat.items.filter(i =>
+        !term || i.name.toLowerCase().includes(term) || cat.name.toLowerCase().includes(term));
+      if (items.length) groups.push({ title: cat.name, cuisine: c.name, items });
+    }));
+    return groups;
+  }
+
+  function renderList() {
+    const host = $('list');
+    const groups = visibleGroups();
+    host.innerHTML = '';
+
+    if (!groups.length) {
+      host.innerHTML =
+        '<div class="py-24 text-center text-sm text-cocoa-700/45">No dishes match that search.</div>';
+      return;
+    }
+
+    groups.forEach(g => {
+      const head = document.createElement('div');
+      head.className = 'mb-2 mt-5 flex items-baseline gap-2 border-b-2 border-saffron-500 pb-1.5 first:mt-0';
+      head.innerHTML =
+        '<span class="h-4 w-1 rounded bg-chilli-500"></span>' +
+        '<h2 class="text-[15px] font-semibold"></h2>' +
+        (activeCuisine === 'all'
+          ? '<span class="text-[11px] font-medium text-cocoa-700/45">' + esc(g.cuisine) + '</span>'
+          : '') +
+        '<span class="ml-auto text-xs text-cocoa-700/45">' + g.items.length + ' items</span>';
+      head.querySelector('h2').textContent = g.title;
+      host.appendChild(head);
+
+      const grid = document.createElement('div');
+      // One column on a phone, two from tablet, three on a wide screen.
+      grid.className = 'grid grid-cols-1 items-stretch gap-2.5 xl:grid-cols-2';
+      g.items.forEach(item => grid.appendChild(card(item)));
+      host.appendChild(grid);
+    });
+  }
+
+  function card(item) {
+    const qty = CART[item.id] || 0;
+    const row = document.createElement('article');
+    // A dish already in the cart is tinted and outlined, so a long list shows
+    // at a glance what has been picked.
+    row.className = 'rise flex h-full items-center gap-3 rounded-xl border p-3 shadow-card ' +
+      (qty ? 'border-chilli-300 bg-chilli-50' : 'border-cream-200 bg-white');
+
+    // Thumbnail, or a drawn placeholder while the sheet has no IMAGE column.
+    const thumb = document.createElement('div');
+    thumb.className = 'flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-saffron-50 text-3xl';
+    if (item.image_url) {
+      const img = document.createElement('img');
+      img.src = item.image_url;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.className = 'h-full w-full object-cover';
+      img.addEventListener('error', () => { thumb.textContent = '🍲'; });
+      thumb.appendChild(img);
+    } else {
+      thumb.textContent = '🍲';
+    }
+
+    const info = document.createElement('div');
+    info.className = 'min-w-0 flex-1';
+    const title = document.createElement('div');
+    title.className = 'flex items-start gap-1.5';
+    title.innerHTML = '<span class="mt-0.5 inline-block h-3 w-3 shrink-0 rounded-sm border border-herb-600 p-[2px]">' +
+                      '<span class="block h-full w-full rounded-full bg-herb-600"></span></span>';
+    const name = document.createElement('h3');
+    name.className = 'text-sm font-semibold leading-snug [overflow-wrap:anywhere]';
+    name.textContent = item.name;
+    title.appendChild(name);
+
+    const meta = document.createElement('div');
+    meta.className = 'mt-1 line-clamp-2 text-[11px] uppercase tracking-wide text-cocoa-700/45';
+    meta.textContent = [item.pack_size, item.serves].filter(Boolean).join(' · ') || item.category;
+
+    const price = document.createElement('div');
+    price.className = 'mt-1 text-sm font-bold text-chilli-600';
+    price.textContent = money(item.price);
+
+    info.append(title, meta, price);
+
+    // Tapping the dish (but not the + control) opens the full details.
+    const opener = document.createElement('button');
+    opener.className = 'flex min-w-0 flex-1 items-center gap-3 text-left';
+    opener.setAttribute('aria-label', 'View details for ' + item.name);
+    opener.append(thumb, info);
+    opener.addEventListener('click', () => showItem(item));
+
+    row.append(opener, control(item));
+    return row;
+  }
+
+  function showItem(item) {
+    const qty = CART[item.id] || 0;
+    const hero = item.image_url
+      ? '<img src="' + esc(item.image_url) + '" alt="" class="h-44 w-full rounded-xl object-cover">'
+      : '<div class="flex h-44 w-full items-center justify-center rounded-xl bg-saffron-50 text-6xl">🍲</div>';
+
+    const facts = [
+      ['Category', item.category],
+      ['Cuisine', item.cuisine],
+      ['Pack size', item.pack_size],
+      ['Serves', item.serves],
+    ].filter(f => f[1]).map(f =>
+      '<div class="flex justify-between border-b border-cream-200 py-2 text-sm">' +
+      '<span class="text-cocoa-700/60">' + f[0] + '</span>' +
+      '<span class="font-medium">' + esc(f[1]) + '</span></div>').join('');
+
+    openSheet(item.name,
+      hero +
+      '<div class="mt-3 flex items-center justify-between">' +
+        '<span class="text-lg font-bold text-herb-700">' + money(item.price) + '</span>' +
+        '<span class="inline-flex items-center gap-1 text-[11px] font-medium text-herb-700">' +
+        '<span class="inline-block h-3 w-3 rounded-sm border border-herb-600 p-[2px]">' +
+        '<span class="block h-full w-full rounded-full bg-herb-600"></span></span>Veg</span>' +
+      '</div>' +
+      (item.description
+        ? '<p class="mt-3 text-sm leading-relaxed text-cocoa-700/80">' + esc(item.description) + '</p>'
+        : '') +
+      '<div class="mt-3">' + facts + '</div>',
+      '<div id="detail-control"></div>');
+
+    function paint() {
+      const now = CART[item.id] || 0;
+      const foot = $('detail-control');
+      if (!foot) return;
+      foot.innerHTML = '';
+      if (!now) {
+        const add = document.createElement('button');
+        add.className = 'w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white';
+        add.textContent = 'Add to cart · ' + money(item.price);
+        add.addEventListener('click', async () => { await setQty(item.id, 1); paint(); });
+        foot.appendChild(add);
+        return;
+      }
+      const bar = document.createElement('div');
+      bar.className = 'flex items-center justify-between gap-3';
+      bar.innerHTML =
+        '<div class="flex items-center gap-3 rounded-xl border border-chilli-300 px-2 py-1.5">' +
+          '<button id="d-minus" class="w-7 text-lg font-bold text-chilli-600">−</button>' +
+          '<span class="w-6 text-center text-sm font-bold tabular-nums">' + now + '</span>' +
+          '<button id="d-plus" class="w-7 text-lg font-bold text-chilli-600">+</button>' +
+        '</div>' +
+        '<span class="text-sm font-bold tabular-nums">' + money(now * item.price) + '</span>';
+      foot.appendChild(bar);
+      $('d-minus').addEventListener('click', async () => { await setQty(item.id, now - 1); paint(); });
+      $('d-plus').addEventListener('click', async () => { await setQty(item.id, now + 1); paint(); });
+    }
+    paint();
+  }
+
+  function control(item) {
+    const qty = CART[item.id] || 0;
+    if (!qty) {
+      const add = document.createElement('button');
+      add.className = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-chilli-500 text-xl font-bold text-white shadow-sm hover:bg-chilli-600';
+      add.setAttribute('aria-label', 'Add ' + item.name);
+      add.textContent = '+';
+      add.addEventListener('click', () => setQty(item.id, 1));
+      return add;
+    }
+
+    // Matches the reference: a light outlined minus, the count, then the
+    // same solid orange square the "+" uses when nothing is selected.
+    const wrap = document.createElement('div');
+    wrap.className = 'flex shrink-0 items-center gap-1.5';
+
+    const minus = document.createElement('button');
+    minus.className = 'flex h-9 w-9 items-center justify-center rounded-lg border ' +
+      'border-chilli-300 bg-white text-lg font-bold text-chilli-600 hover:bg-chilli-50';
+    minus.textContent = '−';
+    minus.setAttribute('aria-label', 'Remove one ' + item.name);
+    minus.addEventListener('click', () => setQty(item.id, qty - 1));
+
+    const count = document.createElement('span');
+    count.className = 'w-5 text-center text-sm font-bold tabular-nums';
+    count.textContent = qty;
+
+    const plus = document.createElement('button');
+    plus.className = 'flex h-9 w-9 items-center justify-center rounded-lg bg-chilli-500 ' +
+      'text-lg font-bold text-white shadow-sm hover:bg-chilli-600';
+    plus.textContent = '+';
+    plus.setAttribute('aria-label', 'Add one ' + item.name);
+    plus.addEventListener('click', () => setQty(item.id, qty + 1));
+
+    wrap.append(minus, count, plus);
+    return wrap;
+  }
+
+  // --- the sheet ----------------------------------------------------------
+  function openSheet(title, bodyHtml, footHtml) {
+    $('sheet-title').textContent = title;
+    $('sheet-body').innerHTML = bodyHtml;
+    $('sheet-foot').innerHTML = footHtml;
+    $('sheet').classList.remove('hidden');
+  }
+  function closeSheet() { $('sheet').classList.add('hidden'); }
+  $('scrim').addEventListener('click', closeSheet);
+  $('sheet-close').addEventListener('click', closeSheet);
+
+  function esc(s) {
     const d = document.createElement('div');
     d.textContent = s == null ? '' : s;
     return d.innerHTML;
   }
 
-  $('place-order').addEventListener('click', async function () {
-    busy(this, true, 'Placing your order…');
-    try {
-      const data = await api('/confirm',
-        Object.assign({ cart: cartLines(), slot_id: slotId }, addressPayload()));
-      if (!data.ok) { showError(data.error); return; }
-      $('done-number').textContent = data.order_number;
-      $('done-pay').href = data.pay_url;
-      show('done');
-    } catch (err) {
-      showError('Could not place the order: ' + err.message);
-    } finally {
-      busy(this, false);
+  async function showCart() {
+    const lines = Object.keys(CART).map(id => ({ id, qty: CART[id], item: ITEMS[id] }))
+                        .filter(l => l.item);
+    if (!lines.length) {
+      // Reachable by removing the last line from inside the sheet.
+      openSheet('Your cart',
+        '<p class="py-10 text-center text-sm text-cocoa-700/60">Your cart is empty.</p>',
+        '<button id="back-to-menu" class="w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white">Browse the menu</button>');
+      $('back-to-menu').addEventListener('click', closeSheet);
+      return;
     }
+
+    const thumb = (item) => item.image_url
+      ? '<img src="' + esc(item.image_url) + '" alt="" loading="lazy" ' +
+        'class="h-14 w-14 shrink-0 rounded-lg object-cover">'
+      : '<div class="flex h-14 w-14 shrink-0 items-center justify-center ' +
+        'rounded-lg bg-saffron-50 text-2xl">🍲</div>';
+
+    const rows = lines.map(l =>
+      '<div class="flex items-center gap-3 border-b border-cream-200 py-3 last:border-0">' +
+        thumb(l.item) +
+        '<div class="min-w-0 flex-1">' +
+          '<div class="text-sm font-semibold leading-snug [overflow-wrap:anywhere]">' +
+            esc(l.item.name) + '</div>' +
+          '<div class="mt-0.5 text-[11px] text-cocoa-700/60">' + money(l.item.price) + ' each</div>' +
+          '<div class="text-sm font-bold text-chilli-600">' + money(l.qty * l.item.price) + '</div>' +
+        '</div>' +
+        '<div class="flex shrink-0 items-center gap-1.5">' +
+          '<button class="line-step flex h-8 w-8 items-center justify-center rounded-lg border ' +
+                  'border-chilli-300 bg-white font-bold text-chilli-600 hover:bg-chilli-50" ' +
+                  'data-id="' + esc(l.id) + '" data-to="' + (l.qty - 1) + '" ' +
+                  'aria-label="One fewer">−</button>' +
+          '<span class="w-5 text-center text-sm font-bold tabular-nums">' + l.qty + '</span>' +
+          '<button class="line-step flex h-8 w-8 items-center justify-center rounded-lg bg-chilli-500 ' +
+                  'font-bold text-white hover:bg-chilli-600" data-id="' + esc(l.id) + '" ' +
+                  'data-to="' + (l.qty + 1) + '" aria-label="One more">+</button>' +
+        '</div>' +
+      '</div>').join('');
+
+    const subtotal = lines.reduce((n, l) => n + l.qty * l.item.price, 0);
+
+    openSheet('🛒  Your Cart', rows,
+      '<div class="flex justify-between border-b border-cream-200 pb-2 text-sm">' +
+        '<span class="text-cocoa-700/80">Subtotal</span>' +
+        '<span class="font-semibold tabular-nums">' + money(subtotal) + '</span></div>' +
+      '<div class="flex justify-between py-2.5 text-base">' +
+        '<span class="font-bold">Total</span>' +
+        '<span class="font-bold tabular-nums">' + money(subtotal) + '</span></div>' +
+      '<p class="mb-2 text-[11px] text-cocoa-700/60">Delivery and taxes are added at the next step.</p>' +
+      '<button id="go-address" class="flex w-full items-center justify-center gap-2 rounded-xl ' +
+      'bg-herb-600 py-3.5 text-sm font-semibold text-white hover:bg-herb-700">' +
+      'Continue to delivery</button>');
+
+    $('go-address').addEventListener('click', showAddress);
+
+    // Editing here re-renders the sheet so the totals stay honest.
+    document.querySelectorAll('#sheet-body .line-step').forEach(b =>
+      b.addEventListener('click', async () => {
+        await setQty(b.dataset.id, Number(b.dataset.to));
+        showCart();
+      }));
+  }
+
+  function field(id, label, value, extra) {
+    return '<label class="mb-2.5 block"><span class="mb-1 block text-xs font-medium text-cocoa-700/80">' +
+      label + '</span><input id="' + id + '" value="' + esc(value || '') + '" ' + (extra || '') +
+      ' class="w-full rounded-lg border border-cream-200 px-3 py-2.5 text-sm outline-none focus:border-chilli-500"></label>';
+  }
+
+  let SAVED = {};
+  function showAddress() {
+    openSheet('Delivery details',
+      field('f-address', 'Street address', SAVED.address_line1) +
+      '<div class="grid grid-cols-2 gap-2">' +
+        field('f-apartment', 'Apartment / unit', SAVED.apartment_unit) +
+        field('f-zip', 'ZIP code', SAVED.postal_code, 'inputmode="numeric"') +
+      '</div>' +
+      field('f-contact', 'Contact number', SAVED.contact_number) +
+      field('f-instructions', 'Driver instructions', SAVED.delivery_instructions) +
+      '<div id="slots-wrap" class="mt-3 hidden"><h3 class="mb-2 text-sm font-semibold">Pick a delivery time</h3>' +
+      '<div id="slots" class="grid grid-cols-2 gap-2"></div></div>',
+      '<button id="check" class="w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white">' +
+      'Check delivery &amp; show times</button>');
+
+    $('check').addEventListener('click', checkAddress);
+  }
+
+  function addressPayload() {
+    return {
+      address_line1: ($('f-address') || {}).value?.trim() || '',
+      apartment_unit: ($('f-apartment') || {}).value?.trim() || '',
+      postal_code: ($('f-zip') || {}).value?.trim() || '',
+      contact_number: ($('f-contact') || {}).value?.trim() || '',
+      delivery_instructions: ($('f-instructions') || {}).value?.trim() || '',
+    };
+  }
+
+  async function checkAddress() {
+    const payload = addressPayload();
+    if (!payload.address_line1) { toast('Enter your street address.'); return; }
+    if (!payload.postal_code) { toast('Enter your ZIP code.'); return; }
+
+    const btn = $('check');
+    btn.disabled = true; btn.textContent = 'Checking…';
+    try {
+      const data = await api('/address', payload);
+      if (!data.ok) { toast(data.error); return; }
+
+      SAVED = Object.assign(SAVED, payload);
+      slotId = null;
+      const box = $('slots');
+      box.innerHTML = '';
+      data.slots.forEach(s => {
+        const b = document.createElement('button');
+        b.className = 'rounded-xl border border-cream-200 bg-white px-2 py-2.5 text-[12px] leading-tight';
+        b.textContent = s.label;
+        b.addEventListener('click', () => {
+          slotId = s.id;
+          Array.from(box.children).forEach(x => {
+            x.className = 'rounded-xl border border-cream-200 bg-white px-2 py-2.5 text-[12px] leading-tight';
+          });
+          b.className = 'rounded-xl border-2 border-herb-600 bg-herb-500/10 px-2 py-2.5 text-[12px] font-semibold leading-tight text-herb-700';
+          $('sheet-foot').innerHTML =
+            '<button id="go-summary" class="w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white">See the total</button>';
+          $('go-summary').addEventListener('click', showSummary);
+        });
+        box.appendChild(b);
+      });
+      $('slots-wrap').classList.remove('hidden');
+      $('slots-wrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (err) {
+      toast('Could not check that address: ' + err.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Check delivery & show times';
+    }
+  }
+
+  async function showSummary() {
+    if (!slotId) { toast('Pick a delivery time.'); return; }
+    const btn = $('go-summary');
+    btn.disabled = true; btn.textContent = 'Pricing…';
+    try {
+      const data = await api('/quote', Object.assign({ slot_id: slotId }, SAVED));
+      if (!data.ok) { toast(data.error); return; }
+
+      const rows = data.lines.map(l =>
+        '<div class="flex justify-between py-1 text-sm"><span>' + l.quantity + ' × ' +
+        esc(l.name) + '</span><span class="tabular-nums">' + money(l.line_total) + '</span></div>').join('');
+      const row = (k, v) => '<div class="flex justify-between py-0.5 text-sm text-cocoa-700/80"><span>' +
+        k + '</span><span class="tabular-nums">' + money(v) + '</span></div>';
+
+      openSheet('Confirm your order',
+        rows + '<hr class="my-2 border-cream-200">' +
+        row('Subtotal', data.dish_total) + row('Delivery', data.delivery_fee) +
+        row('Taxes &amp; fees', Number(data.extra_fees) + Number(data.tax)) +
+        '<hr class="my-2 border-cream-200">' +
+        '<div class="flex justify-between text-base font-bold"><span>Total</span>' +
+        '<span class="tabular-nums">' + money(data.total) + '</span></div>' +
+        '<p class="mt-3 text-xs text-cocoa-700/60">Delivery: ' + esc(data.slot_label) + '</p>',
+        '<button id="place" class="w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white">' +
+        'Confirm &amp; get payment link</button>');
+
+      $('place').addEventListener('click', placeOrder);
+    } catch (err) {
+      toast('Could not price your order: ' + err.message);
+    } finally {
+      if ($('go-summary')) { btn.disabled = false; btn.textContent = 'See the total'; }
+    }
+  }
+
+  async function placeOrder() {
+    const btn = $('place');
+    btn.disabled = true; btn.textContent = 'Placing your order…';
+    try {
+      const data = await api('/confirm', Object.assign({ slot_id: slotId }, SAVED));
+      if (!data.ok) { toast(data.error); return; }
+
+      openSheet('Order placed',
+        '<div class="py-4 text-center">' +
+        '<div class="text-4xl">✅</div>' +
+        '<p class="mt-3 text-sm">Order <strong>' + esc(data.order_number) + '</strong></p>' +
+        '<p class="mt-1 text-sm text-cocoa-700/80">We have sent the payment link to your WhatsApp, ' +
+        'or pay right here. Your slot is held for 30 minutes.</p></div>',
+        '<a href="' + esc(data.pay_url) + '" class="block w-full rounded-xl bg-chilli-500 py-3 text-center text-sm font-semibold text-white">Pay now</a>');
+
+      applyCart({ cart: [], count: 0, subtotal: 0 });
+    } catch (err) {
+      toast('Could not place the order: ' + err.message);
+    } finally {
+      if ($('place')) { btn.disabled = false; btn.textContent = 'Confirm & get payment link'; }
+    }
+  }
+
+  // --- boot ---------------------------------------------------------------
+  $('cart-bar').addEventListener('click', showCart);
+
+  // Jump straight to a category - faster than scrolling 287 dishes.
+  $('index-btn').addEventListener('click', function () {
+    const cats = allCategories();
+    const rows = cats.map(c =>
+      '<button class="jump w-full border-b border-cream-200 py-2.5 text-left text-sm" ' +
+      'data-cat="' + esc(c.key) + '">' + esc(c.label) + '</button>').join('');
+    openSheet('Jump to a category',
+      '<button class="jump w-full border-b border-cream-200 py-2.5 text-left text-sm font-semibold" ' +
+      'data-cat="all">All Items</button>' + rows, '');
+    Array.from(document.querySelectorAll('.jump')).forEach(b =>
+      b.addEventListener('click', () => {
+        activeChip = b.dataset.cat;
+        closeSheet();
+        renderChips();
+        renderList();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }));
+  });
+  $('search').addEventListener('input', () => {
+    $('clear-search').classList.toggle('hidden', !$('search').value);
+    renderList();
+  });
+  $('clear-search').addEventListener('click', () => {
+    $('search').value = '';
+    $('clear-search').classList.add('hidden');
+    renderList();
   });
 
-  show('menu');
-  load();
+  (async function load() {
+    try {
+      const [menu, cart] = await Promise.all([api('/menu'), api('/cart')]);
+      if (!menu.ok) { $('list').innerHTML =
+        '<p class="py-24 text-center text-sm text-red-600">' + esc(menu.error) + '</p>'; return; }
+
+      MENU = menu.cuisines;
+      MENU.forEach(c => c.categories.forEach(cat => cat.items.forEach(i => { ITEMS[i.id] = i; })));
+      SAVED = menu.saved || {};
+
+      const total = Object.keys(ITEMS).length;
+      $('sub').textContent = total + ' dishes · home delivery';
+
+      renderCuisines();
+      renderChips();
+      if (cart.ok) applyCart(cart); else renderList();
+    } catch (err) {
+      $('list').innerHTML =
+        '<p class="py-24 text-center text-sm text-red-600">Could not load the menu: ' +
+        esc(err.message) + '</p>';
+    }
+  })();
 })();
 </script>
 </body>

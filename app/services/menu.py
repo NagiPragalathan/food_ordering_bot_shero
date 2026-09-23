@@ -49,6 +49,10 @@ class ItemOption:
     currency: str
     pack_size: str | None
     serves: str | None
+    # Empty for every row in the client's sheet today; the web storefront
+    # draws a placeholder rather than a broken image.
+    image_url: str | None = None
+    description: str | None = None
 
     @property
     def price_display(self) -> str:
@@ -189,4 +193,6 @@ def _to_option(item: MenuItem) -> ItemOption:
         currency=item.currency,
         pack_size=item.pack_size,
         serves=item.serves,
+        image_url=item.image_url,
+        description=item.description,
     )

@@ -8,7 +8,7 @@ Written for: engineers working on this codebase.
 .venv/Scripts/python.exe -m pytest -vv          # per-test names
 ```
 
-239 tests, all passing, in about 6 seconds.
+287 tests, all passing, in about 7 seconds.
 
 ## What is covered
 
@@ -30,6 +30,9 @@ Written for: engineers working on this codebase.
 | Zoho OAuth connect | `admin/test_zoho_connect.py` | Per-data-centre hosts, offline access, errors returned inside HTTP 200 |
 | Ordering links | `services/test_order_link.py` | Tampered, expired and foreign-signed tokens |
 | Web cart safety | `services/test_web_cart.py` | Malformed browser carts; the dev fee never applies in production |
+| Shared cart | `services/test_cart.py` | Merging, exact-quantity updates, the 20 cap, corrupt lines |
+| Dish images | `services/test_media.py` | Sheets formulas, Drive links, HTML rejected, no re-download |
+| Photos from the sheet | `services/test_sheet_images.py` | XLSX anchors mapped to rows, downscaling, malformed workbooks |
 
 ## Tests worth knowing about
 

@@ -89,6 +89,18 @@ ten-row WhatsApp lists. `ORDER_MODE=chat` keeps the in-chat flow; both end at
 the same Stripe link sent to WhatsApp, and both share the pricing, slot and
 order services.
 
+**Dish photos come out of the sheet's XLSX export, not its CSV.** The pictures
+are anchored over cells, so a CSV shows an empty IMAGE column; the XLSX carries
+them as files plus a drawing part naming the cell each sits on, which is how
+`sheet_images.py` matches a photo to a dish by row. They are downscaled to
+800px JPEG, stored in `data/media/` and served by us - a customer's page load
+never depends on a third-party host, and a failed photo fetch degrades to a
+placeholder rather than failing the import.
+
+**There is one cart per customer, in the database.** `services/cart.py` owns
+it and both the WhatsApp handlers and the web page go through it, so the two
+surfaces cannot drift into separate carts.
+
 **Cart lines are re-priced from the menu, never trusted.** The cart is
 customer-controlled state. `price_cart()` looks every line up and uses the
 stored price. A test covers this specifically.

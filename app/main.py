@@ -13,9 +13,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.admin import router as admin_router
 from app.admin.deps import NotAuthenticated
+
 from app.api.routes import (health, ops, order_web, pay, webhooks_gallabox,
                             webhooks_stripe)
 from app.core.config import settings
@@ -25,6 +27,7 @@ from app.db.session import engine, session_scope
 from app.integrations.gallabox.client import gallabox
 from app.integrations.meta.catalog import meta_catalog
 from app.integrations.uber.direct import uber_direct
+from app.services import media
 from app.integrations.zoho.client import zoho_client
 from app.admin.auth import bootstrap_first_user
 from app.services.settings_store import apply_overrides
@@ -89,6 +92,12 @@ app.include_router(webhooks_gallabox.router)
 app.include_router(webhooks_stripe.router)
 app.include_router(pay.router)
 app.include_router(order_web.router)
+
+# Dish photos downloaded from the client's sheet at import time. Served from
+# here rather than hot-linked, so a page load never depends on Drive.
+media.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount(media.MEDIA_URL_PREFIX,
+          StaticFiles(directory=str(media.MEDIA_DIR)), name="media")
 app.include_router(ops.router)
 app.include_router(admin_router)
 

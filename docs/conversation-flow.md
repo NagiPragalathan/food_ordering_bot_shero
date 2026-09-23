@@ -108,16 +108,31 @@ customer id, so there is no login and the URL cannot be edited to order as
 somebody else. Links last six hours; an old one renders an expired page.
 
 ```
-bot sends link -> /order/{token}          the page
-                  /order/{token}/menu     all 287 dishes, grouped
-                  /order/{token}/address  serviceability + bookable slots
-                  /order/{token}/quote    priced summary with delivery
-                  /order/{token}/confirm  creates the order, sends the pay link
+bot sends link -> /order/{token}            the page
+                  /order/{token}/menu       all 287 dishes, grouped
+                  /order/{token}/cart       GET the saved cart
+                  /order/{token}/cart       POST one dish to an exact quantity
+                  /order/{token}/cart/clear POST to empty it
+                  /order/{token}/address    serviceability + bookable slots
+                  /order/{token}/quote      priced summary with delivery
+                  /order/{token}/confirm    creates the order, sends the pay link
 ```
 
-**The browser's cart is never trusted.** It sends only retailer ids and
-quantities; `_clean_cart` drops anything malformed and every price is looked
-up server-side, exactly as the WhatsApp cart is.
+### One cart, stored in the database
+
+The cart lives in `conversations.context["cart"]` and is managed by
+`services/cart.py`. **The WhatsApp handlers and the web page write to the same
+list**, so closing the page and reopening the link restores the cart, and a
+dish added in chat is already there on the page.
+
+`POST /cart` sets a dish to an *exact* quantity rather than incrementing, so a
+double-tap or a retried request cannot silently add it twice.
+
+**The browser is never trusted with names or prices.** It sends a retailer id
+and a quantity; the name and price are read from the menu, unavailable dishes
+are refused, and `quote` and `confirm` re-read the cart from the database
+rather than from the request body — a tab left open for an hour cannot price a
+cart the customer has since changed.
 
 On confirm the conversation is parked on `AWAIT_PAYMENT`, so the reminder,
 expiry and feedback jobs treat a web order identically to one placed in chat.

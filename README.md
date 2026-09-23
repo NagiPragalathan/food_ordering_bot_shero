@@ -51,7 +51,7 @@ docker compose up --build
 Run the tests, or walk the bot by hand:
 
 ```bash
-python -m pytest                 # 239 tests, ~6s
+python -m pytest                 # 287 tests, ~7s
 python -m scripts.simulate_chat  # a WhatsApp conversation in the terminal
 ```
 
@@ -67,7 +67,7 @@ and `alembic upgrade head` works as-is. Production still runs Postgres.
 |---|---|
 | Steps 1–19 conversation flow | Complete, including the Check Availability shortcut |
 | Menu (3 cuisines, 287 dishes) | Imported from the client's sheet |
-| Web ordering page | Complete — browse, cart, address, slot, summary, pay |
+| Web ordering page | Complete — search, category filters, saved cart, address, slot, pay |
 | Admin dashboard | Complete — menu, import, orders, chat tester, settings |
 | Delivery area + serviceability | Complete — radius, ZIP list, or both |
 | Delivery slots + holds | Complete, generated from the kitchen's operating hours |
@@ -91,7 +91,8 @@ time and each integration comes alive.
 2. **Two open decisions** — how the kitchen gets notified of a new paid order
    (the spec lists no template for it), and tax/currency treatment. Both in
    [docs/open-questions.md](docs/open-questions.md).
-3. **Dish images** — the IMAGE column is empty in every sheet row.
+3. **Dish images** — done. All 287 photos are read out of the sheet's XLSX
+   export (a CSV cannot carry them), downscaled, and served locally.
 
 ## Project layout
 
@@ -109,7 +110,7 @@ app/
 alembic/            migrations
 docs/               see docs/README.md
 scripts/            check_config, check_gallabox, simulate_chat
-tests/              239 tests
+tests/              287 tests
 ```
 
 ## Documentation

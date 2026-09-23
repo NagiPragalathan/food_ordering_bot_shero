@@ -91,6 +91,44 @@ The rules the importer follows:
 One file, one cuisine. Useful if a tab is edited offline. If the file has no
 title row, type the cuisine name in the box.
 
+### Dish photos
+
+Photos come from the sheet itself. **The IMAGE column looks empty in a CSV
+export because the pictures are anchored over the cells rather than stored in
+them** — so the importer also pulls the XLSX export, which does carry them,
+and matches each picture to its dish by row.
+
+All 287 dishes currently have their photo.
+
+Links in the IMAGE column are handled too, if you ever use them instead:
+
+| In the cell | What happens |
+|---|---|
+| A picture pasted into the sheet | Read from the XLSX export, matched by row |
+| `https://…/dosa.jpg` | Downloaded as-is |
+| `=IMAGE("https://…")` | The formula is unwrapped first |
+| A Google Drive share link | Rewritten to the direct-download form |
+| Nothing at all | The dish shows a drawn placeholder |
+
+Photos are **downscaled to 800px JPEG** on the way in — the sheet's originals
+are around 850 KB each, which 287 of would make the menu unusable on a phone.
+The whole set lands at roughly 25 MB, about 87 KB per dish.
+
+Photos are **stored once and served from this server** (`data/media/`), never
+hot-linked — a customer's page must not depend on Drive staying up or staying
+public. Re-importing overwrites in place rather than piling up duplicates.
+
+> The XLSX export is large (a few hundred MB for this menu), so a sheet import
+> takes a minute or two. The import still succeeds if that download fails; you
+> simply get the menu without new photos.
+
+The import summary reports how many were stored and how many could not be
+fetched; a broken link never fails the import.
+
+> If a photo does not appear, the usual cause is a Drive file that is not
+> shared as "Anyone with the link can view" — the server then receives Google's
+> sign-in page instead of an image, and rejects it.
+
 ### Re-importing is safe
 
 Rows are matched on a generated id (cuisine + category + dish), so importing
@@ -240,6 +278,26 @@ customer would receive.
 Two things make the flow stop early, and the page warns about both: no kitchen
 configured (stops at the delivery-area check) and no opening hours (no slots
 to pick).
+
+---
+
+## The customer ordering page
+
+`/order/{token}` — what the WhatsApp link opens. Worth knowing when answering
+a customer question:
+
+| Element | Behaviour |
+|---|---|
+| Search | Matches dish names *and* category names |
+| Category rail | "All Items" plus every category; the ☰ button jumps to one |
+| Tapping a dish | Opens full details: image, description, pack size, serves, cuisine |
+| `+` / `−` | Saves to the customer's cart immediately, server-side |
+| Selected dishes | Tinted and outlined in the list |
+| Bottom bar | Item count and running total; opens the cart |
+
+**The cart is saved against the customer, not the browser.** Closing the page
+and reopening the link restores it, and it is the same cart the WhatsApp bot
+sees. Ordering links expire after six hours.
 
 ---
 

@@ -22,10 +22,10 @@ from app.core.exceptions import (BotFlowError, ConfigurationError,
 from app.core.logging import get_logger
 from app.db.models import ConversationStep, Customer, OrderStage
 from app.db.session import get_session
+from app.services import cart as cart_service
 from app.services import kitchen as kitchen_service
 from app.services import menu as menu_service
 from app.services import order_link, orders, payments, pricing, slots
-from app.services.customers import get_or_create_conversation
 from app.templating import templates
 
 log = get_logger(__name__)
@@ -37,6 +37,7 @@ UPSTREAM_DOWN = ("We could not work out the delivery charge just now. "
                  "Please try again shortly, or message us on WhatsApp.")
 PAYMENT_DOWN = ("We could not start the payment just now. Nothing has been "
                 "charged - please try again shortly.")
+LINK_EXPIRED = "This ordering link has expired."
 
 
 async def _customer(session: AsyncSession, token: str) -> Customer | None:
@@ -73,7 +74,7 @@ async def menu_json(token: str, session: AsyncSession = Depends(get_session)) ->
     """The whole live menu, grouped for the page to render at once."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": "This ordering link has expired."}
+        return {"ok": False, "error": LINK_EXPIRED}
 
     cuisines = []
     for cuisine in await menu_service.list_cuisines(session):
@@ -92,6 +93,13 @@ async def menu_json(token: str, session: AsyncSession = Depends(get_session)) ->
                     "price": float(item.price),
                     "pack_size": item.pack_size or "",
                     "serves": item.serves or "",
+                    # Empty for every row in the client's sheet today; the
+                    # page falls back to a drawn placeholder rather than a
+                    # broken image.
+                    "image_url": item.image_url or "",
+                    "description": item.description or "",
+                    "category": category.name,
+                    "cuisine": cuisine.name,
                 } for item in items],
             })
         if categories:
@@ -114,13 +122,88 @@ def _saved_address(customer: Customer) -> dict:
     }
 
 
+@router.get("/{token}/cart")
+async def read_cart(token: str, session: AsyncSession = Depends(get_session)) -> dict:
+    """The saved cart, so reopening the link picks up where it left off."""
+    customer = await _customer(session, token)
+    if customer is None:
+        return {"ok": False, "error": LINK_EXPIRED}
+
+    _, lines = await cart_service.for_customer(session, customer)
+    return _cart_response(lines)
+
+
+@router.post("/{token}/cart")
+async def update_cart(request: Request, token: str,
+                      session: AsyncSession = Depends(get_session)) -> dict:
+    """Set one dish to an exact quantity. 0 removes it.
+
+    Exact rather than incremental so a double-tap or a retried request cannot
+    quietly add a dish twice.
+    """
+    customer = await _customer(session, token)
+    if customer is None:
+        return {"ok": False, "error": LINK_EXPIRED}
+
+    body = await request.json()
+    retailer_id = str(body.get("retailer_id") or "").strip()
+    if not retailer_id:
+        return {"ok": False, "error": "No dish was given."}
+
+    try:
+        quantity = int(body.get("quantity"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Quantity must be a number."}
+
+    conversation, _ = await cart_service.for_customer(session, customer)
+
+    if quantity <= 0:
+        lines = cart_service.set_quantity(conversation, retailer_id=retailer_id,
+                                          name="", price="0", quantity=0)
+        return _cart_response(lines)
+
+    # Name and price come from the menu, never from the browser. The lookup
+    # excludes unavailable dishes, so this also stops one being re-added
+    # after the kitchen hides it.
+    found = await menu_service.get_by_retailer_ids(session, [retailer_id])
+    item = found.get(retailer_id)
+    if item is None:
+        return {"ok": False, "error": "That dish is no longer available."}
+
+    lines = cart_service.set_quantity(conversation, retailer_id=retailer_id,
+                                      name=item.name, price=item.price,
+                                      quantity=quantity)
+    return _cart_response(lines)
+
+
+@router.post("/{token}/cart/clear")
+async def clear_cart(token: str,
+                     session: AsyncSession = Depends(get_session)) -> dict:
+    customer = await _customer(session, token)
+    if customer is None:
+        return {"ok": False, "error": LINK_EXPIRED}
+
+    conversation, _ = await cart_service.for_customer(session, customer)
+    cart_service.clear(conversation)
+    return _cart_response([])
+
+
+def _cart_response(lines: list[dict]) -> dict:
+    return {
+        "ok": True,
+        "cart": lines,
+        "count": cart_service.item_count(lines),
+        "subtotal": float(cart_service.subtotal(lines)),
+    }
+
+
 @router.post("/{token}/address")
 async def check_address(request: Request, token: str,
                         session: AsyncSession = Depends(get_session)) -> dict:
     """Serviceability check, then the bookable slots (spec steps 10 and 13)."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": "This ordering link has expired."}
+        return {"ok": False, "error": LINK_EXPIRED}
 
     body = await request.json()
     postal_code = str(body.get("postal_code") or "").strip()
@@ -166,10 +249,14 @@ async def quote(request: Request, token: str,
     """Price the cart with delivery, for the summary screen (spec step 14)."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": "This ordering link has expired."}
+        return {"ok": False, "error": LINK_EXPIRED}
 
     body = await request.json()
-    cart = _clean_cart(body.get("cart"))
+    # The cart is read from the database, not from the request: the page is
+    # only a view of it, and a tab left open for an hour must not price a
+    # cart the customer has since changed somewhere else.
+    _, stored = await cart_service.for_customer(session, customer)
+    cart = _clean_cart(stored)
     if not cart:
         return {"ok": False, "error": "Your cart is empty."}
 
@@ -219,10 +306,11 @@ async def confirm(request: Request, token: str,
     """Create the order, hold the slot, and send the payment link to WhatsApp."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": "This ordering link has expired."}
+        return {"ok": False, "error": LINK_EXPIRED}
 
     body = await request.json()
-    cart = _clean_cart(body.get("cart"))
+    conversation, stored = await cart_service.for_customer(session, customer)
+    cart = _clean_cart(stored)
     if not cart:
         return {"ok": False, "error": "Your cart is empty."}
 
@@ -280,10 +368,11 @@ async def confirm(request: Request, token: str,
         return {"ok": False, "error": PAYMENT_DOWN}
 
     # Park the WhatsApp conversation on payment so the reminder and expiry
-    # jobs treat a web order exactly like one placed in chat.
-    conversation = await get_or_create_conversation(session, customer)
+    # jobs treat a web order exactly like one placed in chat. The cart is
+    # emptied now it has become an order.
     conversation.step = ConversationStep.AWAIT_PAYMENT
     conversation.set(order_id=str(order.id))
+    cart_service.clear(conversation)
 
     log.info("web_order_confirmed", order_number=order.order_number,
              customer_id=str(customer.id), total=str(order.total))

@@ -35,9 +35,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
+from app.services import media, sheet_images
 from app.db.models import Category, Cuisine, MenuItem
 
 log = get_logger(__name__)
+
+# The XLSX export carries every photo, so it is large. These bound how
+# long an import may wait and how much it will hold in memory.
+WORKBOOK_TIMEOUT_SECONDS = 300.0
+MAX_WORKBOOK_BYTES = 600 * 1024 * 1024
 
 HEADER_MARKER = "description"
 RETAILER_ID_MAX = 100
@@ -62,6 +68,9 @@ class ParsedItem:
     cost_price: Decimal | None  # PPP
     category: str
     position: int
+    # 1-based row in the source tab. The photos live in the XLSX export
+    # anchored to a cell, so the row is how a picture finds its dish.
+    source_row: int = 0
 
 
 @dataclass
@@ -85,6 +94,8 @@ class ImportResult:
     items_created: int = 0
     items_updated: int = 0
     items_deactivated: int = 0
+    images_stored: int = 0
+    images_failed: int = 0
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -100,6 +111,10 @@ class ImportResult:
         ]
         if self.items_deactivated:
             parts.append(f"{self.items_deactivated} deactivated")
+        if self.images_stored:
+            parts.append(f"{self.images_stored} image(s) stored")
+        if self.images_failed:
+            parts.append(f"{self.images_failed} image(s) could not be fetched")
         return ", ".join(parts)
 
 
@@ -151,11 +166,14 @@ def parse_csv(text: str, *, fallback_cuisine: str = "") -> ParsedTab:
         tab.items.append(ParsedItem(
             name=name,
             description=_clean_description(description),
-            image_url=image if image.startswith("http") else "",
+            # Kept raw: a Drive link or an =IMAGE() formula is still a
+            # source. `media.normalise_source` works out what to fetch.
+            image_url=media.normalise_source(image),
             price=price,
             cost_price=_to_decimal(ppp),
             category=current_category,
             position=position,
+            source_row=line_number,
         ))
 
     if not tab.cuisine:
@@ -278,9 +296,38 @@ async def fetch_tab_csv(sheet_id: str, gid: str) -> str:
     return response.text
 
 
+async def fetch_workbook(sheet_id: str) -> bytes:
+    """The whole sheet as XLSX, which is the only export carrying the photos.
+
+    Much heavier than a CSV - a few hundred megabytes for a menu with a
+    picture per dish - so it gets a long timeout and a size ceiling rather
+    than the CSV client's settings.
+    """
+    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+           f"/export?format=xlsx")
+    async with httpx.AsyncClient(timeout=WORKBOOK_TIMEOUT_SECONDS,
+                                 follow_redirects=True) as client:
+        response = await client.get(url)
+
+    if response.status_code != 200:
+        raise IntegrationError(
+            "google_sheets",
+            f"could not export the workbook (HTTP {response.status_code})",
+            status_code=response.status_code,
+        )
+    if len(response.content) > MAX_WORKBOOK_BYTES:
+        raise IntegrationError(
+            "google_sheets",
+            f"the workbook is {len(response.content) // 1_000_000} MB, over the "
+            f"{MAX_WORKBOOK_BYTES // 1_000_000} MB ceiling",
+        )
+    return response.content
+
+
 # --- importing ---------------------------------------------------------------
 async def import_from_sheet(session: AsyncSession, sheet_url: str, *,
-                            deactivate_missing: bool = True) -> ImportResult:
+                            deactivate_missing: bool = True,
+                            with_photos: bool = True) -> ImportResult:
     """Import every tab of a Google Sheet."""
     sheet_id = sheet_id_from_url(sheet_url)
     tabs = await discover_tabs(sheet_id)
@@ -295,7 +342,47 @@ async def import_from_sheet(session: AsyncSession, sheet_url: str, *,
             tab.warnings.append(f"tab '{name}' had no importable rows")
         parsed.append(tab)
 
+    if with_photos:
+        await _attach_sheet_photos(sheet_id, parsed)
+
     return await apply(session, parsed, deactivate_missing=deactivate_missing)
+
+
+async def _attach_sheet_photos(sheet_id: str, tabs: list[ParsedTab]) -> None:
+    """Lift the anchored photos out of the XLSX export onto the parsed items.
+
+    A CSV cannot carry pictures, so the IMAGE column reads as empty even when
+    the sheet is full of them. The XLSX export does carry them, anchored to a
+    row, which is what `source_row` is for.
+
+    Best effort: the export is large and may fail, and a menu import without
+    photos is far better than no menu import.
+    """
+    try:
+        workbook = await fetch_workbook(sheet_id)
+    except IntegrationError as exc:
+        log.warning("sheet_photos_unavailable", error=str(exc))
+        return
+
+    found = sheet_images.extract(workbook)
+    if not found:
+        return
+
+    for index, tab in enumerate(tabs):
+        if index >= len(found):
+            break
+        by_row = found[index].by_row
+        stored = 0
+        for item in tab.items:
+            raw = by_row.get(item.source_row)
+            if not raw:
+                continue
+            path = media.store_bytes(
+                raw, key=f"{sheet_id}:{index}:{item.source_row}")
+            if path:
+                item.image_url = path
+                stored += 1
+        log.info("sheet_photos_attached", tab=found[index].name, stored=stored)
 
 
 async def import_from_csv_text(session: AsyncSession, text: str, *,
@@ -314,9 +401,33 @@ def _tab_name_to_cuisine(tab_name: str) -> str:
 
 
 async def apply(session: AsyncSession, tabs: list[ParsedTab], *,
-                deactivate_missing: bool = True) -> ImportResult:
+                deactivate_missing: bool = True,
+                fetch_images: bool = True) -> ImportResult:
     """Write parsed tabs into the database, idempotently."""
     result = ImportResult()
+
+    # Pull every image once, up front, over one connection pool. Doing it per
+    # row would re-open a connection 287 times; doing it at request time would
+    # make the customer wait on somebody else's CDN.
+    if fetch_images:
+        # Anything already under /media is a photo we lifted out of the XLSX
+        # moments ago. Only remote links need fetching; treating a local path
+        # as a URL would fail and then blank the photo we just saved.
+        remote = [item.image_url for tab in tabs for item in tab.items
+                  if item.image_url
+                  and not item.image_url.startswith(media.MEDIA_URL_PREFIX)]
+        local_count = sum(1 for tab in tabs for item in tab.items
+                          if item.image_url.startswith(media.MEDIA_URL_PREFIX))
+
+        stored = await media.fetch_many(remote) if remote else {}
+        result.images_stored = len(stored) + local_count
+        result.images_failed = len({s for s in remote if s not in stored})
+
+        for tab in tabs:
+            for item in tab.items:
+                if item.image_url.startswith(media.MEDIA_URL_PREFIX):
+                    continue
+                item.image_url = stored.get(item.image_url, "")
 
     for index, tab in enumerate(tabs):
         result.warnings.extend(tab.warnings)

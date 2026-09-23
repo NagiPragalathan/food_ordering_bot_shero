@@ -227,8 +227,16 @@ sheet shared as "Anyone with the link can view".
 
 Still outstanding for the menu:
 
-- **Dish images.** The IMAGE column is empty in every row. Without images the
-  WhatsApp menu is text only, which is usable but much less appetising.
+## 7b. Dish images 🟢 done
+
+All **287 dishes now have their photo**, taken from your sheet.
+
+Worth recording why this looked impossible at first: a CSV export of the sheet
+shows an empty IMAGE column, because the pictures are anchored *over* the
+cells rather than stored *in* them. The XLSX export does carry them, so that
+is what the importer reads, matching each picture to its dish by row.
+
+Editing a photo in the sheet and re-importing updates it.
 
 ## 8. Backend APIs you may already have 🟡
 

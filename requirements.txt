@@ -40,3 +40,7 @@ pytest==8.3.4
 pytest-asyncio==0.25.2
 respx==0.22.0
 aiosqlite==0.20.0
+
+# Downscales dish photos pulled out of the client's sheet; the originals are
+# ~850KB PNGs, far too heavy for a phone menu.
+Pillow==11.0.0

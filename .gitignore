@@ -16,3 +16,6 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Dish photos downloaded from the client's sheet at import time.
+data/media/

@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import ConversationStep, LeadStage
 from app.integrations.gallabox.messages import Button, ListRow, ListSection
+from app.services import cart as cart_service
 from app.services import kitchen as kitchen_service
 from app.services import menu as menu_service
 from app.services import order_link
@@ -341,22 +342,13 @@ async def handle_cart_review(ctx: FlowContext) -> None:
 # --- helpers -----------------------------------------------------------------
 def _add_to_cart(ctx: FlowContext, retailer_id: str, name: str,
                  price: Decimal, quantity: int) -> None:
-    """Add a line, merging with an existing one for the same dish."""
-    lines = [dict(line) for line in (ctx.get("cart") or [])]
+    """Add a line, merging with an existing one for the same dish.
 
-    for line in lines:
-        if line.get("retailer_id") == retailer_id:
-            line["quantity"] = min(line.get("quantity", 0) + quantity, MAX_QUANTITY)
-            break
-    else:
-        lines.append({
-            "retailer_id": retailer_id,
-            "name": name,
-            "quantity": quantity,
-            "unit_price": str(price),
-        })
-
-    ctx.put(cart=lines)
+    Delegates to `services.cart` so the WhatsApp cart and the web ordering
+    page are literally the same list, not two implementations that agree.
+    """
+    cart_service.add(ctx.conversation, retailer_id=retailer_id, name=name,
+                     price=price, quantity=quantity)
 
 
 def _parse_quantity(text: str) -> int | None:
