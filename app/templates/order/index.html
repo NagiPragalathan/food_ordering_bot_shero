@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shero Home Food — Order</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { brand: {
+      50:'#fdf5ef',100:'#fae6d6',300:'#e8b48a',500:'#c9743a',
+      600:'#b5622c',700:'#8f4a20' } } } } };
+  </script>
+</head>
+<body class="bg-stone-100 text-stone-900">
+
+<header class="sticky top-0 z-20 border-b border-stone-200 bg-white/95 backdrop-blur">
+  <div class="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
+    <div class="min-w-0">
+      <div class="truncate text-base font-semibold">Shero Home Food</div>
+      <div class="truncate text-[11px] text-stone-500">
+        {% if customer.name %}Hi {{ customer.name }} — {% endif %}authentic home-style meals
+      </div>
+    </div>
+    <button id="cart-button"
+            class="relative shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+      Cart
+      <span id="cart-count"
+            class="ml-1 hidden rounded-full bg-white px-1.5 text-xs font-bold text-brand-700">0</span>
+    </button>
+  </div>
+
+  <!-- Progress -->
+  <div class="mx-auto flex max-w-5xl gap-1 px-4 pb-2 text-[11px]">
+    {% for label in ['Menu', 'Cart', 'Address', 'Confirm'] %}
+      <div class="step-pill flex-1 rounded-full bg-stone-200 px-2 py-1 text-center font-medium text-stone-500"
+           data-step="{{ loop.index0 }}">{{ loop.index }}. {{ label }}</div>
+    {% endfor %}
+  </div>
+</header>
+
+<main class="mx-auto max-w-5xl px-4 py-5">
+
+  <!-- 1. MENU -->
+  <section id="view-menu">
+    <div id="cuisine-tabs" class="mb-4 flex flex-wrap gap-2"></div>
+    <input id="search" placeholder="Search dishes…"
+           class="mb-4 w-full rounded-xl border border-stone-300 px-4 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    <div id="menu-body" class="space-y-3">
+      <p class="py-16 text-center text-sm text-stone-500">Loading the menu…</p>
+    </div>
+  </section>
+
+  <!-- 2. CART -->
+  <section id="view-cart" class="hidden">
+    <h2 class="mb-3 text-lg font-semibold">Your cart</h2>
+    <div id="cart-body" class="space-y-2"></div>
+    <div id="cart-total" class="mt-4 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm"></div>
+    <div class="mt-4 flex gap-2">
+      <button data-goto="menu" class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium">Add more</button>
+      <button id="to-address" class="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
+        Continue to delivery
+      </button>
+    </div>
+  </section>
+
+  <!-- 3. ADDRESS -->
+  <section id="view-address" class="hidden">
+    <h2 class="mb-3 text-lg font-semibold">Where should we deliver?</h2>
+    <div class="space-y-3 rounded-xl border border-stone-200 bg-white p-4">
+      <div>
+        <label class="mb-1 block text-xs font-medium text-stone-600">Street address</label>
+        <input id="f-address" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+      </div>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label class="mb-1 block text-xs font-medium text-stone-600">Apartment / unit</label>
+          <input id="f-apartment" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-medium text-stone-600">ZIP code</label>
+          <input id="f-zip" inputmode="numeric" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        </div>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label class="mb-1 block text-xs font-medium text-stone-600">Contact number</label>
+          <input id="f-contact" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-medium text-stone-600">Driver instructions</label>
+          <input id="f-instructions" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        </div>
+      </div>
+      <button id="check-address" class="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
+        Check delivery &amp; show times
+      </button>
+    </div>
+
+    <div id="slots-wrap" class="mt-4 hidden">
+      <h3 class="mb-2 text-sm font-semibold">Pick a delivery time</h3>
+      <div id="slots" class="grid gap-2 sm:grid-cols-2"></div>
+    </div>
+
+    <div class="mt-4 flex gap-2">
+      <button data-goto="cart" class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium">Back</button>
+      <button id="to-summary" disabled
+              class="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40">
+        See the total
+      </button>
+    </div>
+  </section>
+
+  <!-- 4. SUMMARY -->
+  <section id="view-summary" class="hidden">
+    <h2 class="mb-3 text-lg font-semibold">Confirm your order</h2>
+    <div id="summary-body" class="rounded-xl border border-stone-200 bg-white p-4 text-sm"></div>
+    <div class="mt-4 flex gap-2">
+      <button data-goto="address" class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium">Back</button>
+      <button id="place-order" class="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
+        Confirm &amp; get payment link
+      </button>
+    </div>
+  </section>
+
+  <!-- 5. DONE -->
+  <section id="view-done" class="hidden">
+    <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center">
+      <h2 class="text-lg font-semibold text-emerald-900">Order placed</h2>
+      <p class="mt-1 text-sm text-emerald-800">
+        Order <strong id="done-number"></strong>. We have sent the payment link to your
+        WhatsApp — or pay right here.
+      </p>
+      <a id="done-pay" href="#" class="mt-4 inline-block rounded-xl bg-emerald-700 px-6 py-3 text-sm font-semibold text-white hover:bg-emerald-800">
+        Pay now
+      </a>
+      <p class="mt-3 text-[11px] text-emerald-700">
+        Your delivery slot is held for 30 minutes.
+      </p>
+    </div>
+  </section>
+
+  <p id="error" class="mt-4 hidden rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"></p>
+</main>
+
+<script>
+(function () {
+  const TOKEN = {{ token | tojson }};
+  const BASE = '/order/' + TOKEN;
+  const $ = (id) => document.getElementById(id);
+
+  let MENU = [];          // [{name, slug, categories:[{name, items:[…]}]}]
+  let ITEMS = {};         // retailer_id -> item, for cart rendering
+  let cart = {};          // retailer_id -> quantity
+  let slotId = null;
+  let quote = null;
+  let activeCuisine = null;
+
+  const money = (n) => '$' + Number(n).toFixed(2);
+
+  function showError(msg) {
+    const box = $('error');
+    if (!msg) { box.classList.add('hidden'); return; }
+    box.textContent = msg;
+    box.classList.remove('hidden');
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  const VIEWS = ['menu', 'cart', 'address', 'summary', 'done'];
+  function show(name) {
+    showError('');
+    VIEWS.forEach(v => $('view-' + v).classList.toggle('hidden', v !== name));
+    const idx = { menu: 0, cart: 1, address: 2, summary: 3, done: 3 }[name];
+    document.querySelectorAll('.step-pill').forEach((pill, i) => {
+      const done = i <= idx;
+      pill.className = 'step-pill flex-1 rounded-full px-2 py-1 text-center font-medium ' +
+        (done ? 'bg-brand-600 text-white' : 'bg-stone-200 text-stone-500');
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // --- cart ---------------------------------------------------------------
+  function cartLines() {
+    return Object.keys(cart)
+      .filter(id => cart[id] > 0)
+      .map(id => ({ retailer_id: id, quantity: cart[id] }));
+  }
+
+  function cartCount() {
+    return cartLines().reduce((n, l) => n + l.quantity, 0);
+  }
+
+  function setQty(id, qty) {
+    if (qty <= 0) delete cart[id]; else cart[id] = Math.min(qty, 20);
+    renderCartBadge();
+    renderMenu();
+  }
+
+  function renderCartBadge() {
+    const n = cartCount();
+    const badge = $('cart-count');
+    badge.textContent = n;
+    badge.classList.toggle('hidden', n === 0);
+  }
+
+  function renderCart() {
+    const lines = cartLines();
+    const body = $('cart-body');
+    body.innerHTML = '';
+    if (!lines.length) {
+      body.innerHTML = '<p class="py-10 text-center text-sm text-stone-500">Your cart is empty.</p>';
+      $('cart-total').textContent = '';
+      return;
+    }
+    let subtotal = 0;
+    lines.forEach(line => {
+      const item = ITEMS[line.retailer_id];
+      if (!item) return;
+      subtotal += item.price * line.quantity;
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3';
+      row.innerHTML =
+        '<div class="min-w-0 flex-1">' +
+          '<div class="truncate text-sm font-medium"></div>' +
+          '<div class="text-xs text-stone-500">' + money(item.price) + ' each</div>' +
+        '</div>';
+      row.querySelector('.font-medium').textContent = item.name;
+      row.appendChild(stepper(line.retailer_id, line.quantity));
+      const total = document.createElement('div');
+      total.className = 'w-20 text-right text-sm font-semibold tabular-nums';
+      total.textContent = money(item.price * line.quantity);
+      row.appendChild(total);
+      body.appendChild(row);
+    });
+    $('cart-total').innerHTML =
+      '<div class="flex justify-between"><span>Subtotal</span>' +
+      '<span class="font-semibold tabular-nums">' + money(subtotal) + '</span></div>' +
+      '<p class="mt-1 text-[11px] text-stone-500">Delivery and taxes are added at the next step.</p>';
+  }
+
+  function stepper(id, qty) {
+    const wrap = document.createElement('div');
+    wrap.className = 'flex shrink-0 items-center gap-1';
+    const mk = (label, delta) => {
+      const b = document.createElement('button');
+      b.className = 'h-7 w-7 rounded-lg border border-stone-300 text-sm font-semibold hover:bg-stone-100';
+      b.textContent = label;
+      b.addEventListener('click', () => { setQty(id, (cart[id] || 0) + delta); renderCart(); });
+      return b;
+    };
+    const count = document.createElement('span');
+    count.className = 'w-6 text-center text-sm tabular-nums';
+    count.textContent = qty;
+    wrap.append(mk('−', -1), count, mk('+', 1));
+    return wrap;
+  }
+
+  // --- menu ---------------------------------------------------------------
+  function renderTabs() {
+    const tabs = $('cuisine-tabs');
+    tabs.innerHTML = '';
+    MENU.forEach(c => {
+      const b = document.createElement('button');
+      const on = c.slug === activeCuisine;
+      b.className = 'rounded-xl border px-4 py-2 text-sm font-medium ' +
+        (on ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-stone-300 bg-white text-stone-600');
+      b.textContent = c.name;
+      b.addEventListener('click', () => { activeCuisine = c.slug; renderTabs(); renderMenu(); });
+      tabs.appendChild(b);
+    });
+  }
+
+  function renderMenu() {
+    const term = $('search').value.trim().toLowerCase();
+    const body = $('menu-body');
+    body.innerHTML = '';
+
+    const cuisine = MENU.find(c => c.slug === activeCuisine);
+    if (!cuisine) return;
+
+    let shown = 0;
+    cuisine.categories.forEach(cat => {
+      const items = cat.items.filter(i => !term || i.name.toLowerCase().includes(term));
+      if (!items.length) return;
+      shown += items.length;
+
+      const box = document.createElement('details');
+      box.className = 'group overflow-hidden rounded-xl border border-stone-200 bg-white';
+      if (term) box.open = true;
+
+      const head = document.createElement('summary');
+      head.className = 'flex cursor-pointer list-none items-center justify-between px-4 py-3 hover:bg-stone-50 [&::-webkit-details-marker]:hidden';
+      head.innerHTML =
+        '<span class="text-sm font-semibold"></span>' +
+        '<span class="text-xs text-stone-500">' + items.length + ' item(s)</span>';
+      head.querySelector('span').textContent = cat.name;
+      box.appendChild(head);
+
+      const list = document.createElement('div');
+      list.className = 'divide-y divide-stone-100 border-t border-stone-100';
+      items.forEach(item => list.appendChild(itemRow(item)));
+      box.appendChild(list);
+      body.appendChild(box);
+    });
+
+    if (!shown) {
+      body.innerHTML = '<p class="py-16 text-center text-sm text-stone-500">No dishes match that search.</p>';
+    }
+  }
+
+  function itemRow(item) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-3 px-4 py-3';
+
+    const info = document.createElement('div');
+    info.className = 'min-w-0 flex-1';
+    const name = document.createElement('div');
+    name.className = 'truncate text-sm font-medium';
+    name.textContent = item.name;
+    const meta = document.createElement('div');
+    meta.className = 'truncate text-xs text-stone-500';
+    meta.textContent = [item.pack_size, item.serves].filter(Boolean).join(' · ');
+    info.append(name, meta);
+
+    const price = document.createElement('div');
+    price.className = 'w-16 shrink-0 text-right text-sm font-semibold tabular-nums';
+    price.textContent = money(item.price);
+
+    row.append(info, price);
+
+    const qty = cart[item.id] || 0;
+    if (qty > 0) {
+      row.appendChild(stepper(item.id, qty));
+    } else {
+      const add = document.createElement('button');
+      add.className = 'shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700';
+      add.textContent = 'Add';
+      add.addEventListener('click', () => setQty(item.id, 1));
+      row.appendChild(add);
+    }
+    return row;
+  }
+
+  // --- server -------------------------------------------------------------
+  async function api(path, payload) {
+    const res = await fetch(BASE + path, payload ? {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    } : undefined);
+    if (!res.ok) throw new Error('Server error ' + res.status);
+    return res.json();
+  }
+
+  function busy(btn, on, label) {
+    btn.disabled = on;
+    if (on) { btn.dataset.label = btn.textContent; btn.textContent = label; }
+    else if (btn.dataset.label) { btn.textContent = btn.dataset.label; }
+  }
+
+  async function load() {
+    try {
+      const data = await api('/menu');
+      if (!data.ok) { showError(data.error); return; }
+      MENU = data.cuisines;
+      MENU.forEach(c => c.categories.forEach(cat => cat.items.forEach(i => { ITEMS[i.id] = i; })));
+      activeCuisine = MENU.length ? MENU[0].slug : null;
+
+      const s = data.saved || {};
+      $('f-address').value = s.address_line1 || '';
+      $('f-apartment').value = s.apartment_unit || '';
+      $('f-zip').value = s.postal_code || '';
+      $('f-contact').value = s.contact_number || '';
+      $('f-instructions').value = s.delivery_instructions || '';
+
+      renderTabs();
+      renderMenu();
+    } catch (err) {
+      showError('Could not load the menu: ' + err.message);
+    }
+  }
+
+  function addressPayload() {
+    return {
+      address_line1: $('f-address').value.trim(),
+      apartment_unit: $('f-apartment').value.trim(),
+      postal_code: $('f-zip').value.trim(),
+      contact_number: $('f-contact').value.trim(),
+      delivery_instructions: $('f-instructions').value.trim(),
+    };
+  }
+
+  // --- wiring -------------------------------------------------------------
+  $('search').addEventListener('input', renderMenu);
+  $('cart-button').addEventListener('click', () => { renderCart(); show('cart'); });
+  document.querySelectorAll('[data-goto]').forEach(b =>
+    b.addEventListener('click', () => {
+      const target = b.dataset.goto;
+      if (target === 'cart') renderCart();
+      show(target);
+    }));
+
+  $('to-address').addEventListener('click', () => {
+    if (!cartLines().length) { showError('Add at least one dish first.'); return; }
+    show('address');
+  });
+
+  $('check-address').addEventListener('click', async function () {
+    showError('');
+    const payload = addressPayload();
+    if (!payload.address_line1) { showError('Enter your street address.'); return; }
+    if (!payload.postal_code) { showError('Enter your ZIP code.'); return; }
+
+    busy(this, true, 'Checking…');
+    try {
+      const data = await api('/address', payload);
+      if (!data.ok) { showError(data.error); $('slots-wrap').classList.add('hidden'); return; }
+
+      const box = $('slots');
+      box.innerHTML = '';
+      slotId = null;
+      $('to-summary').disabled = true;
+
+      data.slots.forEach(s => {
+        const b = document.createElement('button');
+        b.className = 'slot rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm hover:border-brand-500';
+        b.textContent = s.label;
+        b.addEventListener('click', () => {
+          slotId = s.id;
+          document.querySelectorAll('.slot').forEach(x => {
+            x.className = 'slot rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm hover:border-brand-500';
+          });
+          b.className = 'slot rounded-xl border-2 border-brand-600 bg-brand-50 px-3 py-2.5 text-sm font-semibold text-brand-700';
+          $('to-summary').disabled = false;
+        });
+        box.appendChild(b);
+      });
+      $('slots-wrap').classList.remove('hidden');
+    } catch (err) {
+      showError('Could not check that address: ' + err.message);
+    } finally {
+      busy(this, false);
+    }
+  });
+
+  $('to-summary').addEventListener('click', async function () {
+    if (!slotId) { showError('Pick a delivery time.'); return; }
+    busy(this, true, 'Pricing…');
+    try {
+      const data = await api('/quote',
+        Object.assign({ cart: cartLines(), slot_id: slotId }, addressPayload()));
+      if (!data.ok) { showError(data.error); return; }
+      quote = data;
+
+      const rows = data.lines.map(l =>
+        '<div class="flex justify-between py-1"><span>' + l.quantity + ' × ' +
+        escapeHtml(l.name) + '</span><span class="tabular-nums">' + money(l.line_total) + '</span></div>'
+      ).join('');
+
+      $('summary-body').innerHTML =
+        rows +
+        '<hr class="my-2 border-stone-200">' +
+        line('Subtotal', data.dish_total) +
+        line('Delivery', data.delivery_fee) +
+        line('Taxes &amp; fees', Number(data.extra_fees) + Number(data.tax)) +
+        '<hr class="my-2 border-stone-200">' +
+        '<div class="flex justify-between text-base font-semibold"><span>Total</span>' +
+        '<span class="tabular-nums">' + money(data.total) + '</span></div>' +
+        '<p class="mt-3 text-xs text-stone-500">Delivery: ' + escapeHtml(data.slot_label) + '</p>';
+      show('summary');
+    } catch (err) {
+      showError('Could not price your order: ' + err.message);
+    } finally {
+      busy(this, false);
+    }
+  });
+
+  function line(label, value) {
+    return '<div class="flex justify-between py-0.5 text-stone-600"><span>' + label +
+           '</span><span class="tabular-nums">' + money(value) + '</span></div>';
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : s;
+    return d.innerHTML;
+  }
+
+  $('place-order').addEventListener('click', async function () {
+    busy(this, true, 'Placing your order…');
+    try {
+      const data = await api('/confirm',
+        Object.assign({ cart: cartLines(), slot_id: slotId }, addressPayload()));
+      if (!data.ok) { showError(data.error); return; }
+      $('done-number').textContent = data.order_number;
+      $('done-pay').href = data.pay_url;
+      show('done');
+    } catch (err) {
+      showError('Could not place the order: ' + err.message);
+    } finally {
+      busy(this, false);
+    }
+  });
+
+  show('menu');
+  load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+{% extends "admin/base.html" %}
+{% import "admin/_macros.html" as ui %}
+{% block title %}Import{% endblock %}
+{% block heading %}Import menu{% endblock %}
+{% block subheading %}
+  <p class="text-xs text-stone-500">Pull from Google Sheets, or upload a CSV</p>
+{% endblock %}
+
+{% block content %}
+<div class="grid gap-5 lg:grid-cols-3">
+
+  <div class="space-y-5 lg:col-span-2">
+
+    {% call ui.card('From Google Sheets', 'Every tab is imported as one cuisine') %}
+      <form method="post" action="{{ url_for('admin_import_sheet') }}" class="space-y-4">
+        <div>
+          <label class="mb-1.5 block text-sm font-medium text-stone-700">Sheet URL</label>
+          <input name="sheet_url" required
+                 placeholder="https://docs.google.com/spreadsheets/d/..."
+                 class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                        focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          <p class="mt-1.5 text-xs text-stone-500">
+            The sheet must be shared as <strong>Anyone with the link can view</strong>.
+          </p>
+        </div>
+
+        <label class="flex items-start gap-2 text-sm">
+          <input type="checkbox" name="deactivate_missing" checked
+                 class="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+          <span>
+            Hide items that are no longer in the sheet
+            <span class="block text-xs text-stone-500">
+              They are hidden from customers, never deleted, so past orders stay readable.
+            </span>
+          </span>
+        </label>
+
+        <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+          Import from sheet
+        </button>
+      </form>
+    {% endcall %}
+
+    {% call ui.card('Upload a CSV', 'One file = one cuisine') %}
+      <form method="post" action="{{ url_for('admin_import_csv') }}"
+            enctype="multipart/form-data" class="space-y-4">
+        <div>
+          <label class="mb-1.5 block text-sm font-medium text-stone-700">CSV file</label>
+          <input type="file" name="file" accept=".csv,text/csv" required
+                 class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm
+                        file:mr-3 file:rounded file:border-0 file:bg-stone-100
+                        file:px-3 file:py-1.5 file:text-xs file:font-medium">
+        </div>
+
+        <div>
+          <label class="mb-1.5 block text-sm font-medium text-stone-700">
+            Cuisine name <span class="font-normal text-stone-400">(optional)</span>
+          </label>
+          <input name="cuisine" placeholder="Chettinad"
+                 class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                        focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          <p class="mt-1.5 text-xs text-stone-500">
+            Only needed if the file has no title row like "Chettinad Cuisine - USA Menu".
+          </p>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="deactivate_missing"
+                 class="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+          Hide items missing from this file
+        </label>
+
+        <button class="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-stone-50">
+          Upload and import
+        </button>
+      </form>
+    {% endcall %}
+  </div>
+
+  <div class="space-y-5">
+    {% call ui.card('Currently loaded') %}
+      {% if cuisines %}
+        <div class="space-y-3">
+          {% for c in cuisines %}
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium">{{ c.name }}</div>
+              <div class="text-xs text-stone-500">
+                {{ counts[c.slug].categories }} categories ·
+                {{ counts[c.slug].items }} items
+              </div>
+            </div>
+            {% if c.is_active %}{{ ui.badge('live', 'good') }}{% else %}{{ ui.badge('hidden', 'warn') }}{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        {{ ui.empty('Nothing imported yet.') }}
+      {% endif %}
+    {% endcall %}
+
+    {% call ui.card('Expected layout') %}
+      <div class="space-y-3 text-xs text-stone-600">
+        <p>Each tab should look like your existing sheet:</p>
+        <pre class="overflow-x-auto rounded-lg bg-stone-900 p-3 text-[10px] leading-relaxed text-stone-100">
+      Chettinad Cuisine - USA Menu
+
+  1   Sambar      Description  IMAGE  PPP   MRP
+  1   Drumstick   16 oz pack…         10.78 16.53
+  2   Beans       16 oz pack…          7.36 11.28
+
+  2   Rasam       Description  IMAGE  PPP   MRP
+  1   Tomato      …                    6.20  9.50</pre>
+        <ul class="space-y-1.5">
+          <li>A row is a <strong>category</strong> when the 4th column reads
+              "Description".</li>
+          <li><strong>MRP</strong> is charged to the customer.</li>
+          <li><strong>PPP</strong> is stored as cost, for margin only — never shown.</li>
+          <li>Re-importing <strong>updates</strong> existing rows rather than
+              duplicating them.</li>
+        </ul>
+      </div>
+    {% endcall %}
+  </div>
+</div>
+{% endblock %}

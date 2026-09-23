@@ -1,0 +1,341 @@
+{% extends "admin/base.html" %}
+{% import "admin/_macros.html" as ui %}
+{% block title %}Settings{% endblock %}
+{% block heading %}Settings{% endblock %}
+{% block subheading %}
+  <p class="text-xs text-stone-500">Connect your accounts. Saved values take effect immediately.</p>
+{% endblock %}
+
+{% block content %}
+
+{% if not secrets_enabled %}
+<div class="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+  <strong>Secret fields are disabled.</strong>
+  <code>SETTINGS_ENCRYPTION_KEY</code> is not set, so secrets cannot be stored
+  safely. Non-secret fields still save. Generate a key with:
+  <code class="mt-1 block rounded bg-red-100 px-2 py-1 text-xs">python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</code>
+</div>
+{% endif %}
+
+{% set test_map = {
+  'WhatsApp (Gallabox)': 'gallabox',
+  'Zoho CRM': 'zoho',
+  'Stripe': 'stripe',
+  'Uber Direct': 'uber',
+  'Meta Catalogue': 'meta',
+  'Maps': 'maps',
+} %}
+
+<!-- Zoho connects by OAuth, so it sits outside the main form: a browser
+     cannot nest one form inside another. -->
+<section class="mb-5 overflow-hidden rounded-xl border border-stone-200 bg-white">
+  <header class="flex items-center justify-between border-b border-stone-200 bg-stone-50 px-5 py-3">
+    <div class="flex items-center gap-2">
+      <h2 class="text-sm font-semibold">Zoho CRM</h2>
+      {% if zoho.connected %}{{ ui.badge('connected', 'good') }}
+      {% else %}{{ ui.badge('not connected', 'warn') }}{% endif %}
+    </div>
+    <div class="flex items-center gap-2">
+      {% if zoho.connected %}
+        <form method="post" action="{{ url_for('admin_settings_test', service='zoho') }}">
+          <button class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs
+                         font-medium hover:bg-stone-100">Test connection</button>
+        </form>
+        <form method="post" action="{{ url_for('admin_zoho_disconnect') }}"
+              onsubmit="return confirm('Disconnect Zoho? The stored refresh token is deleted.')">
+          <button class="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs
+                         font-medium text-red-700 hover:bg-red-50">Disconnect</button>
+        </form>
+      {% endif %}
+    </div>
+  </header>
+
+  <form method="post" action="{{ url_for('admin_zoho_connect') }}" class="p-5">
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div>
+        <label class="mb-1.5 block text-sm font-medium text-stone-700">Client ID</label>
+        <input name="zoho_client_id" value="{{ zoho.client_id }}" autocomplete="off"
+               spellcheck="false" placeholder="1000.XXXXXXXXXXXXXXXXXXXX"
+               class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs
+                      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      </div>
+
+      <div>
+        <label class="mb-1.5 flex items-center gap-2 text-sm font-medium text-stone-700">
+          Client Secret
+          {% if zoho.secret_set %}{{ ui.badge('set', 'good') }}{% endif %}
+        </label>
+        <input name="zoho_client_secret" type="password" autocomplete="off"
+               {% if not secrets_enabled %}disabled{% endif %}
+               placeholder="{{ 'Leave blank to keep the current value' if zoho.secret_set else 'Paste it here' }}"
+               class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs
+                      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20
+                      disabled:bg-stone-100 disabled:text-stone-400">
+      </div>
+
+      <div>
+        <label class="mb-1.5 block text-sm font-medium text-stone-700">Data centre</label>
+        <select name="zoho_data_center"
+                class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                       focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          {% for value, label in zoho.centres %}
+            <option value="{{ value }}" {% if zoho.data_centre == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <p class="mt-1 text-[11px] text-stone-400">
+          Must match the domain you log in at - the data centres are isolated.
+        </p>
+      </div>
+
+      <div>
+        <label class="mb-1.5 block text-sm font-medium text-stone-700">Orders module API name</label>
+        <input name="zoho_orders_module" value="{{ zoho.orders_module }}" autocomplete="off"
+               spellcheck="false" placeholder="Orders"
+               class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs
+                      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      </div>
+
+      <div class="flex items-end">
+        <button class="w-full rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white
+                       hover:bg-brand-700">
+          {% if zoho.connected %}Reconnect Zoho{% else %}Connect Zoho{% endif %}
+        </button>
+      </div>
+    </div>
+
+    <div class="mt-4 rounded-lg bg-stone-50 px-4 py-3 text-[11px] leading-relaxed text-stone-500">
+      In Zoho's API console create a <strong>Server-based Application</strong> and
+      register this exact Authorized Redirect URI:
+      <code class="mt-1 block rounded bg-white px-2 py-1 font-mono text-stone-700 select-all">{{ zoho.redirect_uri }}</code>
+      Pressing Connect sends you to Zoho to approve access; the refresh token is
+      stored encrypted here, so there is nothing to copy back.
+    </div>
+  </form>
+</section>
+
+<form method="post" action="{{ url_for('admin_settings_save') }}" class="space-y-5">
+  {# Zoho is rendered above as its own OAuth card. #}
+  {% for group in groups if group.title != 'Zoho CRM' %}
+  <section class="overflow-hidden rounded-xl border border-stone-200 bg-white">
+    <header class="flex items-center justify-between border-b border-stone-200 bg-stone-50 px-5 py-3">
+      <h2 class="text-sm font-semibold">{{ group.title }}</h2>
+      {% if test_map.get(group.title) %}
+        <button type="submit" formmethod="post" formnovalidate
+                formaction="{{ url_for('admin_settings_test', service=test_map[group.title]) }}"
+                class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs
+                       font-medium hover:bg-stone-100">
+          Test connection
+        </button>
+      {% endif %}
+    </header>
+
+    <div class="grid gap-4 p-5 sm:grid-cols-2">
+      {% for field in group.fields %}
+      <div>
+        <label for="{{ field.key }}" class="mb-1.5 flex items-center gap-2 text-sm font-medium text-stone-700">
+          {{ field.label }}
+          {% if field.is_secret and field.is_set %}{{ ui.badge('set', 'good') }}{% endif %}
+          {% if field.from_database %}{{ ui.badge('saved here', 'info') }}{% endif %}
+          {% if not field.is_set and not field.is_secret %}{{ ui.badge('empty', 'warn') }}{% endif %}
+          {% if not field.is_set and field.is_secret %}{{ ui.badge('not set', 'warn') }}{% endif %}
+        </label>
+        <input id="{{ field.key }}" name="{{ field.key }}"
+               type="{{ 'password' if field.is_secret else 'text' }}"
+               value="{{ field.value }}"
+               autocomplete="off" spellcheck="false"
+               {% if field.is_secret %}
+                 placeholder="{{ 'Leave blank to keep the current value' if field.is_set else 'Not set' }}"
+                 {% if not secrets_enabled %}disabled{% endif %}
+               {% endif %}
+               class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs outline-none
+                      focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20
+                      disabled:bg-stone-100 disabled:text-stone-400">
+        <p class="mt-1 text-[11px] text-stone-400">{{ field.key }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+
+  <div class="sticky bottom-4 flex items-center justify-between rounded-xl border border-stone-200
+              bg-white/95 px-5 py-3 shadow-lg backdrop-blur">
+    <p class="text-xs text-stone-500">
+      Secrets are encrypted before they are stored and are never shown again.
+    </p>
+    <button type="submit"
+            class="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+      Save settings
+    </button>
+  </div>
+</form>
+
+<!-- Kitchen -->
+<section class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white">
+  <header class="border-b border-stone-200 bg-stone-50 px-5 py-3">
+    <h2 class="text-sm font-semibold">Kitchen &amp; delivery area</h2>
+    <p class="mt-0.5 text-xs text-stone-500">
+      The pickup address sent to Uber, and who you deliver to.
+    </p>
+  </header>
+
+  <form method="post" action="{{ url_for('admin_kitchen_save') }}" class="grid gap-4 p-5 sm:grid-cols-2">
+    {% set k = kitchen %}
+    <div class="sm:col-span-2">
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Kitchen name</label>
+      <input name="name" required value="{{ k.name if k else 'Shero Home Food' }}"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    </div>
+
+    <div class="sm:col-span-2">
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Street address</label>
+      <input name="address_line1" required value="{{ k.address_line1 if k else '' }}"
+             placeholder="6639 Cambria Terrace"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    </div>
+
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">City</label>
+      <input name="city" required value="{{ k.city if k else '' }}" placeholder="Elkridge"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="mb-1.5 block text-sm font-medium text-stone-700">State</label>
+        <input name="state" required value="{{ k.state if k else '' }}" placeholder="MD"
+               class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                      focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      </div>
+      <div>
+        <label class="mb-1.5 block text-sm font-medium text-stone-700">ZIP</label>
+        <input name="postal_code" required value="{{ k.postal_code if k else '' }}" placeholder="21075"
+               class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                      focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      </div>
+    </div>
+
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Latitude</label>
+      <input name="latitude" required inputmode="decimal"
+             value="{{ k.latitude if k else '' }}" placeholder="39.2073"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    </div>
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Longitude</label>
+      <input name="longitude" required inputmode="decimal"
+             value="{{ k.longitude if k else '' }}" placeholder="-76.7147"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    </div>
+    <p class="-mt-2 text-[11px] text-stone-400 sm:col-span-2">
+      Right-click the kitchen in Google Maps and choose the coordinates to copy them.
+      These drive the delivery-area check and the Uber pickup.
+    </p>
+
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Delivery area rule</label>
+      <select name="service_area_mode"
+              class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                     focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+        {% for value, label in [('radius','Within a radius'),('zips','Only these ZIP codes'),('both','Radius AND ZIP list')] %}
+          <option value="{{ value }}" {% if k and k.service_area_mode == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Radius (km)</label>
+      <input name="delivery_radius_km" inputmode="decimal"
+             value="{{ k.delivery_radius_km if k else 15 }}"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    </div>
+
+    <div class="sm:col-span-2">
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">
+        ZIP codes served <span class="font-normal text-stone-400">(comma separated)</span>
+      </label>
+      <textarea name="service_zips" rows="2" placeholder="21075, 21045, 21044"
+                class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs outline-none
+                       focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">{{ k.service_zips | join(', ') if k and k.service_zips else '' }}</textarea>
+    </div>
+
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Kitchen WhatsApp</label>
+      <input name="kitchen_whatsapp" value="{{ k.kitchen_whatsapp if k and k.kitchen_whatsapp else '' }}"
+             placeholder="14438011011"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      <p class="mt-1 text-[11px] text-stone-400">Gets the new-paid-order alert.</p>
+    </div>
+
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Timezone</label>
+      <input name="timezone_name" value="{{ k.timezone if k else 'America/New_York' }}"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      <p class="mt-1 text-[11px] text-stone-400">Delivery slots are generated in this zone.</p>
+    </div>
+
+    <div class="sm:col-span-2 border-t border-stone-200 pt-4">
+      <h3 class="text-sm font-semibold text-stone-800">Opening hours</h3>
+      <p class="mt-1 text-[11px] text-stone-500">
+        Delivery slots exist only inside these windows. Leave a day blank to close it.
+        {% if k and not k.operating_hours %}
+          <span class="font-semibold text-amber-700">
+            No hours are set, so customers are currently told there are no slots.
+          </span>
+        {% endif %}
+      </p>
+
+      <div class="mt-3 grid gap-2">
+        {% set day_names = {'mon':'Monday','tue':'Tuesday','wed':'Wednesday','thu':'Thursday','fri':'Friday','sat':'Saturday','sun':'Sunday'} %}
+        {% for key, label in day_names.items() %}
+          {# operating_hours is {"mon": [["11:00","21:00"]]} - first window only #}
+          {% set window = (k.operating_hours.get(key) if k and k.operating_hours else None) %}
+          {% set opens = window[0][0] if window else '' %}
+          {% set closes = window[0][1] if window else '' %}
+          <div class="flex items-center gap-3">
+            <span class="w-24 text-sm text-stone-600">{{ label }}</span>
+            <input type="time" name="hours_{{ key }}_open" value="{{ opens }}"
+                   class="rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none
+                          focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            <span class="text-xs text-stone-400">to</span>
+            <input type="time" name="hours_{{ key }}_close" value="{{ closes }}"
+                   class="rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none
+                          focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Slot length (minutes)</label>
+      <input name="slot_length_minutes" inputmode="numeric"
+             value="{{ k.slot_length_minutes if k else 60 }}"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    </div>
+
+    <div>
+      <label class="mb-1.5 block text-sm font-medium text-stone-700">Orders per slot</label>
+      <input name="slot_capacity" inputmode="numeric"
+             value="{{ k.slot_capacity if k else 4 }}"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      <p class="mt-1 text-[11px] text-stone-400">How many deliveries the kitchen can handle at once.</p>
+    </div>
+
+    <div class="sm:col-span-2">
+      <button class="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+        Save kitchen
+      </button>
+    </div>
+  </form>
+</section>
+
+{% endblock %}

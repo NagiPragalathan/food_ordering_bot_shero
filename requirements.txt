@@ -1,0 +1,42 @@
+# --- Web framework -----------------------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# Admin dashboard: server-rendered templates + form posts + signed sessions.
+jinja2==3.1.5
+python-multipart==0.0.20
+itsdangerous==2.2.0
+
+# --- Config / validation -----------------------------------------------------
+pydantic==2.10.5
+pydantic-settings==2.7.1
+email-validator==2.2.0
+
+# --- Database ----------------------------------------------------------------
+SQLAlchemy[asyncio]==2.0.37
+asyncpg==0.30.0
+alembic==1.14.1
+
+# --- HTTP integrations -------------------------------------------------------
+httpx==0.28.1
+tenacity==9.0.0
+
+# --- Payments ----------------------------------------------------------------
+stripe==11.4.1
+
+# --- Admin credential storage ------------------------------------------------
+# Fernet encryption for secrets saved through the settings page, and password
+# hashing for admin logins.
+cryptography==44.0.0
+argon2-cffi==23.1.0
+
+# --- Scheduling (payment reminder / link expiry / slot release) --------------
+APScheduler==3.11.0
+
+# --- Logging -----------------------------------------------------------------
+structlog==25.1.0
+
+# --- Tests -------------------------------------------------------------------
+pytest==8.3.4
+pytest-asyncio==0.25.2
+respx==0.22.0
+aiosqlite==0.20.0

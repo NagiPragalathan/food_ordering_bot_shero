@@ -1,0 +1,53 @@
+{# Shared UI bits, so cards and badges look the same on every page. #}
+
+{% macro stat(label, value, sub=None, tone='default') %}
+<div class="rounded-xl border border-stone-200 bg-white p-4">
+  <div class="text-xs font-medium uppercase tracking-wide text-stone-500">{{ label }}</div>
+  <div class="mt-1.5 text-2xl font-semibold tabular-nums
+    {% if tone == 'good' %}text-emerald-700{% elif tone == 'warn' %}text-amber-700{% else %}text-stone-900{% endif %}">
+    {{ value }}
+  </div>
+  {% if sub %}<div class="mt-0.5 text-xs text-stone-500">{{ sub }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro badge(text, tone='default') %}
+<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium
+  {% if tone == 'good' %}bg-emerald-100 text-emerald-800
+  {% elif tone == 'warn' %}bg-amber-100 text-amber-800
+  {% elif tone == 'bad' %}bg-red-100 text-red-800
+  {% elif tone == 'info' %}bg-blue-100 text-blue-800
+  {% else %}bg-stone-100 text-stone-700{% endif %}">{{ text }}</span>
+{% endmacro %}
+
+{% macro stage_badge(stage) %}
+  {% if stage in ('Delivered',) %}{{ badge(stage, 'good') }}
+  {% elif stage in ('Out for Delivery', 'Sent to Kitchen') %}{{ badge(stage, 'info') }}
+  {% elif stage in ('Paid & Slot Booked',) %}{{ badge(stage, 'good') }}
+  {% elif stage in ('Cancelled', 'Refunded') %}{{ badge(stage, 'bad') }}
+  {% elif stage in ('Pending Payment',) %}{{ badge(stage, 'warn') }}
+  {% else %}{{ badge(stage) }}{% endif %}
+{% endmacro %}
+
+{% macro payment_badge(status) %}
+  {% if status == 'paid' %}{{ badge('Paid', 'good') }}
+  {% elif status == 'failed' %}{{ badge('Failed', 'bad') }}
+  {% elif status == 'expired' %}{{ badge('Expired', 'warn') }}
+  {% elif status == 'refunded' %}{{ badge('Refunded', 'bad') }}
+  {% elif status == 'link_sent' %}{{ badge('Awaiting payment', 'warn') }}
+  {% else %}{{ badge('Not started') }}{% endif %}
+{% endmacro %}
+
+{% macro card(title, subtitle=None) %}
+<section class="rounded-xl border border-stone-200 bg-white">
+  <header class="border-b border-stone-200 px-5 py-3.5">
+    <h2 class="text-sm font-semibold">{{ title }}</h2>
+    {% if subtitle %}<p class="mt-0.5 text-xs text-stone-500">{{ subtitle }}</p>{% endif %}
+  </header>
+  <div class="p-5">{{ caller() }}</div>
+</section>
+{% endmacro %}
+
+{% macro empty(message) %}
+<div class="py-10 text-center text-sm text-stone-400">{{ message }}</div>
+{% endmacro %}

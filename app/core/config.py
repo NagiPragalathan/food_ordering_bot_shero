@@ -1,0 +1,195 @@
+"""Typed application settings.
+
+Everything the service needs comes from the environment (see `.env.example`).
+Nothing is hardcoded: credentials, base URLs and business rules are all here so
+a deployment can be re-pointed (test -> live Stripe, zoho.com -> zoho.in)
+without touching code.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field, computed_field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+Environment = Literal["development", "staging", "production"]
+SourceMode = Literal["local", "remote"]
+# How a customer browses: a link to the web storefront, or WhatsApp lists.
+OrderMode = Literal["web", "chat"]
+DistanceMode = Literal["haversine", "google_matrix"]
+
+# Zoho runs region-isolated stacks; the OAuth and API hosts must match the data
+# centre the client's org actually lives in, otherwise every call 401s.
+ZOHO_HOSTS: dict[str, tuple[str, str]] = {
+    "com": ("https://accounts.zoho.com", "https://www.zohoapis.com"),
+    "in": ("https://accounts.zoho.in", "https://www.zohoapis.in"),
+    "eu": ("https://accounts.zoho.eu", "https://www.zohoapis.eu"),
+    "au": ("https://accounts.zoho.com.au", "https://www.zohoapis.com.au"),
+    "jp": ("https://accounts.zoho.jp", "https://www.zohoapis.jp"),
+    "ca": ("https://accounts.zohocloud.ca", "https://www.zohoapis.ca"),
+}
+
+
+def is_unset(value: str | None) -> bool:
+    """True when a setting is blank or is obviously a placeholder.
+
+    python-dotenv keeps everything after `=` as the value, so a line like
+    `KEY=    # [REQUIRED] paste it here` silently sets KEY to that comment.
+    Without this check the readiness probe would report a completely
+    unconfigured deployment as ready.
+    """
+    text = (value or "").strip()
+    if not text:
+        return True
+    # A comment that leaked in as a value.
+    if text.startswith("#"):
+        return True
+    # Common placeholder spellings left behind in a copied template.
+    lowered = text.lower()
+    return lowered in {
+        "changeme", "change-me", "todo", "tbd", "xxx", "none", "null",
+        "your-key-here", "<your-key>", "placeholder",
+    }
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False
+    )
+
+    # --- Application ---------------------------------------------------------
+    app_env: Environment = "development"
+    log_level: str = "INFO"
+    enable_scheduler: bool = True
+    public_base_url: str = "http://localhost:8000"
+    pay_redirect_base_url: str = "http://localhost:8000"
+
+    # --- Database ------------------------------------------------------------
+    database_url: str = "postgresql+asyncpg://shero:shero@localhost:5432/shero_bot"
+
+    # --- Gallabox ------------------------------------------------------------
+    gallabox_api_key: str = ""
+    gallabox_api_secret: str = ""
+    gallabox_channel_id: str = ""
+    gallabox_base_url: str = "https://server.gallabox.com/devapi"
+    gallabox_webhook_token: str = ""
+
+    # --- Ops API (outlet staff marking orders) -------------------------------
+    ops_api_key: str = ""
+
+    # --- Admin dashboard -----------------------------------------------------
+    admin_session_secret: str = ""
+    admin_session_hours: int = 12
+    # Fernet key encrypting secrets saved through the Settings page.
+    settings_encryption_key: str = ""
+    # Bootstrap login, used once to create the first admin user.
+    admin_bootstrap_email: str = ""
+    admin_bootstrap_password: str = ""
+
+    # --- Meta ----------------------------------------------------------------
+    meta_graph_version: str = "v21.0"
+    meta_catalog_id: str = ""
+    meta_system_user_token: str = ""
+    meta_catalog_cache_ttl_seconds: int = 900
+
+    # --- Zoho ----------------------------------------------------------------
+    zoho_client_id: str = ""
+    zoho_client_secret: str = ""
+    zoho_refresh_token: str = ""
+    zoho_data_center: str = "com"
+    zoho_orders_module: str = "Orders"
+
+    # --- Uber Direct ---------------------------------------------------------
+    uber_customer_id: str = ""
+    uber_client_id: str = ""
+    uber_client_secret: str = ""
+    uber_scope: str = "eats.deliveries"
+    uber_auth_url: str = "https://auth.uber.com/oauth/v2/token"
+    uber_api_base_url: str = "https://api.uber.com"
+
+    # --- Stripe --------------------------------------------------------------
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_currency: str = "usd"
+    payment_link_ttl_minutes: int = 30
+    payment_reminder_minutes: int = 15
+
+    # --- Geo -----------------------------------------------------------------
+    google_maps_api_key: str = ""
+    distance_mode: DistanceMode = "haversine"
+    geocoder_country: str = "US"
+
+    # --- Client backend adapters ---------------------------------------------
+    order_mode: OrderMode = "web"
+    outlet_source: SourceMode = "local"
+    slot_source: SourceMode = "local"
+    client_backend_base_url: str = ""
+    client_backend_api_key: str = ""
+
+    # --- Business rules ------------------------------------------------------
+    # Stand-in delivery fee for local testing, used only when Uber is
+    # unconfigured AND app_env is not "production". 0 disables it.
+    delivery_fee_fallback: float = Field(default=0.0, ge=0)
+    tax_percent: float = Field(default=0.0, ge=0, le=100)
+    default_delivery_radius_km: float = Field(default=10.0, gt=0)
+    slot_hold_minutes: int = 30
+    feedback_delay_minutes: int = 30
+
+    # --- Derived -------------------------------------------------------------
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def zoho_accounts_url(self) -> str:
+        return ZOHO_HOSTS.get(self.zoho_data_center, ZOHO_HOSTS["com"])[0]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def zoho_api_url(self) -> str:
+        return ZOHO_HOSTS.get(self.zoho_data_center, ZOHO_HOSTS["com"])[1]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def meta_graph_url(self) -> str:
+        return f"https://graph.facebook.com/{self.meta_graph_version}"
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
+
+    def missing_credentials(self) -> list[str]:
+        """Names of credentials that are still blank or obviously unfilled.
+
+        Used by the /health/readiness probe and by `scripts/check_config.py` so
+        a half-configured deployment fails loudly instead of at 3am on a live
+        customer's payment.
+        """
+        required = {
+            "GALLABOX_API_KEY": self.gallabox_api_key,
+            "GALLABOX_API_SECRET": self.gallabox_api_secret,
+            "GALLABOX_CHANNEL_ID": self.gallabox_channel_id,
+            "GALLABOX_WEBHOOK_TOKEN": self.gallabox_webhook_token,
+            "META_CATALOG_ID": self.meta_catalog_id,
+            "META_SYSTEM_USER_TOKEN": self.meta_system_user_token,
+            "ZOHO_CLIENT_ID": self.zoho_client_id,
+            "ZOHO_CLIENT_SECRET": self.zoho_client_secret,
+            "ZOHO_REFRESH_TOKEN": self.zoho_refresh_token,
+            "UBER_CUSTOMER_ID": self.uber_customer_id,
+            "UBER_CLIENT_ID": self.uber_client_id,
+            "UBER_CLIENT_SECRET": self.uber_client_secret,
+            "STRIPE_SECRET_KEY": self.stripe_secret_key,
+            "STRIPE_WEBHOOK_SECRET": self.stripe_webhook_secret,
+            "OPS_API_KEY": self.ops_api_key,
+            "ADMIN_SESSION_SECRET": self.admin_session_secret,
+            "SETTINGS_ENCRYPTION_KEY": self.settings_encryption_key,
+        }
+        return sorted(name for name, value in required.items() if is_unset(value))
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
