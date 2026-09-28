@@ -8,12 +8,15 @@
 
 {% block actions %}
 <a href="{{ url_for('admin_import') }}"
-   class="rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700">
+   class="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50">
   Import from sheet
 </a>
 {% endblock %}
 
 {% block content %}
+
+{# Every form that can carry a file uses multipart; the plain ones do not need it. #}
+{% set back = '?cuisine=' ~ (selected.slug if selected else '') %}
 
 <div class="mb-5 flex flex-wrap items-center gap-2">
   {% for c in cuisines %}
@@ -37,19 +40,181 @@
   </form>
 </div>
 
+{# ---------- add things ---------- #}
+<div class="mb-5 space-y-3">
+
+  {# Add a dish. Needs a category to put it in, so it says so when there is none. #}
+  <details class="group overflow-hidden rounded-xl border border-stone-200 bg-white">
+    <summary class="flex cursor-pointer list-none items-center gap-2 px-5 py-3 hover:bg-stone-50
+                    [&::-webkit-details-marker]:hidden">
+      <svg class="h-4 w-4 shrink-0 text-brand-600 transition-transform group-open:rotate-45"
+           viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M10 4v12M4 10h12" stroke-linecap="round"/>
+      </svg>
+      <span class="text-sm font-semibold">Add a dish</span>
+      <span class="text-xs text-stone-500">
+        {% if selected %}to {{ selected.name }}{% else %}pick a cuisine first{% endif %}
+      </span>
+    </summary>
+
+    <div class="border-t border-stone-200 px-5 py-4">
+      {% if categories %}
+      <form method="post" enctype="multipart/form-data"
+            action="{{ url_for('admin_menu_item_create') }}{{ back }}"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+
+        <label class="block text-xs font-medium text-stone-600 sm:col-span-2 lg:col-span-1">
+          Dish name *
+          <input name="name" required maxlength="200" placeholder="Murungaikai Sambar"
+                 class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                        outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+        </label>
+
+        <label class="block text-xs font-medium text-stone-600">
+          Category *
+          <select name="category_id" required
+                  class="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal
+                         outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            {% for c in categories %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block text-xs font-medium text-stone-600">
+            Price *
+            <input name="price" required inputmode="decimal" placeholder="16.53"
+                   class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal tabular-nums
+                          outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          </label>
+          <label class="block text-xs font-medium text-stone-600">
+            Cost
+            <input name="cost_price" inputmode="decimal" placeholder="10.78"
+                   class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal tabular-nums
+                          outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          </label>
+        </div>
+
+        <label class="block text-xs font-medium text-stone-600 sm:col-span-2 lg:col-span-3">
+          Description
+          <textarea name="description" rows="2" placeholder="16 oz pack, serves 2-3"
+                    class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                           outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"></textarea>
+        </label>
+
+        <label class="block text-xs font-medium text-stone-600">
+          Pack size
+          <input name="pack_size" maxlength="80" placeholder="16 oz"
+                 class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                        outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+        </label>
+
+        <label class="block text-xs font-medium text-stone-600">
+          Serves
+          <input name="serves" maxlength="80" placeholder="2-3 people"
+                 class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                        outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+        </label>
+
+        <label class="block text-xs font-medium text-stone-600">
+          Photo
+          <input type="file" name="photo" accept="image/*"
+                 class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-normal
+                        file:mr-2 file:rounded file:border-0 file:bg-stone-100 file:px-2 file:py-1
+                        file:text-xs file:font-medium hover:file:bg-stone-200">
+          <span class="mt-1 block text-[11px] font-normal text-stone-400">
+            or paste a link below
+          </span>
+        </label>
+
+        <label class="block text-xs font-medium text-stone-600 sm:col-span-2">
+          Photo link
+          <input name="image_url" placeholder="https://..."
+                 class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                        outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+        </label>
+
+        <div class="flex items-end justify-between gap-3 sm:col-span-2 lg:col-span-3">
+          <label class="flex items-center gap-2 text-xs text-stone-600">
+            <input type="checkbox" name="is_available" checked
+                   class="h-3.5 w-3.5 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+            Available to order straight away
+          </label>
+          <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+            Add dish
+          </button>
+        </div>
+      </form>
+      {% else %}
+        <p class="text-sm text-stone-500">
+          {% if selected %}
+            {{ selected.name }} has no categories yet. Add one below first — a dish
+            has to live in a category.
+          {% else %}
+            Choose a cuisine above, or create one below.
+          {% endif %}
+        </p>
+      {% endif %}
+    </div>
+  </details>
+
+  {# Add a category / a cuisine. Two small forms, side by side. #}
+  <div class="grid gap-3 sm:grid-cols-2">
+    <form method="post" action="{{ url_for('admin_category_create') }}{{ back }}"
+          class="flex items-end gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3">
+      <input type="hidden" name="cuisine_id" value="{{ selected.id if selected else '' }}">
+      <label class="flex-1 text-xs font-medium text-stone-600">
+        New category {% if selected %}in {{ selected.name }}{% endif %}
+        <input name="name" required maxlength="120" placeholder="Festival Specials"
+               {% if not selected %}disabled{% endif %}
+               class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-normal
+                      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20
+                      disabled:bg-stone-50 disabled:text-stone-400">
+      </label>
+      <button {% if not selected %}disabled{% endif %}
+              class="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-semibold hover:bg-stone-50
+                     disabled:cursor-not-allowed disabled:text-stone-400">
+        Add
+      </button>
+    </form>
+
+    <form method="post" action="{{ url_for('admin_cuisine_create') }}{{ back }}"
+          class="flex items-end gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3">
+      <label class="flex-1 text-xs font-medium text-stone-600">
+        New cuisine
+        <input name="name" required maxlength="80" placeholder="North Indian"
+               class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-normal
+                      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      </label>
+      <button class="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-semibold hover:bg-stone-50">
+        Add
+      </button>
+    </form>
+  </div>
+</div>
+
 {% if selected %}
-<div class="mb-5 flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3">
+<div class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3">
   <div class="text-sm">
     <span class="font-semibold">{{ selected.name }}</span>
     <span class="text-stone-500">
       — {% if selected.is_active %}visible in WhatsApp{% else %}hidden from customers{% endif %}
     </span>
   </div>
-  <form method="post" action="{{ url_for('admin_cuisine_toggle', cuisine_id=selected.id) }}">
-    <button class="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium hover:bg-stone-50">
-      {% if selected.is_active %}Hide from menu{% else %}Show in menu{% endif %}
-    </button>
-  </form>
+  <div class="flex items-center gap-2">
+    <form method="post" action="{{ url_for('admin_cuisine_toggle', cuisine_id=selected.id) }}">
+      <button class="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-medium hover:bg-stone-50">
+        {% if selected.is_active %}Hide from menu{% else %}Show in menu{% endif %}
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('admin_cuisine_delete', cuisine_id=selected.id) }}"
+          onsubmit="return confirm('Delete {{ selected.name }} and every dish in it? This cannot be undone.')">
+      <button class="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50">
+        Delete cuisine
+      </button>
+    </form>
+  </div>
 </div>
 {% endif %}
 
@@ -75,51 +240,167 @@
 
       <div class="divide-y divide-stone-100">
       {% for item in items %}
-        <form method="post" action="{{ url_for('admin_menu_item_update', item_id=item.id) }}"
-              class="flex flex-wrap items-center gap-3 px-5 py-3 hover:bg-stone-50/60">
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <span class="truncate text-sm font-medium">{{ item.name }}</span>
-              {% if not item.is_available %}{{ ui.badge('hidden', 'warn') }}{% endif %}
-            </div>
-            <div class="mt-0.5 truncate text-xs text-stone-500">
-              {% if item.pack_size %}{{ item.pack_size }}{% endif %}
-              {% if item.serves %} · {{ item.serves }}{% endif %}
-              {% if item.cost_price %}
-                · cost ${{ '%.2f' | format(item.cost_price) }}
-                {% if item.margin_percent %}
-                  <span class="text-emerald-700">({{ item.margin_percent }}% margin)</span>
+        {# A row is a plain div holding sibling forms: HTML forbids nesting a
+           form inside another, so edit and delete cannot share one. #}
+        <div class="px-5 py-3 hover:bg-stone-50/60">
+          <div class="flex flex-wrap items-center gap-3">
+            {% if item.image_url %}
+              <img src="{{ item.image_url }}" alt="" loading="lazy"
+                   class="h-10 w-10 shrink-0 rounded-lg object-cover">
+            {% else %}
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg
+                          bg-stone-100 text-[10px] text-stone-400">no photo</div>
+            {% endif %}
+
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate text-sm font-medium">{{ item.name }}</span>
+                {% if not item.is_available %}{{ ui.badge('hidden', 'warn') }}{% endif %}
+              </div>
+              <div class="mt-0.5 truncate text-xs text-stone-500">
+                {% if item.pack_size %}{{ item.pack_size }}{% endif %}
+                {% if item.serves %} · {{ item.serves }}{% endif %}
+                {% if item.cost_price %}
+                  · cost ${{ '%.2f' | format(item.cost_price) }}
+                  {% if item.margin_percent %}
+                    <span class="text-emerald-700">({{ item.margin_percent }}% margin)</span>
+                  {% endif %}
                 {% endif %}
-              {% endif %}
+              </div>
             </div>
+
+            {# Quick edit: price and availability only. It deliberately sends no
+               other field, so saving here cannot blank a description. #}
+            <form method="post" action="{{ url_for('admin_menu_item_update', item_id=item.id) }}"
+                  class="flex items-center gap-3">
+              <label class="flex items-center gap-1.5 text-xs text-stone-500">
+                <input type="checkbox" name="is_available" {% if item.is_available %}checked{% endif %}
+                       class="h-3.5 w-3.5 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+                Available
+              </label>
+              <div class="flex items-center gap-1">
+                <span class="text-sm text-stone-400">$</span>
+                <input name="price" value="{{ '%.2f' | format(item.price) }}"
+                       inputmode="decimal"
+                       class="w-20 rounded-lg border border-stone-300 px-2 py-1 text-right text-sm tabular-nums
+                              outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+              </div>
+              <button class="rounded-lg border border-stone-300 px-2.5 py-1 text-xs font-medium hover:bg-stone-100">
+                Save
+              </button>
+            </form>
+
+            <form method="post" action="{{ url_for('admin_menu_item_delete', item_id=item.id) }}"
+                  onsubmit="return confirm('Delete {{ item.name }} from the menu? This cannot be undone.')">
+              <button title="Delete this dish"
+                      class="rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-red-700
+                             hover:border-red-200 hover:bg-red-50">
+                Delete
+              </button>
+            </form>
           </div>
 
-          <label class="flex items-center gap-1.5 text-xs text-stone-500">
-            <input type="checkbox" name="is_available" {% if item.is_available %}checked{% endif %}
-                   class="h-3.5 w-3.5 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
-            Available
-          </label>
+          {# Everything else about the dish, folded away until it is needed. #}
+          <details class="mt-2">
+            <summary class="cursor-pointer list-none text-xs text-brand-700 hover:underline
+                            [&::-webkit-details-marker]:hidden">
+              Edit full details
+            </summary>
+            <form method="post" enctype="multipart/form-data"
+                  action="{{ url_for('admin_menu_item_update', item_id=item.id) }}"
+                  class="mt-3 grid gap-3 rounded-lg bg-stone-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
 
-          <div class="flex items-center gap-1">
-            <span class="text-sm text-stone-400">$</span>
-            <input name="price" value="{{ '%.2f' | format(item.price) }}"
-                   inputmode="decimal"
-                   class="w-20 rounded-lg border border-stone-300 px-2 py-1 text-right text-sm tabular-nums
-                          outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-          </div>
+              <label class="block text-xs font-medium text-stone-600 lg:col-span-2">
+                Dish name
+                <input name="name" value="{{ item.name }}" required maxlength="200"
+                       class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                              outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+              </label>
 
-          <button class="rounded-lg border border-stone-300 px-2.5 py-1 text-xs font-medium hover:bg-stone-100">
-            Save
-          </button>
-        </form>
+              <div class="grid grid-cols-2 gap-3">
+                <label class="block text-xs font-medium text-stone-600">
+                  Price
+                  <input name="price" value="{{ '%.2f' | format(item.price) }}" required inputmode="decimal"
+                         class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal tabular-nums
+                                outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+                </label>
+                <label class="block text-xs font-medium text-stone-600">
+                  Cost
+                  <input name="cost_price" inputmode="decimal"
+                         value="{% if item.cost_price is not none %}{{ '%.2f' | format(item.cost_price) }}{% endif %}"
+                         class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal tabular-nums
+                                outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+                </label>
+              </div>
+
+              <label class="block text-xs font-medium text-stone-600 sm:col-span-2 lg:col-span-3">
+                Description
+                <textarea name="description" rows="2"
+                          class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                                 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">{{ item.description or '' }}</textarea>
+              </label>
+
+              <label class="block text-xs font-medium text-stone-600">
+                Pack size
+                <input name="pack_size" value="{{ item.pack_size or '' }}" maxlength="80"
+                       class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                              outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+              </label>
+
+              <label class="block text-xs font-medium text-stone-600">
+                Serves
+                <input name="serves" value="{{ item.serves or '' }}" maxlength="80"
+                       class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal
+                              outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+              </label>
+
+              <label class="block text-xs font-medium text-stone-600">
+                Replace photo
+                <input type="file" name="photo" accept="image/*"
+                       class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-normal
+                              file:mr-2 file:rounded file:border-0 file:bg-stone-200 file:px-2 file:py-1
+                              file:text-xs file:font-medium hover:file:bg-stone-300">
+                <span class="mt-1 block text-[11px] font-normal text-stone-400">
+                  leave empty to keep the current one
+                </span>
+              </label>
+
+              <div class="flex items-end justify-between gap-3 sm:col-span-2 lg:col-span-3">
+                <label class="flex items-center gap-2 text-xs text-stone-600">
+                  <input type="checkbox" name="is_available" {% if item.is_available %}checked{% endif %}
+                         class="h-3.5 w-3.5 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+                  Available
+                </label>
+                <button class="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700">
+                  Save all details
+                </button>
+              </div>
+            </form>
+          </details>
+        </div>
       {% endfor %}
       </div>
+
+      {% if items and items[0].category %}
+      <div class="border-t border-stone-100 bg-stone-50/60 px-5 py-2 text-right">
+        <form method="post"
+              action="{{ url_for('admin_category_delete', category_id=items[0].category.id) }}"
+              onsubmit="return confirm('Delete the {{ category }} category and all {{ items | length }} dish(es) in it? This cannot be undone.')">
+          <button class="text-xs font-medium text-red-700 hover:underline">
+            Delete the {{ category }} category
+          </button>
+        </form>
+      </div>
+      {% endif %}
     </details>
   {% endfor %}
   </div>
 {% else %}
   <div class="rounded-xl border border-dashed border-stone-300 bg-white py-16 text-center">
-    <p class="text-sm text-stone-500">No menu items yet.</p>
+    <p class="text-sm text-stone-500">No menu items here yet.</p>
+    <p class="mt-1 text-xs text-stone-400">
+      Use <span class="font-medium">Add a dish</span> above, or import your whole sheet at once.
+    </p>
     <a href="{{ url_for('admin_import') }}"
        class="mt-3 inline-block rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
       Import from your Google Sheet

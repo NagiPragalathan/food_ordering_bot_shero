@@ -24,6 +24,7 @@ from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
 from app.db.models import AdminUser, Outlet
 from app.db.session import get_session
+from app.integrations.zoho import oauth as zoho_oauth
 from app.services import connection_tests, zoho_connect
 # Same key order slot generation reads, so the two cannot drift apart.
 from app.services.slots import WEEKDAY_KEYS
@@ -75,15 +76,12 @@ async def settings_page(
         "missing_credentials": settings.missing_credentials(),
         # Zoho is connected by OAuth rather than by pasting a refresh token.
         "zoho": {
-            "centres": zoho_connect.DATA_CENTRES,
-            "data_centre": settings.zoho_data_center,
-            "client_id": "" if is_unset(settings.zoho_client_id)
-                         else settings.zoho_client_id,
-            # The secret itself never reaches the browser, only whether it is set.
-            "secret_set": not is_unset(settings.zoho_client_secret),
-            "orders_module": settings.zoho_orders_module or "",
+            # The client id and secret live in .env; the card is one button.
+            "client_ready": not (is_unset(settings.zoho_client_id)
+                                 or is_unset(settings.zoho_client_secret)),
             "connected": not is_unset(settings.zoho_refresh_token),
-            "redirect_uri": zoho_connect.redirect_uri(),
+            "centres": zoho_connect.DATA_CENTRES,
+            "data_centre": settings.zoho_data_center or "com",
         },
     })
 
@@ -123,36 +121,20 @@ async def save_settings(
 async def zoho_start(
     request: Request,
     zoho_data_center: str = Form(default="com"),
-    zoho_client_id: str = Form(default=""),
-    zoho_client_secret: str = Form(default=""),
-    zoho_orders_module: str = Form(default=""),
-    session: AsyncSession = Depends(get_session),
     current_user: AdminUser = Depends(require_admin),
 ):
-    """Save the client details, then hand the admin to Zoho's consent screen."""
-    url = str(request.url_for("admin_settings"))
+    """Hand the admin to Zoho's consent screen, on the chosen domain.
 
+    The callback prefers the data centre Zoho reports, and falls back to the
+    one chosen here (carried in a cookie with the state).
+    """
+    url = str(request.url_for("admin_settings"))
     centre = zoho_data_center.strip().lower()
     if centre not in dict(zoho_connect.DATA_CENTRES):
-        return redirect(url, flash=("error", f"Unknown data centre '{centre}'."))
-
-    # The secret is blank when it is already stored, so `save_many` skips it.
-    try:
-        await save_many(session, {
-            "ZOHO_CLIENT_ID": zoho_client_id.strip(),
-            "ZOHO_CLIENT_SECRET": zoho_client_secret.strip(),
-            "ZOHO_DATA_CENTER": centre,
-            "ZOHO_ORDERS_MODULE": zoho_orders_module.strip() or "Orders",
-        }, updated_by=current_user.email)
-    except SecretsUnavailable:
+        return redirect(url, flash=("error", f"Unknown Zoho domain '{centre}'."))
+    if is_unset(settings.zoho_client_id) or is_unset(settings.zoho_client_secret):
         return redirect(url, flash=(
-            "error", "Set SETTINGS_ENCRYPTION_KEY before storing Zoho credentials."))
-
-    client_id = (zoho_client_id.strip() or settings.zoho_client_id or "").strip()
-    if is_unset(client_id):
-        return redirect(url, flash=("error", "Enter the Zoho Client ID first."))
-    if is_unset(settings.zoho_client_secret):
-        return redirect(url, flash=("error", "Enter the Zoho Client Secret first."))
+            "error", "Add ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET to .env first."))
 
     # Carried through Zoho and checked on the way back, so a callback that did
     # not originate here is rejected.
@@ -160,10 +142,12 @@ async def zoho_start(
     log.info("zoho_connect_started", centre=centre, by=current_user.email)
 
     response = RedirectResponse(
-        zoho_connect.authorize_url(client_id, centre, state),
+        zoho_connect.authorize_url(settings.zoho_client_id.strip(), centre, state),
         status_code=status.HTTP_303_SEE_OTHER,
     )
     response.set_cookie("zoho_oauth_state", state, max_age=900, httponly=True,
+                        samesite="lax")
+    response.set_cookie("zoho_oauth_centre", centre, max_age=900, httponly=True,
                         samesite="lax")
     return response
 
@@ -193,12 +177,23 @@ async def zoho_callback(
     if not code:
         return redirect(url, flash=("error", "Zoho sent no authorisation code."))
 
+    # Where the account lives (us, in, eu, ...). The code can only be
+    # exchanged there, and every later API call goes there too.
+    location = request.query_params.get("location")
+    centre = zoho_connect.centre_from_location(location)
+    if centre is None:
+        if location:
+            log.warning("zoho_callback_unknown_location", location=location)
+        chosen = request.cookies.get("zoho_oauth_centre", "")
+        centre = chosen if chosen in dict(zoho_connect.DATA_CENTRES) \
+            else (settings.zoho_data_center or "com")
+
     try:
         refresh_token = await zoho_connect.exchange_code(
-            code, settings.zoho_client_id, settings.zoho_client_secret,
-            settings.zoho_data_center,
+            code, settings.zoho_client_id, settings.zoho_client_secret, centre,
         )
-        await save_many(session, {"ZOHO_REFRESH_TOKEN": refresh_token},
+        await save_many(session, {"ZOHO_REFRESH_TOKEN": refresh_token,
+                                  "ZOHO_DATA_CENTER": centre},
                         updated_by=current_user.email)
     except IntegrationError as exc:
         log.error("zoho_connect_failed", error=exc.message)
@@ -207,11 +202,13 @@ async def zoho_callback(
         return redirect(url, flash=(
             "error", "Set SETTINGS_ENCRYPTION_KEY before storing the token."))
 
-    log.info("zoho_connected", centre=settings.zoho_data_center,
-             by=current_user.email)
+    # A token cached from before (another account or data centre) is stale.
+    zoho_oauth.invalidate_token()
+    log.info("zoho_connected", centre=centre, by=current_user.email)
     response = redirect(url, flash=(
-        "success", f"Zoho connected on {settings.zoho_data_center}."))
+        "success", f"Zoho connected (data centre: zoho.{centre})."))
     response.delete_cookie("zoho_oauth_state")
+    response.delete_cookie("zoho_oauth_centre")
     return response
 
 

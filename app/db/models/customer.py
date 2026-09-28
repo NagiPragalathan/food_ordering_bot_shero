@@ -47,7 +47,8 @@ class Customer(Base, UUIDPrimaryKey, Timestamps):
     campaign_id: Mapped[str | None] = mapped_column(String(80))
     referral_payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
-    # Zoho linkage.
+    # Zoho linkage. Food customers are Leads in Shero's CRM; the contact id is
+    # unused there, where Contacts are Kitchen Partners (docs/zoho-setup.md).
     zoho_lead_id: Mapped[str | None] = mapped_column(String(40), index=True)
     zoho_contact_id: Mapped[str | None] = mapped_column(String(40), index=True)
     lead_stage: Mapped[str] = mapped_column(
@@ -67,3 +68,13 @@ class Customer(Base, UUIDPrimaryKey, Timestamps):
     def has_details(self) -> bool:
         """True once name and email are captured (spec steps 3-4)."""
         return bool(self.name and self.email)
+
+    @property
+    def greeting_name(self) -> str:
+        """What to put after "Hi" in a message.
+
+        A lead we contacted first has no name yet, and a template renders a
+        missing parameter as the empty string - "Hi , your order is ready".
+        Every outgoing greeting goes through here so that cannot happen.
+        """
+        return (self.name or "").strip() or "there"

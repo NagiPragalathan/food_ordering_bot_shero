@@ -124,6 +124,16 @@ async def list_items(session: AsyncSession, cuisine_slug: str,
     return [_to_option(item) for item in rows.scalars()]
 
 
+async def cuisine_slug_for(session: AsyncSession, retailer_id: str) -> str | None:
+    """The cuisine a dish belongs to, as Customer.cuisine_preference keeps it."""
+    return (await session.execute(
+        select(Cuisine.slug)
+        .join(Category, Category.cuisine_id == Cuisine.id)
+        .join(MenuItem, MenuItem.category_id == Category.id)
+        .where(MenuItem.retailer_id == retailer_id)
+    )).scalar_one_or_none()
+
+
 async def get_by_retailer_ids(session: AsyncSession,
                               retailer_ids: list[str]) -> dict[str, ItemOption]:
     """Look up cart lines. Unavailable items are deliberately excluded."""

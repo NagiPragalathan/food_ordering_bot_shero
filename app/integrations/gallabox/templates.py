@@ -18,6 +18,9 @@ from typing import Literal
 
 Category = Literal["UTILITY", "MARKETING"]
 ButtonKind = Literal["none", "dynamic_url", "quick_reply"]
+# Where a dynamic URL button points: the short payment redirect, or the web
+# ordering page (whose suffix is the customer's signed link token).
+UrlBase = Literal["pay", "order"]
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,7 @@ class TemplateSpec:
     button_kind: ButtonKind = "none"
     button_label: str | None = None
     quick_replies: tuple[str, ...] = field(default_factory=tuple)
+    url_base: UrlBase = "pay"
 
     @property
     def param_count(self) -> int:
@@ -67,9 +71,11 @@ PAYMENT_SUCCESS = TemplateSpec(
     category="UTILITY",
     trigger="Stripe payment confirmed (step 16)",
     params=("order_number", "amount", "outlet_name", "slot_label"),
+    # Ends on words, not on {{4}}: Meta rejects a body whose last thing is a
+    # variable, counting a trailing full stop as no ending at all.
     sample_body=(
         "Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} "
-        "for delivery at {{4}}."
+        "for delivery at {{4}}. Thank you for ordering with Shero!"
     ),
 )
 
@@ -140,9 +146,74 @@ FEEDBACK_REQUEST = TemplateSpec(
     category="MARKETING",
     trigger="30 minutes after delivery (step 19)",
     params=("order_number",),
-    sample_body="How was your Shero meal today? Rate your order #{{1}}.",
+    sample_body=(
+        "How was your Shero meal today? Rate order #{{1}} using the buttons below."
+    ),
     button_kind="quick_reply",
     quick_replies=("Great", "Good", "Poor"),
+)
+
+WELCOME = TemplateSpec(
+    name="shero_welcome",
+    category="MARKETING",
+    trigger="Business-initiated opener, outside the 24-hour window",
+    params=("customer_name",),
+    sample_body=(
+        "\U0001F44B Hi {{1}}! Welcome to *Shero Home Food* ❤️\U0001F1FA\U0001F1F8\n\n"
+        "Looking for a delicious Indian vegetarian meal delivered to your home? "
+        "\U0001F371\n\n"
+        "We make ordering simple. Tap the button below to browse our menu, "
+        "build your cart and pay securely."
+    ),
+    # A tapped button beats "reply ORDER": the payload reaches the engine as a
+    # button reply, which `_handle_global_intent` starts the flow on.
+    button_kind="quick_reply",
+    quick_replies=("Order Now",),
+)
+
+ORDER_SUMMARY = TemplateSpec(
+    name="order_summary",
+    category="UTILITY",
+    trigger="Web order confirmed - summary, then Pay Now / Change menu / Update location",
+    params=("customer_name", "order_number", "items", "delivery_address",
+            "slot_label", "amount"),
+    # Parameters cannot carry line breaks (Meta rejects them at send time), so
+    # the structure lives in the approved body and the items arrive as one
+    # comma-separated line.
+    sample_body=(
+        "Hi {{1}}, here is your Shero order #{{2}}.\n\n"
+        "*Items:* {{3}}\n"
+        "*Deliver to:* {{4}}\n"
+        "*Delivery:* {{5}}\n"
+        "*Total:* ${{6}}\n\n"
+        "Tap Pay Now to pay securely - the link is valid for 30 minutes. "
+        "Need a change? Use the buttons below."
+    ),
+    # Pay Now is button 0, so its URL suffix is sent as button parameter "0".
+    # The two quick replies arrive back as button replies carrying their text.
+    button_kind="dynamic_url",
+    button_label="Pay Now",
+    quick_replies=("Change menu", "Update location"),
+)
+
+MENU_LINK = TemplateSpec(
+    name="menu_link",
+    category="UTILITY",
+    trigger="Order Now / new link - the web menu, with Get new link on the same message",
+    params=(),
+    # A plain link message (cta_url) may carry only its one button. A template
+    # may mix a URL button with quick replies, which is the only way to have
+    # View Menu and Get new link on one message.
+    sample_body=(
+        "Here is our full menu \U0001F35B\n\n"
+        "Tap View Menu to browse all our dishes, add what you like to your cart "
+        "and choose a delivery time - we will send your payment link right back "
+        "here. The link is personal to you and works for a few hours."
+    ),
+    button_kind="dynamic_url",
+    button_label="View Menu",
+    quick_replies=("Get new link",),
+    url_base="order",
 )
 
 ALL_TEMPLATES: tuple[TemplateSpec, ...] = (
@@ -158,7 +229,14 @@ ALL_TEMPLATES: tuple[TemplateSpec, ...] = (
     FEEDBACK_REQUEST,
 )
 
-BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in ALL_TEMPLATES}
+# Everything this project creates on the WABA: the spec's ten, plus the
+# welcome opener (reaching customers before they write in), the web order
+# summary (Pay Now with Change menu / Update location) and the menu link
+# (View Menu with Get new link), none of which the spec lists.
+MANAGED_TEMPLATES: tuple[TemplateSpec, ...] = ALL_TEMPLATES + (
+    WELCOME, ORDER_SUMMARY, MENU_LINK)
+
+BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in MANAGED_TEMPLATES}
 
 
 def render(spec: TemplateSpec, *values: object, button_value: str | None = None) -> dict:
@@ -171,7 +249,9 @@ def render(spec: TemplateSpec, *values: object, button_value: str | None = None)
     if spec.button_kind == "dynamic_url" and not button_value:
         raise ValueError(f"template '{spec.name}' has a dynamic URL button and needs a button_value")
 
-    from app.integrations.gallabox.messages import template_message
+    from app.integrations.gallabox.messages import template_message, url_button_value
 
-    button_values = {"0": [button_value]} if button_value else None
+    # Every template here has its one URL button first (index 0); quick
+    # replies after it need no runtime value.
+    button_values = [url_button_value(0, button_value)] if button_value else None
     return template_message(spec.name, [str(v) for v in values], button_values=button_values)

@@ -182,6 +182,7 @@ async def find_orders_for_reminder(session: AsyncSession,
     result = await session.execute(
         select(Order).where(
             Order.payment_status == PaymentStatus.LINK_SENT,
+            Order.stage == OrderStage.PENDING_PAYMENT,
             Order.reminder_sent_at.is_(None),
             Order.created_at <= cutoff,
             Order.payment_link_expires_at > now,
@@ -192,11 +193,16 @@ async def find_orders_for_reminder(session: AsyncSession,
 
 async def find_expired_orders(session: AsyncSession,
                               now: datetime | None = None) -> list[Order]:
-    """Unpaid orders whose payment link has lapsed (spec step 15)."""
+    """Unpaid orders whose payment link has lapsed (spec step 15).
+
+    A cancelled order (changed by the customer, or never sent) is not
+    "abandoned" and gets no message.
+    """
     now = now or datetime.now(timezone.utc)
     result = await session.execute(
         select(Order).where(
             Order.payment_status == PaymentStatus.LINK_SENT,
+            Order.stage == OrderStage.PENDING_PAYMENT,
             Order.payment_link_expires_at <= now,
         )
     )

@@ -2,13 +2,14 @@
 
 Pasting a refresh token by hand means generating it in Zoho's API console,
 copying a `grant_token` within its 10-minute life, and exchanging it with
-curl. This does that exchange for the admin instead: pick a data centre, press
-Connect, approve on Zoho, and the refresh token is stored encrypted without
-ever being shown.
+curl. This does that exchange for the admin instead: press Connect, approve
+on Zoho, and the refresh token is stored encrypted without ever being shown.
 
-The data centre matters more than it looks. Zoho's data centres are isolated,
-so a `.in` org rejects credentials issued at `.com` with a generic error -
-hence the choice sits next to the button rather than in a text field.
+The data centre matters more than it looks: Zoho's data centres are isolated,
+so a `.in` org rejects calls made to `.com`. Nobody has to pick it, though.
+The consent screen starts at accounts.zoho.com, which signs in an account
+from any data centre (with Multi-DC enabled on the client), and Zoho's reply
+says where the account lives in its `location` parameter.
 """
 
 from __future__ import annotations
@@ -28,14 +29,29 @@ log = get_logger(__name__)
 # owner assignment, and read module metadata to validate custom fields.
 SCOPES = "ZohoCRM.modules.ALL,ZohoCRM.settings.ALL,ZohoCRM.users.READ"
 
+# The domain suffix picked next to Connect Zoho: where the consent screen
+# opens. Zoho's reply still has the final say (see centre_from_location).
 DATA_CENTRES = [
-    ("com", "zoho.com (US / global)"),
-    ("in", "zoho.in (India)"),
-    ("eu", "zoho.eu (Europe)"),
-    ("au", "zoho.com.au (Australia)"),
-    ("jp", "zoho.jp (Japan)"),
-    ("ca", "zohocloud.ca (Canada)"),
+    ("com", "zoho.com"),
+    ("in", "zoho.in"),
+    ("eu", "zoho.eu"),
+    ("au", "zoho.com.au"),
+    ("jp", "zoho.jp"),
+    ("ca", "zohocloud.ca"),
 ]
+
+# Zoho's `location` values -> our ZOHO_DATA_CENTER keys (see ZOHO_HOSTS).
+LOCATIONS = {"us": "com", "com": "com", "in": "in", "eu": "eu",
+             "au": "au", "jp": "jp", "ca": "ca"}
+
+
+def centre_from_location(location: str | None) -> str | None:
+    """The data centre Zoho's callback reports, or None if it is unknown.
+
+    Only mapped values count: the token exchange posts the client secret to
+    that data centre's accounts host, so it must never come from the URL.
+    """
+    return LOCATIONS.get((location or "").strip().lower())
 
 
 def accounts_host(data_centre: str) -> str:

@@ -19,9 +19,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.db.models import PaymentStatus
+from app.db.models import Customer, PaymentStatus
 from app.db.session import get_session
+from app.integrations.stripe_gw import checkout
+from app.services import order_link
 from app.services import orders as order_service
+from app.services import payments
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/pay", tags=["payment"])
@@ -54,6 +57,74 @@ async def payment_cancelled_page(order_number: str) -> HTMLResponse:
     )
 
 
+@router.get("/mock/{order_number}", response_class=HTMLResponse)
+async def mock_checkout_page(
+    order_number: str,
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    """Stand-in for Stripe while no key is set (see checkout.mock_mode)."""
+    order = await _mock_order(session, order_number)
+    if order is None:
+        return _page("Not found", "We could not find that order.", "", status=404)
+    if order.payment_status == PaymentStatus.PAID:
+        return _page("Already paid", "This test order is already marked paid.",
+                     order.order_number)
+    # Simulating the payment runs exactly what Stripe's webhook would: slot
+    # booked, Lead converted to a Contact, Order filed in Zoho, kitchen told.
+    button = (
+        f"<form method='post' action='/pay/mock/{html.escape(order.order_number)}/paid'>"
+        "<button style='margin-top:1.25rem;width:100%;padding:.8rem;border:0;"
+        "border-radius:10px;background:#2F7549;color:#fff;font-weight:600;"
+        "font-size:1rem;cursor:pointer'>Simulate successful payment</button></form>"
+    )
+    return _page(
+        "Test payment",
+        f"Amount: <b>{order.total:.2f} {html.escape(order.currency.upper())}</b><br>"
+        "This is a demo checkout - no card is charged.<br>"
+        "Real payments start once Stripe is connected." + button,
+        order.order_number,
+    )
+
+
+@router.post("/mock/{order_number}/paid", response_class=HTMLResponse)
+async def mock_payment_success(
+    order_number: str,
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    """Mark a test order paid, as the Stripe webhook would. Mock mode only."""
+    if not checkout.mock_mode():
+        # With a real key only Stripe may say an order is paid.
+        return _page("Not found", "That payment link is not valid.", "", status=404)
+    order = await _mock_order(session, order_number)
+    if order is None:
+        return _page("Not found", "We could not find that order.", "", status=404)
+    customer = await session.get(Customer, order.customer_id)
+    if customer is None:
+        log.error("mock_payment_no_customer", order_number=order.order_number)
+        return _page("Not found", "We could not find that order.", "", status=404)
+
+    await payments.handle_payment_success(session, order, customer)
+    log.info("mock_payment_succeeded", order_number=order.order_number)
+    return _page(
+        "Payment simulated",
+        "The order is now marked paid. The confirmation goes to WhatsApp, "
+        "and the customer and order are sent to Zoho.",
+        order.order_number,
+    )
+
+
+async def _mock_order(session: AsyncSession, order_number: str):
+    """A test order by number, only while payments are mocked."""
+    number = order_number.upper()
+    if not ORDER_NUMBER_RE.match(number):
+        return None
+    order = await order_service.get_by_number(session, number)
+    if order is None or not (order.stripe_session_id or "").startswith(
+            checkout.MOCK_SESSION_PREFIX):
+        return None     # a real Stripe order is never paid from here
+    return order
+
+
 @router.get("/{order_number}")
 async def redirect_to_checkout(
     order_number: str,
@@ -82,6 +153,12 @@ async def redirect_to_checkout(
             and order.payment_link_expires_at <= datetime.now(timezone.utc))
     )
     if expired:
+        # The payment_expired template's Order Now button lands here: send
+        # the customer to the menu, where the order's dishes are waiting.
+        menu = _fresh_menu_url(order.customer_id)
+        if menu:
+            log.info("pay_redirect_expired_to_menu", order_number=order.order_number)
+            return RedirectResponse(menu, status_code=302)
         return _page(
             "Link expired",
             "This payment link has expired and the delivery slot was released. "
@@ -91,6 +168,15 @@ async def redirect_to_checkout(
 
     log.info("pay_redirect", order_number=order.order_number)
     return RedirectResponse(order.checkout_url, status_code=302)
+
+
+def _fresh_menu_url(customer_id) -> str | None:
+    """A new signed menu link, or None if links cannot be signed here."""
+    try:
+        return order_link.build_url(customer_id)
+    except RuntimeError as exc:
+        log.error("pay_redirect_no_menu_link", error=str(exc))
+        return None
 
 
 def _page(title: str, message: str, order_number: str,

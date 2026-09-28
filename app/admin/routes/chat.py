@@ -59,6 +59,16 @@ class Recorder:
                         for s in sections for r in s.rows],
         })
 
+    async def send_cta_url(self, to, body, *, url, display_text,
+                           header=None, footer=None):
+        # The tester shows the destination, which a real customer never
+        # sees - it is the one thing you want to check here.
+        self.sent.append({
+            "kind": "cta_url",
+            "body": f"{body}\n\n[{display_text}] -> {url}",
+            "options": [],
+        })
+
     async def request_location(self, to, body):
         self.sent.append({"kind": "location_request", "body": body, "options": []})
 

@@ -175,8 +175,9 @@ def store_bytes(data: bytes, *, key: str) -> str | None:
     return f"{MEDIA_URL_PREFIX}/{destination.name}"
 
 
-def _shrink(data: bytes) -> bytes:
-    """Downscale to a sane thumbnail and re-encode as JPEG."""
+def _shrink(data: bytes, *, max_px: int = THUMBNAIL_MAX_PX,
+            quality: int = JPEG_QUALITY) -> bytes:
+    """Downscale to fit `max_px` and re-encode as JPEG."""
     from PIL import Image
 
     with Image.open(io.BytesIO(data)) as image:
@@ -190,10 +191,10 @@ def _shrink(data: bytes) -> bytes:
         else:
             image = image.convert("RGB")
 
-        image.thumbnail((THUMBNAIL_MAX_PX, THUMBNAIL_MAX_PX), Image.LANCZOS)
+        image.thumbnail((max_px, max_px), Image.LANCZOS)
 
         buffer = io.BytesIO()
-        image.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+        image.save(buffer, format="JPEG", quality=quality, optimize=True)
         return buffer.getvalue()
 
 

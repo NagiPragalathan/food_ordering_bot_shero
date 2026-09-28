@@ -60,6 +60,13 @@ class GallaboxClient(ApiClient):
                                header=header, footer=footer)
         )
 
+    async def send_cta_url(self, to: str, body: str, *, url: str,
+                           display_text: str, header: str | None = None,
+                           footer: str | None = None) -> dict:
+        return await self._send(to, m.cta_url_message(
+            body, url=url, display_text=display_text,
+            header=header, footer=footer))
+
     async def request_location(self, to: str, body: str) -> dict:
         return await self._send(to, m.location_request_message(body))
 

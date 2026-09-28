@@ -13,13 +13,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.admin import router as admin_router
 from app.admin.deps import NotAuthenticated
 
-from app.api.routes import (health, ops, order_web, pay, webhooks_gallabox,
-                            webhooks_stripe)
+from app.api.routes import (health, media_thumbs, ops, order_addresses, order_web,
+                            pay, webhooks_gallabox, webhooks_stripe)
+from app.core.http_cache import ImmutableStaticFiles
 from app.core.config import settings
 from app.core.exceptions import IntegrationError, SheroError
 from app.core.logging import configure_logging, get_logger
@@ -87,17 +88,26 @@ app = FastAPI(
     redoc_url=None,
 )
 
+# The ordering page's menu JSON (~166 KB for 287 dishes) and HTML compress to
+# a fifth of that. Over a slow tunnel or mobile link that is most of the
+# page's load time. Photos are already JPEG, so small bodies and images are
+# left alone by the size floor and content type.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 app.include_router(health.router)
 app.include_router(webhooks_gallabox.router)
 app.include_router(webhooks_stripe.router)
 app.include_router(pay.router)
 app.include_router(order_web.router)
+app.include_router(order_addresses.router)
 
 # Dish photos downloaded from the client's sheet at import time. Served from
 # here rather than hot-linked, so a page load never depends on Drive.
+# /media/thumb/... first: the mount below would otherwise claim the path.
+app.include_router(media_thumbs.router)
 media.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount(media.MEDIA_URL_PREFIX,
-          StaticFiles(directory=str(media.MEDIA_DIR)), name="media")
+          ImmutableStaticFiles(directory=str(media.MEDIA_DIR)), name="media")
 app.include_router(ops.router)
 app.include_router(admin_router)
 

@@ -1,69 +1,90 @@
 """Zoho field API names, in one place.
 
-Standard Zoho fields are fixed. The CUSTOM_* names must match fields the
-client's Zoho administrator creates (the spec lists this under "Approval to
-create custom fields, stages and an Orders module"). If the admin names them
-differently, change them here only - nothing else in the codebase hardcodes a
-Zoho field name.
+Shero's Zoho CRM (zoho.in): food customers are **Leads** and their paid
+orders go in the **Orders** module. Contacts there are Kitchen Partners, so
+the bot never converts a Lead or writes a Contact.
 
-See docs/zoho-setup.md for the exact list to hand to the admin.
+Fields marked "added by the bot" do not exist until `scripts/setup_zoho_crm.py
+--apply` creates them (their definitions are in schema.py). Nothing else in
+the codebase hardcodes a Zoho field name.
+
+See docs/zoho-setup.md for the full mapping.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-# --- Standard Zoho fields ----------------------------------------------------
-LAST_NAME = "Last_Name"      # required by Zoho on Leads and Contacts
-FIRST_NAME = "First_Name"
-COMPANY = "Company"          # required by Zoho on Leads
-EMAIL = "Email"
-PHONE = "Phone"
-MOBILE = "Mobile"
-STREET = "Street"
-CITY = "City"
-STATE = "State"
-ZIP_CODE = "Zip_Code"
-LEAD_SOURCE = "Lead_Source"
-LEAD_STATUS = "Lead_Status"  # holds the bot stage (New Enquiry ... Converted)
-DESCRIPTION = "Description"
+# --- Leads module ------------------------------------------------------------
+LEADS = "Leads"
 
-# --- Custom fields on Lead / Contact -----------------------------------------
-CUSTOM_WHATSAPP_NUMBER = "WhatsApp_Number"
-CUSTOM_SELECTED_OUTLET = "Selected_Outlet"
-CUSTOM_DISTANCE_KM = "Distance_KM"
-CUSTOM_CUISINE_PREFERENCE = "Cuisine_Preference"
-CUSTOM_AD_ID = "Ad_ID"
-CUSTOM_CAMPAIGN_ID = "Campaign_ID"
-CUSTOM_APARTMENT_UNIT = "Apartment_Unit"
-CUSTOM_STAGE_TIMESTAMPS = "Stage_Timestamps"   # multi-line text, JSON blob
+L_FIRST_NAME = "First_Name"
+L_LAST_NAME = "Last_Name"             # required by Zoho
+L_PHONE = "Phone"                     # labelled "Contact Number"
+L_EMAIL = "Email"
+L_STREET = "Street"                   # labelled "Address"
+L_ADDRESS_LINE_2 = "Address_Second_Line"
+L_CITY = "City"
+L_STATE = "State"
+L_ZIP = "Zip_Code"                    # labelled "PinCode"
+L_LATITUDE = "Latitude"
+L_LONGITUDE = "Longitude"
+L_LEAD_SOURCE = "Lead_Source"
+L_CUISINE = "Native_Cuisine_at_home"  # labelled "Cuisine"; picklist, see CUISINES
+L_AD_ID = "Facebook_Ad_ID"
+L_CAMPAIGN_ID = "Facebook_Ad_Campaign_ID"
+# Added by the bot.
+L_BOT_STAGE = "Bot_Stage"                     # picklist: the 11 funnel stages
+L_BOT_STAGE_HISTORY = "Bot_Stage_History"     # multi-line: one "time  stage" per line
+L_SELECTED_OUTLET = "Selected_Outlet"
+L_DISTANCE_KM = "Distance_KM"
 
-# --- Custom fields on the Orders module --------------------------------------
-ORDER_NUMBER = "Name"          # the module's primary field holds the order id
-ORDER_CONTACT = "Contact_Name" # lookup -> Contacts
-ORDER_OUTLET = "Outlet"
-ORDER_ITEMS = "Items"          # multi-line text: "2 x Chicken Biryani"
-ORDER_DISH_TOTAL = "Dish_Total"
-ORDER_DELIVERY_CHARGE = "Delivery_Charge"
-ORDER_TAX = "Tax"
-ORDER_TOTAL = "Total"
-ORDER_SLOT = "Delivery_Slot"
-ORDER_STRIPE_PAYMENT_ID = "Stripe_Payment_ID"
-ORDER_STAGE = "Order_Stage"
-ORDER_DELIVERED_TIME = "Delivered_Time"
-ORDER_DELIVERY_ADDRESS = "Delivery_Address"
+LEAD_SOURCE_WHATSAPP = "Whatsapp"             # an existing Lead_Source option
+# Options of the Cuisine picklist; a cuisine outside it is not written.
+CUISINES = ("Chettinad", "Andhra", "Kerala", "North Indian", "Multi Cuisines",
+            "My Bowl", "Rice Express", "Curry Home")
 
-# Company is mandatory on Zoho Leads but meaningless for a consumer food
-# order, so every lead carries this constant.
-DEFAULT_COMPANY = "Shero Home Food - WhatsApp"
+# --- Orders module -----------------------------------------------------------
+O_LEAD = "Lead"                       # lookup -> Leads (added by the bot)
+O_CUSTOMER_NO = "Customer_No"
+O_ORDER_NO = "Order_No"
+O_ADDRESS = "Address"
+O_CITY = "City"
+O_STATE = "State"
+O_LATITUDE = "Latitude"
+O_LONGITUDE = "Longitude"
+O_CUISINE = "Cuisine"
+O_STATUS = "Order_Status"
+O_CHANNEL = "Channel"
+O_PLACED_TIME = "Order_Placed_Time"
+O_ACCEPTED_TIME = "Order_Accepted_Time"       # = paid
+O_DISPATCHED_TIME = "Order_Dispatched_Time"
+O_INSTRUCTIONS = "Order_Instruction_s"
+O_ITEMS = "Item_Details"              # subform, see I_* below
+# Added by the bot.
+O_OUTLET_NAME = "Outlet_Name"
+O_DELIVERY_SLOT = "Delivery_Slot"
+O_DELIVERY_CHARGE = "Delivery_Charge"
+O_TAXES_AND_FEES = "Taxes_and_Fees"
+O_ORDER_TOTAL = "Order_Total"         # the charged total; Grand_Total is a formula over the items only
+O_STRIPE_PAYMENT_ID = "Stripe_Payment_ID"
+O_DELIVERED_TIME = "Delivered_Time"
+
+CHANNEL_WHATSAPP_BOT = "WhatsApp Bot"         # option added to Channel by the bot
+
+# Item_Details subform rows.
+I_NAME = "SAP_Name"
+I_QUANTITY = "Quantity"
+I_UNIT_PRICE = "Unit_Price"
 
 
 def split_name(full_name: str | None) -> tuple[str, str]:
     """Split a free-text name into (first, last).
 
-    Zoho rejects a Lead without Last_Name, so a single-word name is used as the
-    last name and an empty name falls back to a placeholder.
+    A single-word name is the last name; an empty one falls back to a
+    placeholder, since Zoho's name fields are required.
     """
     cleaned = (full_name or "").strip()
     if not cleaned:
@@ -74,8 +95,23 @@ def split_name(full_name: str | None) -> tuple[str, str]:
     return " ".join(parts[:-1]), parts[-1]
 
 
+def cuisine_option(cuisine: str | None) -> str | None:
+    """The Cuisine picklist option matching `cuisine`, or None."""
+    wanted = (cuisine or "").strip().lower()
+    return next((c for c in CUISINES if c.lower() == wanted), None)
+
+
+def zoho_datetime(value: datetime | None) -> str | None:
+    """Zoho wants `2026-09-28T10:00:00+00:00`: no microseconds."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+
 def jsonable(value: Any) -> Any:
-    """Coerce Decimal/None into something Zoho's JSON API accepts."""
+    """Coerce Decimal into something Zoho's JSON API accepts."""
     if isinstance(value, Decimal):
         return float(value)
     return value

@@ -1,0 +1,82 @@
+{# The bottom sheet, the error toast and the helpers every ordering page
+   shares: the menu page (index.html) and the address-only page
+   (location.html). #}
+<div id="sheet" class="fixed inset-0 z-40 hidden">
+  <div id="scrim" class="absolute inset-0 bg-black/40"></div>
+  <section class="absolute inset-x-0 bottom-0 flex max-h-[92vh] flex-col rounded-t-2xl bg-white sm:inset-x-auto sm:left-1/2 sm:bottom-auto sm:top-1/2 sm:w-[32rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:shadow-2xl">
+    <header class="flex items-center justify-between border-b border-cream-200 px-4 py-3">
+      <h2 id="sheet-title" class="text-base font-semibold">Your cart</h2>
+      <button id="sheet-close" class="rounded-lg p-1 text-cocoa-700/45 hover:bg-cream-100" aria-label="Close">✕</button>
+    </header>
+    <div id="sheet-body" class="flex-1 overflow-y-auto px-4 py-4"></div>
+    <footer id="sheet-foot" class="border-t border-cream-200 bg-white px-4 py-3"></footer>
+  </section>
+</div>
+
+<p id="toast" class="fixed inset-x-4 bottom-24 z-50 hidden rounded-xl bg-red-600 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+
+<script>
+window.SheroUI = function (token) {
+  const BASE = '/order/' + token;
+  const $ = (id) => document.getElementById(id);
+  const money = (n) => '$' + Number(n || 0).toFixed(2);
+  let expired = false;    // once the link dies, one clear screen beats N errors
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : s;
+    return d.innerHTML;
+  }
+
+  function toast(msg) {
+    if (expired) return;
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.remove('hidden');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
+  }
+
+  function openSheet(title, bodyHtml, footHtml) {
+    $('sheet-title').textContent = title;
+    $('sheet-body').innerHTML = bodyHtml;
+    $('sheet-foot').innerHTML = footHtml;
+    $('sheet').classList.remove('hidden');
+  }
+  function closeSheet() { $('sheet').classList.add('hidden'); }
+  $('scrim').addEventListener('click', closeSheet);
+  $('sheet-close').addEventListener('click', closeSheet);
+
+  async function api(path, payload) {
+    const res = await fetch(BASE + path, payload ? {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    } : undefined);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    // A tab left open past the link's lifetime: every call now answers
+    // "expired", so show the way to a fresh link once, instead.
+    if (data && data.expired) showExpired(data.new_link_url);
+    return data;
+  }
+
+  function showExpired(newLinkUrl) {
+    expired = true;
+    $('toast').classList.add('hidden');
+    openSheet('Link expired',
+      '<div class="py-4 text-center"><div class="text-4xl">⏰</div>' +
+      '<p class="mt-3 text-sm font-semibold">This link has expired</p>' +
+      '<p class="mt-1 text-sm text-cocoa-700/70">Links work for a few hours, so nobody else can use yours. ' +
+      'Your cart is saved - a fresh link opens it again.</p></div>',
+      newLinkUrl
+        ? '<a href="' + esc(newLinkUrl) + '" class="block w-full rounded-xl bg-[#25D366] py-3 text-center ' +
+          'text-sm font-semibold text-white">Get a new link on WhatsApp</a>'
+        : '<p class="text-center text-sm">Send us <strong>new menu link</strong> on WhatsApp.</p>');
+    $('sheet-close').classList.add('hidden');     // nothing to go back to
+    $('scrim').replaceWith($('scrim').cloneNode()); // tapping outside must not close it
+  }
+
+  return { $, esc, money, toast, api, openSheet, closeSheet, BASE };
+};
+</script>

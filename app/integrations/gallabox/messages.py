@@ -115,6 +115,41 @@ def list_message(body: str, sections: list[ListSection], *, button_text: str = "
     return {"type": "interactive", "interactive": interactive}
 
 
+def cta_url_message(body: str, *, url: str, display_text: str,
+                    header: str | None = None, footer: str | None = None) -> dict:
+    """A single button that opens a link (Meta's `cta_url` interactive).
+
+    Used for the ordering link. A bare URL in a text message is easy to miss
+    and easy to mistype; this renders as a button and opens in WhatsApp's own
+    browser, so the customer never leaves the app.
+
+    Unlike a template's URL button this needs no approval and carries the
+    whole URL, which matters here: the ordering link ends in a signed token
+    far too long to pass as a template button parameter. It is only valid
+    inside the 24-hour customer service window, which is exactly where the
+    menu link is sent.
+    """
+    if not url:
+        raise ValueError("a cta_url message needs a url")
+
+    interactive: dict = {
+        "type": "cta_url",
+        "body": {"text": body},
+        "action": {
+            "name": "cta_url",
+            "parameters": {
+                "display_text": clip(display_text, BUTTON_TITLE_LIMIT),
+                "url": url,
+            },
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header}
+    if footer:
+        interactive["footer"] = {"text": footer}
+    return {"type": "interactive", "interactive": interactive}
+
+
 def location_request_message(body: str) -> dict:
     """Native "share your location" prompt (spec steps 6a and 9).
 
@@ -148,8 +183,18 @@ def product_list_message(catalog_id: str, sections: list[dict], *, header: str,
     return {"type": "interactive", "interactive": interactive}
 
 
+def url_button_value(index: int, text: str) -> dict:
+    """The runtime part of a dynamic URL button, in Gallabox's shape.
+
+    Gallabox wants `buttonValues` as a list of these - a dict keyed by index
+    is rejected with a 500 ("buttonValues.find is not a function").
+    """
+    return {"index": index, "sub_type": "url",
+            "parameters": {"type": "text", "text": text}}
+
+
 def template_message(name: str, body_values: list[str], *,
-                     button_values: dict[str, list[str]] | None = None,
+                     button_values: list[dict] | None = None,
                      language: str = "en") -> dict:
     """Pre-approved template (spec section 3).
 

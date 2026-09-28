@@ -21,6 +21,7 @@ Legend: 🔴 blocks go-live · 🟡 needed before that area works · ⚪ optiona
 | API Key | Settings → API Keys (**app.gallabox.com/apikey**) | `GALLABOX_API_KEY` |
 | API Secret | same screen, **shown only once** | `GALLABOX_API_SECRET` |
 | Channel ID | Settings → WhatsApp Channel → Channel Id | `GALLABOX_CHANNEL_ID` |
+| Account ID | the 24-hex id in any dashboard URL, `/accounts/<this>/…` | `GALLABOX_ACCOUNT_ID` |
 | Admin login for our team | invite our email as Admin | — |
 
 ### Creating the API key and secret
@@ -142,7 +143,6 @@ Your channel already shows **FB Business Verification: Verified** and
 |---|---|---|
 | Client ID | api-console.zoho.com → Self Client / Server-based app | `ZOHO_CLIENT_ID` |
 | Client Secret | same | `ZOHO_CLIENT_SECRET` |
-| **Data centre** | `.com`, `.in`, `.eu`, `.au`, `.jp` or `.ca` | `ZOHO_DATA_CENTER` |
 | Admin user (or our email added as Administrator) | | — |
 | Your Zoho edition/plan | determines API call limits | — |
 
@@ -150,12 +150,10 @@ Required OAuth scopes: `ZohoCRM.modules.ALL`, `ZohoCRM.settings.ALL`,
 `ZohoCRM.users.READ`.
 
 **You do not need to produce a refresh token.** Create a *Server-based
-Application* in Zoho's API console, register the redirect URI the Settings
-page shows, then press **Connect Zoho** there and approve access. Full steps
-in [zoho-setup.md](zoho-setup.md).
-
-> The data centre matters more than it looks: a `.in` org will reject `.com`
-> credentials with a generic error. Please tell us which domain you log in at.
+Application* in Zoho's API console, register the redirect URI, turn on
+Multi-DC, then press **Connect Zoho** in Settings and approve access. The data
+centre (`.com`, `.in`, ...) is detected from your login. Full steps in
+[zoho-setup.md](zoho-setup.md).
 
 **We also need your approval to create** the custom fields, the Lead Status
 picklist values and the Orders module listed in
@@ -171,6 +169,13 @@ can action it directly.
 | Publishable key | same | `STRIPE_PUBLISHABLE_KEY` |
 | Our email added as a **Developer** team member | Settings → Team | — |
 | Account activated for live payments | | — |
+
+**Until a key is set, payments are mocked:** ordering and the WhatsApp
+summary still work end to end, and Pay Now opens a "Test payment" page
+(`/pay/mock/<order>`) instead of Stripe. Nothing is charged. Its **Simulate
+successful payment** button runs what Stripe's webhook would (slot booked,
+customer marked Converted and the Order filed in Zoho, kitchen told), so the whole
+flow can be tested. The button is refused once a Stripe key is set.
 
 We create the webhook endpoint ourselves and will give you the resulting
 `whsec_…` to store (`STRIPE_WEBHOOK_SECRET`).
@@ -272,7 +277,10 @@ WhatsApp button.
 
 | What | What you gain | `.env` variable |
 |---|---|---|
-| Google Maps API key | accurate ZIP geocoding and real road distances. Without it we fall back to OpenStreetMap, which is free but rate-limited and has no SLA | `GOOGLE_MAPS_API_KEY` |
+| Google Maps API key | accurate addresses from map pins and address search, ZIP geocoding and real road distances. Enable the **Geocoding API**. Without it we fall back to OpenStreetMap, which is free but rate-limited, often lacks house numbers and has no SLA | `GOOGLE_MAPS_API_KEY` |
+| Google Maps browser key | draws Google's map (with satellite view) on the ordering page. It is visible in the page, so create a **separate** key restricted to the **Maps JavaScript API** and to your domain as HTTP referrer | `GOOGLE_MAPS_BROWSER_KEY` |
+
+Step-by-step guide for creating both keys, with click paths and direct links: [google-maps-api-key-guide.pdf](google-maps-api-key-guide.pdf).
 
 ---
 

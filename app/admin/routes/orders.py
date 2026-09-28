@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.deps import redirect, render, require_admin
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import (
     AdminUser,
@@ -35,6 +36,16 @@ TRANSITIONS = {
     OrderStage.OUT_FOR_DELIVERY: ("Mark delivered", OrderStage.DELIVERED,
                                   tpl.ORDER_DELIVERED),
 }
+
+
+def should_notify(template) -> bool:
+    """Whether a stage change should also message the customer.
+
+    The stage always advances; the message is optional. With
+    `SEND_DELIVERY_UPDATES` off the kitchen still tracks an order through
+    Out for delivery and Delivered - the customer simply is not told.
+    """
+    return template is not None and settings.send_delivery_updates
 
 
 @router.get("", name="admin_orders")
@@ -116,7 +127,7 @@ async def advance_order(
     await session.flush()
 
     customer = await session.get(Customer, order.customer_id)
-    if template is not None and customer is not None:
+    if should_notify(template) and customer is not None:
         try:
             await gallabox.send_template(customer.whatsapp_number, template,
                                          order.order_number)

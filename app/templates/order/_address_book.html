@@ -1,0 +1,327 @@
+{# Saved delivery addresses for the ordering page: pick one, add, edit, delete.
+   Included by order/index.html, which passes in its helpers. The map is
+   Leaflet on OpenStreetMap tiles (no key); if it fails to load, the form
+   still works as plain typed fields. #}
+<script>
+window.SheroAddressBook = function (deps) {
+  const { api, openSheet, toast, esc, $, checkDelivery, kitchen, googleKey } = deps;
+
+  let LIST = [];          // saved addresses from the server
+  let LABELS = ['Home', 'Office', 'Other'];
+  let CONTACT = '';       // the WhatsApp number - shown, never editable
+  let selected = null;    // id of the address being ordered to
+  let map = null;
+
+  const ICON = { home: '🏠', office: '🏢' };
+  const icon = (label) => ICON[(label || '').toLowerCase()] || '📍';
+  const btn = 'rounded-xl py-3 text-sm font-semibold';
+
+  function contactBox() {
+    return '<div class="mt-3 flex items-center gap-2 rounded-lg bg-cream-100 px-3 py-2.5 text-sm">' +
+      '<span>📞</span><div class="min-w-0 flex-1"><div class="text-xs text-cocoa-700/70">' +
+      'The driver will call</div><div class="font-semibold tabular-nums">+' + esc(CONTACT) +
+      '</div></div><span class="text-[11px] text-cocoa-700/60">your WhatsApp number</span></div>';
+  }
+
+  // --- the list ---------------------------------------------------------------
+  async function open() {
+    try {
+      const data = await api('/addresses');
+      if (!data.ok) { toast(data.error); return; }
+      LIST = data.addresses; LABELS = data.labels || LABELS; CONTACT = data.contact_number || '';
+    } catch (err) {
+      toast('Could not load your addresses: ' + err.message);
+      return;
+    }
+    if (!LIST.length) { showForm(null); return; }
+    if (!LIST.some(a => a.id === selected)) selected = LIST[0].id;
+    showList();
+  }
+
+  function card(a) {
+    const on = a.id === selected;
+    return '<div class="addr mb-2 flex cursor-pointer gap-3 rounded-xl border-2 p-3 ' +
+      (on ? 'border-herb-600 bg-herb-500/5' : 'border-cream-200 bg-white') + '" data-id="' + a.id + '">' +
+      '<div class="text-xl">' + icon(a.label) + '</div>' +
+      '<div class="min-w-0 flex-1"><div class="text-sm font-semibold">' + esc(a.label) + '</div>' +
+      '<div class="text-[13px] leading-snug text-cocoa-700/80 [overflow-wrap:anywhere]">' +
+      esc(a.address_line1) + (a.apartment_unit ? ', ' + esc(a.apartment_unit) : '') +
+      ' · ' + esc(a.postal_code) + '</div>' +
+      (a.latitude != null ? '<div class="mt-0.5 text-[11px] text-herb-700">📍 Pinned on the map</div>' : '') +
+      '<div class="mt-1.5 flex gap-3 text-xs font-semibold">' +
+      '<button class="edit text-chilli-600" data-id="' + a.id + '">Edit</button>' +
+      '<button class="del text-cocoa-700/60" data-id="' + a.id + '">Delete</button></div></div>' +
+      '<div class="pt-1 text-herb-600">' + (on ? '●' : '<span class="text-cream-200">●</span>') + '</div></div>';
+  }
+
+  function showList() {
+    openSheet('Delivery address',
+      LIST.map(card).join('') +
+      '<button id="addr-new" class="mt-1 w-full rounded-xl border-2 border-dashed border-chilli-300 ' +
+      'py-3 text-sm font-semibold text-chilli-600">+ Add a new address</button>' +
+      contactBox() +
+      '<div id="slots-wrap" class="mt-4 hidden"><h3 class="mb-2 text-sm font-semibold">Pick a delivery time</h3>' +
+      '<div id="slots" class="grid grid-cols-2 gap-2"></div></div>',
+      '<button id="check" class="w-full bg-chilli-500 text-white ' + btn + '">' +
+      'Check delivery &amp; show times</button>');
+
+    document.querySelectorAll('#sheet-body .addr').forEach(el =>
+      el.addEventListener('click', () => { selected = el.dataset.id; showList(); }));
+    document.querySelectorAll('#sheet-body .edit').forEach(b =>
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showForm(LIST.find(a => a.id === b.dataset.id));
+      }));
+    document.querySelectorAll('#sheet-body .del').forEach(b =>
+      b.addEventListener('click', (e) => { e.stopPropagation(); remove(b.dataset.id); }));
+    $('addr-new').addEventListener('click', () => showForm(null));
+    $('check').addEventListener('click', () => checkDelivery(selected));
+  }
+
+  async function remove(id) {
+    const a = LIST.find(x => x.id === id);
+    if (!confirm('Delete "' + (a ? a.label : 'this address') + '"?')) return;
+    try {
+      const data = await api('/addresses/' + encodeURIComponent(id) + '/delete', {});
+      if (!data.ok) { toast(data.error); return; }
+      LIST = data.addresses;
+      if (selected === id) selected = LIST.length ? LIST[0].id : null;
+      LIST.length ? showList() : showForm(null);
+    } catch (err) {
+      toast('Could not delete that address: ' + err.message);
+    }
+  }
+
+  // --- the form ---------------------------------------------------------------
+  function input(id, label, value, extra) {
+    return '<label class="mb-2.5 block"><span class="mb-1 block text-xs font-medium text-cocoa-700/80">' +
+      label + '</span><input id="' + id + '" value="' + esc(value || '') + '" ' + (extra || '') +
+      ' class="w-full rounded-lg border border-cream-200 px-3 py-2.5 text-sm outline-none focus:border-chilli-500"></label>';
+  }
+
+  function showForm(a) {
+    const editing = a || {};
+    const label = editing.label || 'Home';
+    const preset = LABELS.includes(label) ? label : 'Other';
+    const pin = { lat: editing.latitude, lng: editing.longitude };
+
+    openSheet(a ? 'Edit address' : 'Add a delivery address',
+      '<div class="mb-3 flex gap-2">' + LABELS.map(l =>
+        '<button type="button" class="chip flex-1 rounded-full border px-3 py-2 text-sm font-semibold ' +
+        (l === preset ? 'border-herb-600 bg-herb-500/10 text-herb-700' : 'border-cream-200 bg-white') +
+        '" data-label="' + esc(l) + '">' + icon(l) + ' ' + esc(l) + '</button>').join('') + '</div>' +
+      '<div id="custom-wrap" class="' + (preset === 'Other' ? '' : 'hidden') + '">' +
+      input('f-label', 'Name this address', preset === 'Other' && label !== 'Other' ? label : '',
+            'placeholder="e.g. Mum\'s place" maxlength="40"') + '</div>' +
+
+      '<form id="addr-search" class="mb-2 flex gap-2">' +
+        '<input id="f-search" type="search" autocomplete="off" placeholder="Search your address, e.g. 12 Maple St Edison" ' +
+        'class="min-w-0 flex-1 rounded-lg border border-cream-200 px-3 py-2.5 text-sm outline-none focus:border-chilli-500">' +
+        '<button class="rounded-lg bg-cocoa-800 px-4 text-sm font-semibold text-white">Search</button>' +
+      '</form>' +
+      '<div id="map-wrap" class="relative mb-2 overflow-hidden rounded-xl border border-cream-200">' +
+        '<div id="map" class="h-52 w-full bg-cream-100"></div>' +
+        // A fixed pin over the centre: the customer moves the map, not the pin,
+        // which is far easier with a thumb than dragging a marker.
+        '<div class="pointer-events-none absolute left-1/2 top-1/2 z-[500] -translate-x-1/2 -translate-y-full text-3xl">📍</div>' +
+        '<button type="button" id="locate-me" class="absolute bottom-2 left-2 z-[500] rounded-lg bg-white ' +
+        'px-3 py-2 text-xs font-semibold text-cocoa-800 shadow">◎ Use my current location</button>' +
+      '</div>' +
+      '<p id="map-hint" class="mb-3 text-[11px] text-cocoa-700/60">Move the map so the pin sits on your door, ' +
+      'search the address, or tap “Use my current location”. We fill in the street for you.</p>' +
+
+      input('f-address', 'Street address', editing.address_line1) +
+      '<div class="grid grid-cols-2 gap-2">' +
+        input('f-apartment', 'Apartment / unit', editing.apartment_unit) +
+        input('f-zip', 'ZIP code', editing.postal_code, 'inputmode="numeric"') +
+      '</div>' +
+      input('f-instructions', 'Driver instructions', editing.delivery_instructions) +
+      contactBox(),
+      '<div class="flex gap-2">' +
+      (LIST.length ? '<button id="addr-back" class="flex-1 border border-cream-200 bg-white ' + btn + '">Back</button>' : '') +
+      '<button id="addr-save" class="flex-[2] bg-herb-600 text-white ' + btn + '">Save address</button></div>');
+
+    let chosen = preset;
+    document.querySelectorAll('#sheet-body .chip').forEach(c =>
+      c.addEventListener('click', () => {
+        chosen = c.dataset.label;
+        document.querySelectorAll('#sheet-body .chip').forEach(x => {
+          const on = x === c;
+          x.classList.toggle('border-herb-600', on); x.classList.toggle('bg-herb-500/10', on);
+          x.classList.toggle('text-herb-700', on); x.classList.toggle('border-cream-200', !on);
+          x.classList.toggle('bg-white', !on);
+        });
+        $('custom-wrap').classList.toggle('hidden', chosen !== 'Other');
+      }));
+
+    startMap(pin);
+    $('locate-me').addEventListener('click', () => locateMe(pin));
+    $('addr-search').addEventListener('submit', (e) => { e.preventDefault(); search(pin); });
+    if ($('addr-back')) $('addr-back').addEventListener('click', showList);
+    $('addr-save').addEventListener('click', () => save(editing.id, () =>
+      chosen === 'Other' ? (($('f-label').value || '').trim() || 'Other') : chosen, pin));
+  }
+
+  async function save(id, labelOf, pin) {
+    const payload = {
+      id: id || null,
+      label: labelOf(),
+      address_line1: $('f-address').value.trim(),
+      apartment_unit: $('f-apartment').value.trim(),
+      postal_code: $('f-zip').value.trim(),
+      delivery_instructions: $('f-instructions').value.trim(),
+      latitude: pin.lat, longitude: pin.lng,
+    };
+    if (!payload.address_line1) { toast('Enter your street address.'); return; }
+    if (!payload.postal_code) { toast('Enter your ZIP code.'); return; }
+
+    const b = $('addr-save');
+    b.disabled = true; b.textContent = 'Saving…';
+    try {
+      const data = await api('/addresses', payload);
+      if (!data.ok) { toast(data.error); return; }
+      selected = data.address.id;
+      const list = await api('/addresses');
+      LIST = list.ok ? list.addresses : [data.address];
+      showList();
+    } catch (err) {
+      toast('Could not save the address: ' + err.message);
+    } finally {
+      if ($('addr-save')) { b.disabled = false; b.textContent = 'Save address'; }
+    }
+  }
+
+  // --- the map ----------------------------------------------------------------
+  // Two engines behind one small interface - { setView(lat, lng, zoom),
+  // remove() } - so the rest of the form does not care which one is drawn.
+  // Google (with satellite view) when a browser key is configured, else
+  // OpenStreetMap through Leaflet. Either way the street and ZIP come from
+  // the server, which uses Google Geocoding whenever it has a key.
+  let googleReady = null;      // one load of the Google script per page
+  let skipFill = false;        // a search already filled the fields
+
+  function loadGoogle() {
+    if (!googleKey) return Promise.reject(new Error('no key'));
+    if (googleReady) return googleReady;
+    googleReady = new Promise((resolve, reject) => {
+      window.__sheroMapsReady = () => resolve(window.google.maps);
+      // Google calls this on a bad or unauthorised key, after loading fine.
+      window.gm_authFailure = () => reject(new Error('Google Maps key rejected'));
+      const s = document.createElement('script');
+      s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(googleKey) +
+              '&callback=__sheroMapsReady&loading=async';
+      s.async = true;
+      s.onerror = () => reject(new Error('Google Maps did not load'));
+      document.head.appendChild(s);
+    });
+    return googleReady;
+  }
+
+  function startPoint(pin) {
+    const has = pin.lat != null && pin.lng != null;
+    if (has) return { lat: pin.lat, lng: pin.lng, zoom: 18 };
+    if (kitchen && kitchen.lat != null) return { lat: kitchen.lat, lng: kitchen.lng, zoom: 12 };
+    return { lat: 39.8, lng: -98.6, zoom: 4 };
+  }
+
+  async function startMap(pin) {
+    if (map) { map.remove(); map = null; }
+    const at = startPoint(pin);
+    const moved = settleThen(pin, at);
+
+    try {
+      const gm = await loadGoogle();
+      if (!$('map')) return;                       // sheet closed meanwhile
+      const g = new gm.Map($('map'), {
+        center: { lat: at.lat, lng: at.lng }, zoom: at.zoom,
+        mapTypeControl: true, streetViewControl: false, fullscreenControl: false,
+        gestureHandling: 'greedy', clickableIcons: false,
+      });
+      g.addListener('idle', () => { const c = g.getCenter(); moved(c.lat(), c.lng()); });
+      map = { setView: (lat, lng, zoom) => { g.setCenter({ lat, lng }); g.setZoom(zoom); },
+              remove: () => { $('map') && ($('map').innerHTML = ''); } };
+      return;
+    } catch (err) {
+      if (googleKey) console.warn('Google map unavailable, using OpenStreetMap:', err.message);
+    }
+
+    if (!window.L) {                               // no map at all: fields still work
+      $('map-wrap').classList.add('hidden');
+      $('map-hint').classList.add('hidden');
+      return;
+    }
+    const l = L.map('map', { zoomControl: false }).setView([at.lat, at.lng], at.zoom);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '© OpenStreetMap',
+    }).addTo(l);
+    // The sheet was hidden a moment ago; Leaflet measured a 0×0 box.
+    setTimeout(() => l.invalidateSize(), 60);
+    l.on('moveend', () => { const c = l.getCenter(); moved(c.lat, c.lng); });
+    map = { setView: (lat, lng, zoom) => l.setView([lat, lng], zoom), remove: () => l.remove() };
+  }
+
+  // Record the pin on every move, but only look the street up once the
+  // finger has settled: each lookup is a paid (Google) or rate-limited call.
+  function settleThen(pin, start) {
+    let timer = null;
+    return (lat, lng) => {
+      // Both engines report the first draw and resizes as moves. Those are
+      // not the customer choosing a spot, and filling the form with the
+      // kitchen's street would be worse than leaving it blank.
+      if (Math.abs(lat - start.lat) < 1e-6 && Math.abs(lng - start.lng) < 1e-6) return;
+      pin.lat = +lat.toFixed(6); pin.lng = +lng.toFixed(6);
+      clearTimeout(timer);
+      if (skipFill) { skipFill = false; return; }
+      timer = setTimeout(() => fillFrom(pin), 700);
+    };
+  }
+
+  async function fillFrom(pin) {
+    try {
+      const data = await api('/locate?lat=' + pin.lat + '&lng=' + pin.lng);
+      if (!data.ok) { toast(data.error); return; }
+      if (data.address_line1 && $('f-address')) $('f-address').value = data.address_line1;
+      if (data.postal_code && $('f-zip')) $('f-zip').value = data.postal_code;
+    } catch (err) {
+      // Not fatal: the pin is still saved, and the street can be typed.
+      console.warn('locate failed', err);
+    }
+  }
+
+  async function search(pin) {
+    const q = ($('f-search').value || '').trim();
+    if (q.length < 3) { toast('Type at least a street and town.'); return; }
+    try {
+      const data = await api('/search?q=' + encodeURIComponent(q));
+      if (!data.ok) { toast(data.error); return; }
+      pin.lat = data.lat; pin.lng = data.lng;
+      if (data.address_line1) $('f-address').value = data.address_line1;
+      if (data.postal_code) $('f-zip').value = data.postal_code;
+      skipFill = true;                              // the search result is the answer
+      if (map) map.setView(data.lat, data.lng, 18);
+    } catch (err) {
+      toast('Could not search just now: ' + err.message);
+    }
+  }
+
+  function locateMe(pin) {
+    if (!navigator.geolocation) { toast('Your browser cannot share its location. Move the map instead.'); return; }
+    const b = $('locate-me');
+    b.textContent = 'Finding you…';
+    navigator.geolocation.getCurrentPosition((pos) => {
+      b.textContent = '◎ Use my current location';
+      pin.lat = +pos.coords.latitude.toFixed(6); pin.lng = +pos.coords.longitude.toFixed(6);
+      if (map) map.setView(pin.lat, pin.lng, 18);   // the move fills the fields
+      else fillFrom(pin);
+    }, (err) => {
+      b.textContent = '◎ Use my current location';
+      toast(err.code === 1
+        ? 'Location access was blocked. Move the map to your door, or search the address.'
+        : 'Could not find your location. Move the map, or search the address.');
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+  }
+
+  return { open, selectedId: () => selected, showList,
+           selectedAddress: () => LIST.find(a => a.id === selected) || null };
+};
+</script>

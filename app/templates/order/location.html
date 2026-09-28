@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Update delivery address</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
+  <script>
+    /* Same palette as the menu page (index.html). */
+    tailwind.config = { theme: { extend: {
+      colors: {
+        cream:   { 50:'#FDFBF7', 100:'#F7F1E8', 200:'#EDE2D3' },
+        cocoa:   { 700:'#3A2A22', 800:'#2B1E18', 900:'#1D1411' },
+        saffron: { 50:'#FEF7EA', 100:'#FDEBC9', 300:'#F6CE7E',
+                   500:'#EDA93C', 600:'#D9912A' },
+        chilli:  { 50:'#FDF0EC', 100:'#FADCD2', 300:'#EFA48C',
+                   500:'#D2542F', 600:'#B94525', 700:'#96361C' },
+        herb:    { 500:'#3E8E5A', 600:'#2F7549', 700:'#245C39' },
+      },
+      boxShadow: { card: '0 1px 2px rgba(29,20,17,.06), 0 4px 16px rgba(29,20,17,.05)' },
+    } } };
+  </script>
+</head>
+<body class="bg-cream-100 text-cocoa-900">
+
+<!-- The order summary's "Update location" button lands here: the dishes are
+     kept, only the address (and so the delivery time) is chosen again. -->
+<header class="bg-cocoa-800 text-white shadow-sm">
+  <div class="mx-auto flex max-w-xl items-center gap-3 px-4 py-3">
+    <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-lg">📍</div>
+    <div class="min-w-0 flex-1">
+      <div class="truncate text-[15px] font-semibold leading-tight">Update delivery address</div>
+      <div class="truncate text-[11px] text-white/70">Shero Home Food · your dishes are kept</div>
+    </div>
+  </div>
+</header>
+
+<main class="mx-auto max-w-xl px-4 py-5">
+  <section class="rounded-2xl border border-cream-200 bg-white p-4 shadow-card">
+    <h2 class="mb-2 text-sm font-semibold">Your order</h2>
+    <div id="lines" class="text-sm text-cocoa-700/60">Loading…</div>
+  </section>
+
+  <button id="choose" class="mt-4 hidden w-full rounded-xl bg-chilli-500 py-3.5 text-sm font-semibold text-white hover:bg-chilli-600">
+    Choose delivery address
+  </button>
+  <a href="/order/{{ token }}" class="mt-3 block text-center text-sm font-medium text-cocoa-700/70 underline">
+    Change dishes instead
+  </a>
+</main>
+
+{% include "order/_sheet.html" %}
+{% include "order/_address_book.html" %}
+{% include "order/_checkout.html" %}
+
+<script>
+(function () {
+  const ui = window.SheroUI({{ token | tojson }});
+  const { $, esc, money, toast, api, openSheet } = ui;
+
+  const checkout = window.SheroCheckout(ui, {
+    // The cart became an order: nothing left to re-address on this page.
+    onPlaced: () => { $('choose').classList.add('hidden'); renderLines([], 0); },
+  });
+  const book = window.SheroAddressBook({
+    api, openSheet, toast, esc, $, checkDelivery: checkout.checkDelivery,
+    kitchen: {{ {"lat": kitchen.latitude, "lng": kitchen.longitude} | tojson if kitchen else "null" }},
+    googleKey: {{ maps_browser_key | tojson }},
+  });
+  checkout.attach(book);
+  $('choose').addEventListener('click', () => book.open());
+
+  function renderLines(lines, subtotal) {
+    if (!lines.length) {
+      $('lines').innerHTML = '<p class="py-2">Your cart is empty. ' +
+        '<a class="font-semibold text-chilli-600 underline" href="/order/' + esc({{ token | tojson }}) +
+        '">Open the menu</a> to add dishes.</p>';
+      return;
+    }
+    $('lines').innerHTML = lines.map(l =>
+      '<div class="flex justify-between gap-3 border-b border-cream-200 py-1.5 text-cocoa-900 last:border-0">' +
+      '<span class="min-w-0 [overflow-wrap:anywhere]">' + l.quantity + ' × ' + esc(l.name) + '</span>' +
+      '<span class="shrink-0 tabular-nums">' + money(Number(l.unit_price) * l.quantity) + '</span></div>'
+    ).join('') +
+      '<div class="mt-2 flex justify-between font-semibold text-cocoa-900"><span>Subtotal</span>' +
+      '<span class="tabular-nums">' + money(subtotal) + '</span></div>';
+  }
+
+  (async function load() {
+    try {
+      const cart = await api('/cart');
+      if (!cart.ok) return;              // expired: SheroUI already shows the way out
+      renderLines(cart.cart || [], cart.subtotal);
+      if (cart.count) {
+        $('choose').classList.remove('hidden');
+        book.open();                     // the whole point of this page
+      }
+    } catch (err) {
+      $('lines').innerHTML = '<p class="text-red-600">Could not load your order: ' + esc(err.message) + '</p>';
+    }
+  })();
+})();
+</script>
+</body>
+</html>

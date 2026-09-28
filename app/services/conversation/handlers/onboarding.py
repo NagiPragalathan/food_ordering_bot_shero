@@ -22,8 +22,10 @@ async def start(ctx: FlowContext) -> None:
     await ensure_lead(ctx.customer)
 
     if ctx.customer.has_details:
-        await ctx.reply_text(p.WELCOME_BACK.format(name=ctx.customer.name))
-        await show_main_menu(ctx)
+        # One message, greeting and button together, rather than a greeting
+        # followed by a separate "What would you like to do?".
+        await show_main_menu(
+            ctx, greeting=p.WELCOME_BACK.format(name=ctx.customer.greeting_name))
         return
 
     await ctx.reply_text(p.WELCOME_ASK_NAME)
@@ -38,15 +40,32 @@ async def handle_name(ctx: FlowContext) -> None:
         return
 
     ctx.customer.name = name
-    await ctx.reply_text(p.ASK_EMAIL.format(name=name))
+    await _ask_email(ctx, p.ASK_EMAIL.format(name=name))
     ctx.goto(ConversationStep.AWAIT_EMAIL)
+
+
+async def _ask_email(ctx: FlowContext, question: str) -> None:
+    """The email question, always with a way back to fix the name.
+
+    The name is echoed in the question ("Thanks Asha!"), which is exactly when
+    somebody notices it is wrong - so the button sits right there, and again on
+    a re-ask, rather than only on the first try.
+    """
+    await ctx.reply_buttons(question, [Button(p.CHANGE_NAME, p.BTN_CHANGE_NAME)])
 
 
 async def handle_email(ctx: FlowContext) -> None:
     """Step 4: capture the email, re-asking if the format is invalid."""
+    # Checked on the tapped id, not the text: typing "change name" here is a
+    # (bad) email address, and must be treated as one.
+    if ctx.event.reply_id == p.CHANGE_NAME:
+        await ctx.reply_text(p.ASK_NAME_AGAIN)
+        ctx.goto(ConversationStep.AWAIT_NAME)
+        return
+
     email = clean_email(ctx.text)
     if email is None:
-        await ctx.reply_text(p.EMAIL_REASK)
+        await _ask_email(ctx, p.EMAIL_REASK)
         return
 
     ctx.customer.email = email
@@ -56,15 +75,15 @@ async def handle_email(ctx: FlowContext) -> None:
     await show_main_menu(ctx)
 
 
-async def show_main_menu(ctx: FlowContext) -> None:
-    """Step 5: Order Online / Talk to Us."""
-    await ctx.reply_buttons(
-        p.MAIN_MENU,
-        [
-            Button(p.MENU_ORDER, p.BTN_ORDER_ONLINE),
-            Button(p.MENU_TALK, p.BTN_TALK_TO_US),
-        ],
-    )
+async def show_main_menu(ctx: FlowContext, *, greeting: str | None = None) -> None:
+    """Step 5: the one thing to do next.
+
+    A stale `menu:talk` id from a button sent before this changed is still
+    honoured by `handle_main_menu`, so nobody who tapped the old one is
+    left without an answer.
+    """
+    body = f"{greeting}\n\n{p.MAIN_MENU}" if greeting else p.MAIN_MENU
+    await ctx.reply_buttons(body, [Button(p.MENU_ORDER, p.BTN_ORDER_NOW)])
     ctx.goto(ConversationStep.MAIN_MENU)
 
 

@@ -73,8 +73,14 @@ class Settings(BaseSettings):
     gallabox_api_key: str = ""
     gallabox_api_secret: str = ""
     gallabox_channel_id: str = ""
+    # Only needed to create/inspect message templates, not to send messages.
+    gallabox_account_id: str = ""
     gallabox_base_url: str = "https://server.gallabox.com/devapi"
     gallabox_webhook_token: str = ""
+    # The business's own WhatsApp number, digits with country code
+    # (e.g. 14438011011). Powers the "Open WhatsApp" button after a web
+    # order; left empty, the page simply does not show it.
+    whatsapp_business_number: str = ""
 
     # --- Ops API (outlet staff marking orders) -------------------------------
     ops_api_key: str = ""
@@ -117,8 +123,28 @@ class Settings(BaseSettings):
     payment_link_ttl_minutes: int = 30
     payment_reminder_minutes: int = 15
 
+    # --- Optional customer messages ------------------------------------
+    # Both are in the original spec but switched off at the client's
+    # request. The templates stay approved on the WABA either way, so
+    # turning one back on is this flag and nothing else - no resubmission.
+    # Off means the *message* is skipped, not the step: an unpaid order
+    # still expires, and an order still moves through the kitchen stages.
+    send_payment_reminder: bool = False
+    send_delivery_updates: bool = False
+
+    # --- Testing on a live number --------------------------------------
+    # Comma-separated WhatsApp numbers the bot will answer. Empty means
+    # everyone (production). See services/allowlist.py.
+    bot_allowed_numbers: str = ""
+
     # --- Geo -----------------------------------------------------------------
     google_maps_api_key: str = ""
+    # A second key for the map drawn in the customer's browser. Anything a
+    # page loads is public, so this one should be restricted in Google Cloud
+    # to HTTP referrers (your domain) and the Maps JavaScript API only. The
+    # server key above stays private. Empty: the page draws an OpenStreetMap
+    # map instead, while addresses still come from Google via the server.
+    google_maps_browser_key: str = ""
     distance_mode: DistanceMode = "haversine"
     geocoder_country: str = "US"
 

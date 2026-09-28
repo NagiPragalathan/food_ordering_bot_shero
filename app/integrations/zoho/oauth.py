@@ -52,7 +52,8 @@ async def get_access_token(*, force_refresh: bool = False) -> str:
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
-                response = await client.post(url, params=params)
+                # In the form body, not the query string: a URL gets logged.
+                response = await client.post(url, data=params)
             except httpx.HTTPError as exc:
                 raise IntegrationError("zoho", f"token refresh network error: {exc}") from exc
 

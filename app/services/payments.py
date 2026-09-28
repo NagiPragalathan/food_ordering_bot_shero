@@ -17,7 +17,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import PaymentError
+from app.core.exceptions import IntegrationError, PaymentError
 from app.core.logging import get_logger
 from app.db.models import (
     Customer,
@@ -27,6 +27,7 @@ from app.db.models import (
     Outlet,
     PaymentStatus,
 )
+from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
@@ -46,8 +47,12 @@ def payment_short_url(order_number: str) -> str:
 
 # --- creating the link -------------------------------------------------------
 async def create_payment_link(session: AsyncSession, order: Order,
-                              customer: Customer) -> str:
-    """Create the Stripe session, store it, and send the payment template."""
+                              customer: Customer, *, with_summary: bool = False) -> str:
+    """Create the Stripe session, store it, and send the payment template.
+
+    `with_summary` (the web page) sends the full order summary with Pay Now,
+    Change menu and Update location instead of the short payment_link.
+    """
     result = await checkout.create_checkout_session(
         order_id=str(order.id),
         order_number=order.order_number,
@@ -65,31 +70,102 @@ async def create_payment_link(session: AsyncSession, order: Order,
     order.payment_status = PaymentStatus.LINK_SENT
     await session.flush()
 
-    await current_sender().send_template(
-        customer.whatsapp_number,
-        tpl.PAYMENT_LINK,
-        customer.name or "there",
-        order.order_number,
-        f"{order.total:.2f}",
-        order.slot_label or "your chosen slot",
-        button_value=order.order_number,
-    )
+    if with_summary:
+        await send_order_summary(order, customer)
+    else:
+        await _send_payment_link(order, customer)
 
     await crm_sync.advance_stage(customer, LeadStage.PAYMENT_LINK_SENT)
     log.info("payment_link_sent", order_number=order.order_number)
     return result["url"]
 
 
+async def _send_payment_link(order: Order, customer: Customer) -> None:
+    await current_sender().send_template(
+        customer.whatsapp_number,
+        tpl.PAYMENT_LINK,
+        customer.greeting_name,
+        order.order_number,
+        f"{order.total:.2f}",
+        order.slot_label or "your chosen slot",
+        button_value=order.order_number,
+    )
+
+
+async def send_order_summary(order: Order, customer: Customer) -> None:
+    """The order_summary template, or payment_link while it is not approved.
+
+    The customer must always get a way to pay. Approval is checked first,
+    because Gallabox accepts a send for an unapproved template and it then
+    fails silently; a send error falls back too. Either way the fallback is
+    the approved payment_link - losing Change menu and Update location, not
+    the order.
+    """
+    if not await template_status.is_approved(tpl.ORDER_SUMMARY.name):
+        log.info("order_summary_not_approved_using_payment_link",
+                 order_number=order.order_number)
+        await _send_payment_link(order, customer)
+        return
+    try:
+        await current_sender().send_template(
+            customer.whatsapp_number,
+            tpl.ORDER_SUMMARY,
+            customer.greeting_name,
+            order.order_number,
+            summary_items(order.items or []),
+            summary_address(order),
+            order.slot_label or "your chosen slot",
+            f"{order.total:.2f}",
+            button_value=order.order_number,
+        )
+    except IntegrationError as exc:
+        log.warning("order_summary_template_failed", order_number=order.order_number,
+                    error=str(exc))
+        await _send_payment_link(order, customer)
+
+
+# Meta caps a template parameter's length and refuses line breaks in one.
+SUMMARY_ITEMS_LIMIT = 400
+
+
+def summary_items(items: list[dict]) -> str:
+    """ "2 x Drumstick Sambar, 1 x Beans Sambar" - one line, capped."""
+    parts = [f"{int(line.get('quantity') or 1)} x {line.get('name') or 'Item'}"
+             for line in items]
+    text = ""
+    for index, part in enumerate(parts):
+        candidate = f"{text}, {part}" if text else part
+        if len(candidate) > SUMMARY_ITEMS_LIMIT:
+            return f"{text} and {len(parts) - index} more"
+        text = candidate
+    return " ".join(text.split()) or "your items"
+
+
+def summary_address(order: Order) -> str:
+    """Street, unit and ZIP on one line."""
+    parts = [order.delivery_address, order.apartment_unit, order.postal_code]
+    return " ".join(", ".join(p.strip() for p in parts if p and p.strip()).split()) \
+        or "your saved address"
+
+
 async def send_reminder(session: AsyncSession, order: Order,
                         customer: Customer) -> bool:
-    """15-minute unpaid nudge (spec step 15)."""
+    """15-minute unpaid nudge (spec step 15).
+
+    Switched off by default (`SEND_PAYMENT_REMINDER`). The guard is here, at
+    the single place the reminder is sent, so no caller can route around it.
+    Expiry is unaffected: an unpaid link still dies at 30 minutes and still
+    releases its slot.
+    """
+    if not settings.send_payment_reminder:
+        return False
     if order.payment_status != PaymentStatus.LINK_SENT or order.reminder_sent_at:
         return False
 
     await current_sender().send_template(
         customer.whatsapp_number,
         tpl.PAYMENT_REMINDER,
-        customer.name or "there",
+        customer.greeting_name,
         order.order_number,
         order.slot_label or "your chosen slot",
         button_value=order.order_number,
@@ -126,15 +202,20 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     outlet = await session.get(Outlet, order.outlet_id) if order.outlet_id else None
     outlet_name = outlet.name if outlet else "Shero"
 
-    # 2. Confirmation to the customer.
-    await current_sender().send_template(
-        customer.whatsapp_number,
-        tpl.PAYMENT_SUCCESS,
-        order.order_number,
-        f"{order.total:.2f}",
-        outlet_name,
-        order.slot_label or "your chosen slot",
-    )
+    # 2. Confirmation to the customer. The money is taken by now, so a
+    # WhatsApp failure must not stop the CRM record and the kitchen alert.
+    try:
+        await current_sender().send_template(
+            customer.whatsapp_number,
+            tpl.PAYMENT_SUCCESS,
+            order.order_number,
+            f"{order.total:.2f}",
+            outlet_name,
+            order.slot_label or "your chosen slot",
+        )
+    except IntegrationError as exc:
+        log.error("payment_success_message_failed", order_number=order.order_number,
+                  error=str(exc))
 
     # 3. Lead -> Contact and the Order record (spec step 16).
     await crm_sync.convert_and_record_order(customer, order, outlet_name)
@@ -159,7 +240,7 @@ async def handle_payment_failed(session: AsyncSession, order: Order,
     await current_sender().send_template(
         customer.whatsapp_number,
         tpl.PAYMENT_FAILED,
-        customer.name or "there",
+        customer.greeting_name,
         order.order_number,
         button_value=order.order_number,
     )
@@ -177,17 +258,33 @@ async def handle_payment_expired(session: AsyncSession, order: Order,
     order.payment_status = PaymentStatus.EXPIRED
     # The whole point of the 30-minute expiry: give the window back.
     await slots.release_holds_for_order(session, order.id, reason="payment_expired")
+    await _restore_cart(session, order, customer)
     await session.flush()
 
     await current_sender().send_template(
         customer.whatsapp_number,
         tpl.PAYMENT_EXPIRED,
-        customer.name or "there",
+        customer.greeting_name,
         button_value=order.order_number,
     )
     await crm_sync.advance_stage(customer, LeadStage.PAYMENT_ABANDONED)
     log.info("payment_expired", order_number=order.order_number)
     return True
+
+
+async def _restore_cart(session: AsyncSession, order: Order,
+                        customer: Customer) -> None:
+    """Put an expired order's dishes back in the cart, unless it has new ones.
+
+    The payment_expired message promises "your cart is still saved", and its
+    Order Now button opens the menu on that cart.
+    """
+    from app.services import cart as cart_service
+    from app.services.order_changes import as_cart
+
+    conversation, lines = await cart_service.for_customer(session, customer)
+    if not lines:
+        conversation.set(cart=as_cart(order.items or []))
 
 
 async def refund_order(session: AsyncSession, order: Order, customer: Customer,

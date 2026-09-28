@@ -63,7 +63,9 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("META_SYSTEM_USER_TOKEN", "System User Token", True),
     ],
     "Maps": [
-        ("GOOGLE_MAPS_API_KEY", "Google Maps API Key", True),
+        ("GOOGLE_MAPS_API_KEY", "Google Maps API Key (server: Geocoding API)", True),
+        ("GOOGLE_MAPS_BROWSER_KEY",
+         "Google Maps Browser Key (Maps JavaScript API, referrer-restricted)", False),
     ],
     "Business rules": [
         ("TAX_PERCENT", "Tax percent applied to the dish subtotal", False),

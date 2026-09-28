@@ -15,8 +15,11 @@ from __future__ import annotations
 from decimal import Decimal
 
 from app.core.config import settings
+from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
 from app.db.models import ConversationStep, LeadStage
+from app.integrations.gallabox import template_status
+from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.messages import Button, ListRow, ListSection
 from app.services import cart as cart_service
 from app.services import kitchen as kitchen_service
@@ -34,7 +37,9 @@ MAX_QUANTITY = 20
 
 
 # --- step 6: cuisine ---------------------------------------------------------
-async def send_order_link(ctx: FlowContext) -> None:
+async def send_order_link(ctx: FlowContext, *, body: str | None = None,
+                          open_at: str | None = None,
+                          button: str | None = None) -> None:
     """Send a personal link to the web storefront (ORDER_MODE=web).
 
     The conversation parks on CUISINE_MENU so that "menu" re-sends a fresh
@@ -42,7 +47,8 @@ async def send_order_link(ctx: FlowContext) -> None:
     lands in the chat search rather than a dead end.
     """
     try:
-        url = order_link.build_url(ctx.customer.id)
+        url = order_link.build_url(ctx.customer.id, open_at=open_at)
+        suffix = order_link.link_suffix(ctx.customer.id, open_at=open_at)
     except RuntimeError as exc:
         # No signing secret configured - fall back to chat browsing rather
         # than leaving the customer with nothing.
@@ -50,9 +56,53 @@ async def send_order_link(ctx: FlowContext) -> None:
         await _show_cuisine_list(ctx)
         return
 
-    await ctx.reply_text(p.ORDER_LINK_PROMPT.format(url=url))
-    log.info("order_link_sent", customer_id=str(ctx.customer.id))
+    # The usual message is the menu_link template: View Menu and Get new link
+    # together, which a plain link message cannot carry. A message with its
+    # own wording (Change menu, Update location) cannot use the fixed
+    # template text, so it goes as a plain link message.
+    if body is None and await _send_menu_template(ctx, suffix):
+        ctx.goto(ConversationStep.CUISINE_MENU)
+        return
+
+    # A tappable button beats a bare link: it opens in WhatsApp's own browser,
+    # so the customer never leaves the app, and there is nothing to mistype.
+    # `cta_url` needs no template but does need the 24-hour window, and not
+    # every WhatsApp provider passes it through - so a refusal falls back to
+    # the plain link rather than leaving the customer with no menu at all.
+    try:
+        await ctx.reply_cta_url(
+            body or p.ORDER_LINK_BUTTON_BODY,
+            url=url,
+            display_text=button or p.ORDER_LINK_BUTTON_LABEL,
+            footer=p.ORDER_LINK_FOOTER,
+        )
+        log.info("order_link_sent", customer_id=str(ctx.customer.id), kind="button")
+    except IntegrationError as exc:
+        log.warning("order_link_button_failed", error=str(exc))
+        await ctx.reply_text(p.ORDER_LINK_PROMPT.format(url=url))
+        log.info("order_link_sent", customer_id=str(ctx.customer.id), kind="text")
+
     ctx.goto(ConversationStep.CUISINE_MENU)
+
+
+async def _send_menu_template(ctx: FlowContext, suffix: str) -> bool:
+    """The menu_link template. False if it is not approved or could not be sent.
+
+    Approval is checked first: Gallabox accepts a send for an unapproved
+    template and it then fails silently, so a send error alone would leave
+    the customer with nothing. On False the caller sends the plain View Menu
+    message, whose footer tells the customer to type "new link".
+    """
+    if not await template_status.is_approved(tpl.MENU_LINK.name):
+        log.info("menu_link_not_approved_using_fallback")
+        return False
+    try:
+        await ctx.reply_template(tpl.MENU_LINK, button_value=suffix)
+    except IntegrationError as exc:
+        log.warning("menu_link_template_failed", error=str(exc))
+        return False
+    log.info("order_link_sent", customer_id=str(ctx.customer.id), kind="template")
+    return True
 
 
 async def show_cuisines(ctx: FlowContext) -> None:

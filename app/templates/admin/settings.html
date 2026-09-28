@@ -50,66 +50,33 @@
     </div>
   </header>
 
+  {# One button: the data centre (com, in, eu, ...) is read from Zoho's reply,
+     and the client id and secret come from .env. #}
   <form method="post" action="{{ url_for('admin_zoho_connect') }}" class="p-5">
-    <div class="grid gap-4 sm:grid-cols-2">
-      <div>
-        <label class="mb-1.5 block text-sm font-medium text-stone-700">Client ID</label>
-        <input name="zoho_client_id" value="{{ zoho.client_id }}" autocomplete="off"
-               spellcheck="false" placeholder="1000.XXXXXXXXXXXXXXXXXXXX"
-               class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs
-                      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-      </div>
-
-      <div>
-        <label class="mb-1.5 flex items-center gap-2 text-sm font-medium text-stone-700">
-          Client Secret
-          {% if zoho.secret_set %}{{ ui.badge('set', 'good') }}{% endif %}
-        </label>
-        <input name="zoho_client_secret" type="password" autocomplete="off"
-               {% if not secrets_enabled %}disabled{% endif %}
-               placeholder="{{ 'Leave blank to keep the current value' if zoho.secret_set else 'Paste it here' }}"
-               class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs
-                      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20
-                      disabled:bg-stone-100 disabled:text-stone-400">
-      </div>
-
-      <div>
-        <label class="mb-1.5 block text-sm font-medium text-stone-700">Data centre</label>
-        <select name="zoho_data_center"
-                class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+    {% if zoho.client_ready %}
+      <div class="flex flex-wrap items-center gap-2">
+        <select name="zoho_data_center" aria-label="Zoho domain"
+                class="rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none
                        focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
           {% for value, label in zoho.centres %}
             <option value="{{ value }}" {% if zoho.data_centre == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
-        <p class="mt-1 text-[11px] text-stone-400">
-          Must match the domain you log in at - the data centres are isolated.
-        </p>
-      </div>
-
-      <div>
-        <label class="mb-1.5 block text-sm font-medium text-stone-700">Orders module API name</label>
-        <input name="zoho_orders_module" value="{{ zoho.orders_module }}" autocomplete="off"
-               spellcheck="false" placeholder="Orders"
-               class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs
-                      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-      </div>
-
-      <div class="flex items-end">
-        <button class="w-full rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white
+        <button class="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white
                        hover:bg-brand-700">
           {% if zoho.connected %}Reconnect Zoho{% else %}Connect Zoho{% endif %}
         </button>
       </div>
-    </div>
-
-    <div class="mt-4 rounded-lg bg-stone-50 px-4 py-3 text-[11px] leading-relaxed text-stone-500">
-      In Zoho's API console create a <strong>Server-based Application</strong> and
-      register this exact Authorized Redirect URI:
-      <code class="mt-1 block rounded bg-white px-2 py-1 font-mono text-stone-700 select-all">{{ zoho.redirect_uri }}</code>
-      Pressing Connect sends you to Zoho to approve access; the refresh token is
-      stored encrypted here, so there is nothing to copy back.
-    </div>
+      <p class="mt-2 text-[11px] text-stone-400">
+        Pick the domain your Zoho CRM opens on (crm.zoho.com, crm.zoho.in, ...).
+      </p>
+    {% else %}
+      <p class="text-sm text-stone-600">
+        Add <code class="font-mono text-xs">ZOHO_CLIENT_ID</code> and
+        <code class="font-mono text-xs">ZOHO_CLIENT_SECRET</code> to <code class="font-mono text-xs">.env</code>
+        to enable Connect Zoho.
+      </p>
+    {% endif %}
   </form>
 </section>
 

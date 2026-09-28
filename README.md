@@ -73,7 +73,7 @@ and `alembic upgrade head` works as-is. Production still runs Postgres.
 | Delivery slots + holds | Complete, generated from the kitchen's operating hours |
 | Uber Direct delivery quote | Complete |
 | Stripe checkout, expiry, refunds | Complete, with the short Pay Now redirect |
-| Zoho leads, stages, conversion, orders | Complete |
+| Zoho Leads (funnel stage), Orders | Complete; fields added by `scripts/setup_zoho_crm.py` |
 | 10 WhatsApp templates | Defined and validated in code; **await Meta approval** |
 | Order fulfilment (steps 17–19) | Complete — dashboard + ops API |
 | Scheduled reminder / expiry / feedback | Complete |

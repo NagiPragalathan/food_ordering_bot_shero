@@ -25,6 +25,21 @@ class ZohoClient(ApiClient):
     def __init__(self) -> None:
         super().__init__(base_url=settings.zoho_api_url)
 
+    async def _get_client(self):
+        """The pooled client, rebuilt if the data centre has changed.
+
+        Connect Zoho saves the data centre while the server runs; a client
+        built at import time kept calling zohoapis.com for a .in account,
+        and every call came back 401.
+        """
+        current = settings.zoho_api_url
+        if current != self.base_url:
+            log.info("zoho_api_host_changed", host=current)
+            await self.aclose()
+            self._client = None
+            self.base_url = current
+        return await super()._get_client()
+
     async def default_headers(self) -> dict[str, str]:
         token = await get_access_token()
         return {
@@ -48,30 +63,20 @@ class ZohoClient(ApiClient):
     def _module_path(self, module: str) -> str:
         return f"/crm/{API_VERSION}/{module}"
 
+    # Shero's CRM has workflows on its modules (kitchen-partner onboarding and
+    # the like). Records the bot writes must not set those off, so every
+    # write passes an empty trigger list instead of Zoho's default.
+    NO_TRIGGERS: list[str] = []
+
     async def create_record(self, module: str, fields: dict) -> str | None:
         """Insert one record; returns the new Zoho id."""
-        body = {"data": [fields], "trigger": ["workflow"]}
+        body = {"data": [fields], "trigger": self.NO_TRIGGERS}
         result = await self.post(self._module_path(module), json=body)
         return _first_record_id(result)
 
     async def update_record(self, module: str, record_id: str, fields: dict) -> str | None:
-        body = {"data": [{"id": record_id, **fields}], "trigger": ["workflow"]}
+        body = {"data": [{"id": record_id, **fields}], "trigger": self.NO_TRIGGERS}
         result = await self.put(self._module_path(module), json=body)
-        return _first_record_id(result)
-
-    async def upsert_record(self, module: str, fields: dict,
-                            duplicate_check_fields: list[str]) -> str | None:
-        """Insert-or-update keyed on `duplicate_check_fields`.
-
-        Used for Leads keyed on Phone so a returning WhatsApp number can never
-        create a second Lead (spec section 2).
-        """
-        body = {
-            "data": [fields],
-            "duplicate_check_fields": duplicate_check_fields,
-            "trigger": ["workflow"],
-        }
-        result = await self.post(f"{self._module_path(module)}/upsert", json=body)
         return _first_record_id(result)
 
     async def search(self, module: str, criteria: str) -> list[dict]:
@@ -95,25 +100,39 @@ class ZohoClient(ApiClient):
         records = (result or {}).get("data") or []
         return records[0] if records else None
 
-    async def convert_lead(self, lead_id: str, *, overwrite: bool = False) -> dict:
-        """Convert a Lead into a Contact (spec step 16).
+    # -- field metadata (scripts/setup_zoho_crm.py) ---------------------------
+    async def list_fields(self, module: str) -> list[dict]:
+        result = await self.get(f"/crm/{API_VERSION}/settings/fields",
+                                params={"module": module})
+        return (result or {}).get("fields", []) or []
 
-        Returns the created entity ids, e.g. {"Contacts": "...", "Accounts": "..."}.
-        Deals are deliberately not created - orders live in the custom Orders
-        module instead.
+    async def create_fields(self, module: str, fields: list[dict]) -> list[dict]:
+        """Create up to five custom fields (Zoho's per-call limit).
+
+        The create API is v8-only. Returns Zoho's per-field results; a
+        failed field is raised, not skipped.
         """
-        body = {
-            "data": [{
-                "overwrite": overwrite,
-                "notify_lead_owner": False,
-                "notify_new_entity_owner": False,
-            }]
-        }
-        result = await self.post(
-            f"{self._module_path('Leads')}/{lead_id}/actions/convert", json=body
-        )
-        records = (result or {}).get("data") or []
-        return records[0] if records else {}
+        result = await self.post("/crm/v8/settings/fields", params={"module": module},
+                                 json={"fields": fields}, expected=(200, 201))
+        rows = (result or {}).get("fields") or []
+        for row in rows:
+            if row.get("status") == "error":
+                raise IntegrationError(
+                    "zoho", f"field create failed: {row.get('code')} {row.get('message')} "
+                            f"{row.get('details')}", payload=row)
+        return rows
+
+    async def add_picklist_option(self, module: str, field_id: str, option: str) -> None:
+        """Add one option to a custom picklist; existing options are kept."""
+        body = {"fields": [{"pick_list_values": [
+            {"display_value": option, "actual_value": option}]}]}
+        result = await self.request("PATCH", f"/crm/v8/settings/fields/{field_id}",
+                                    params={"module": module}, json=body)
+        for row in (result or {}).get("fields") or []:
+            if row.get("status") == "error":
+                raise IntegrationError(
+                    "zoho", f"picklist update failed: {row.get('code')} {row.get('message')}",
+                    payload=row)
 
 
 def _first_record_id(result: Any) -> str | None:

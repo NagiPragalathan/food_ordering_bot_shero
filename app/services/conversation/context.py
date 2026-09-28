@@ -8,7 +8,7 @@ changing this file, not twenty handlers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,31 +29,54 @@ class FlowContext:
     customer: Customer
     conversation: Conversation
     event: InboundEvent
+    # How many messages this event has sent the customer. The engine reads it
+    # after the step handler: zero means the customer would be left with
+    # silence, which is never the right answer.
+    sent: int = field(default=0, init=False)
 
     # --- outbound ------------------------------------------------------------
     async def reply_text(self, body: str) -> None:
         await current_sender().send_text(self.customer.whatsapp_number, body,
                                  name=self.customer.name)
+        self.sent += 1
 
     async def reply_buttons(self, body: str, buttons: list[m.Button], *,
                             header: str | None = None,
                             footer: str | None = None) -> None:
         await current_sender().send_buttons(self.customer.whatsapp_number, body, buttons,
                                     header=header, footer=footer)
+        self.sent += 1
 
     async def reply_list(self, body: str, sections: list[m.ListSection], *,
                          button_text: str = "Choose",
                          header: str | None = None) -> None:
         await current_sender().send_list(self.customer.whatsapp_number, body, sections,
                                  button_text=button_text, header=header)
+        self.sent += 1
+
+    async def reply_cta_url(self, body: str, *, url: str, display_text: str,
+                            header: str | None = None,
+                            footer: str | None = None) -> None:
+        await current_sender().send_cta_url(
+            self.customer.whatsapp_number, body, url=url,
+            display_text=display_text, header=header, footer=footer)
+        self.sent += 1
+
+    async def reply_template(self, spec, *values: object,
+                             button_value: str | None = None) -> None:
+        await current_sender().send_template(self.customer.whatsapp_number, spec,
+                                             *values, button_value=button_value)
+        self.sent += 1
 
     async def request_location(self, body: str) -> None:
         await current_sender().request_location(self.customer.whatsapp_number, body)
+        self.sent += 1
 
     async def reply_products(self, sections: list[dict], *, header: str,
                              body: str, footer: str | None = None) -> None:
         await current_sender().send_product_list(self.customer.whatsapp_number, sections,
                                          header=header, body=body, footer=footer)
+        self.sent += 1
 
     async def handover(self, note: str | None = None) -> None:
         await current_sender().handover_to_agent(self.customer.whatsapp_number, note=note)

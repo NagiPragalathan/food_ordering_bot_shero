@@ -15,7 +15,7 @@ from decimal import Decimal
 
 import stripe
 
-from app.core.config import settings
+from app.core.config import is_unset, settings
 from app.core.exceptions import PaymentError
 from app.core.logging import get_logger
 
@@ -24,6 +24,21 @@ log = get_logger(__name__)
 # Stripe rejects an expiry closer than 30 minutes or further than 24 hours.
 MIN_EXPIRY_MINUTES = 30
 MAX_EXPIRY_MINUTES = 24 * 60
+
+
+# With no STRIPE_SECRET_KEY the checkout is mocked: the order flow and the
+# WhatsApp summary run end to end, and Pay Now opens a "test payment" page
+# instead of Stripe. Nothing is charged and no webhook will mark it paid.
+MOCK_SESSION_PREFIX = "mock_"
+
+
+def mock_mode() -> bool:
+    """True while no Stripe key is configured."""
+    return is_unset(settings.stripe_secret_key)
+
+
+def mock_checkout_url(order_number: str) -> str:
+    return f"{settings.public_base_url.rstrip('/')}/pay/mock/{order_number}"
 
 
 def _apply_api_key() -> None:
@@ -102,10 +117,17 @@ async def create_checkout_session(
     ttl_minutes: int | None = None,
 ) -> dict:
     """Create the Checkout Session and return {id, url, expires_at}."""
-    _apply_api_key()
     currency = (currency or settings.stripe_currency).lower()
     minutes = clamp_expiry_minutes(ttl_minutes or settings.payment_link_ttl_minutes)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+    if mock_mode():
+        log.warning("stripe_mock_checkout", order_number=order_number,
+                    reason="STRIPE_SECRET_KEY is not set")
+        return {"id": f"{MOCK_SESSION_PREFIX}{order_number}",
+                "url": mock_checkout_url(order_number), "expires_at": expires_at}
+
+    _apply_api_key()
 
     params: dict = {
         "mode": "payment",
@@ -146,6 +168,8 @@ async def create_checkout_session(
 
 async def expire_session(session_id: str) -> None:
     """Expire a session early (slot released, or order cancelled)."""
+    if session_id.startswith(MOCK_SESSION_PREFIX):
+        return   # nothing exists at Stripe to expire
     _apply_api_key()
     try:
         await stripe.checkout.Session.expire_async(session_id)

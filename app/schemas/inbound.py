@@ -23,7 +23,19 @@ class InboundKind(StrEnum):
     REPLY = "reply"          # button tap or list selection
     LOCATION = "location"    # shared location pin
     CART = "cart"            # catalogue order / cart submission
+    MEDIA = "media"          # voice note, photo, file... - nothing to read
     UNKNOWN = "unknown"
+
+
+# Message types a customer sends that the bot cannot read. They still deserve
+# an answer ("please type instead") rather than silence. Anything else we do
+# not recognise - a reaction, a status receipt - stays UNKNOWN and is ignored:
+# replying to a thumbs-up is noise, and replying to an event we cannot place
+# risks the bot answering its own echoes.
+MEDIA_TYPES = frozenset({
+    "audio", "voice", "image", "video", "document", "sticker",
+    "contacts", "unsupported",
+})
 
 
 @dataclass
@@ -72,9 +84,16 @@ def parse_inbound(body: dict) -> InboundEvent:
     whatsapp = _first_dict(payload, "whatsapp", "message") or payload
 
     contact = _first_dict(payload, "contact", "from", "sender") or {}
+    # Gallabox puts the sender on the message object as `whatsapp.from`, the
+    # mirror of the `whatsapp.to` it records on outbound. Missing that meant a
+    # perfectly good message parsed to a blank number and was dropped as
+    # unrecognised, with the webhook still answering 200 - so Gallabox saw a
+    # healthy endpoint while the customer got no reply.
     number = _clean_number(
         contact.get("phone")
         or contact.get("phoneNumber")
+        or whatsapp.get("from")
+        or whatsapp.get("phone")
         or payload.get("from")
         or payload.get("phone")
         or body.get("from")
@@ -122,6 +141,11 @@ def parse_inbound(body: dict) -> InboundEvent:
 
     if event.kind is InboundKind.UNKNOWN and event.text:
         event.kind = InboundKind.TEXT
+
+    if event.kind is InboundKind.UNKNOWN and (
+        msg_type in MEDIA_TYPES or any(key in whatsapp for key in MEDIA_TYPES)
+    ):
+        event.kind = InboundKind.MEDIA
 
     return event
 

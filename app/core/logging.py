@@ -34,6 +34,10 @@ def configure_logging() -> None:
     logging.basicConfig(
         format="%(message)s", stream=sys.stdout, level=settings.log_level.upper()
     )
+    # httpx logs every request URL at INFO, query string included - which
+    # printed Zoho's refresh token and client secret. Our own upstream_call
+    # line already records each call without them.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     processors: list[Any] = [
         structlog.contextvars.merge_contextvars,

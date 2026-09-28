@@ -5,7 +5,12 @@ Written for: the Shero team who will run the bot day to day.
 `https://api.<yourdomain>/admin/` — or `http://localhost:8000/admin/` when
 running locally.
 
-Six screens: Dashboard, Menu, Import, Orders, Chat tester, Settings.
+Five screens in the sidebar: **Dashboard, Menu, Orders, Chat tester,
+Settings**.
+
+The **Import** page is hidden from the sidebar but still works — go straight
+to `/admin/import`. Only the nav entry was removed, so putting it back is a
+one-line change in `app/templates/admin/base.html`.
 
 ---
 
@@ -38,18 +43,67 @@ A banner at the top lists any credentials still missing.
 
 The whole menu, grouped by cuisine and category exactly as your sheet is.
 
-For each dish you can:
+You can run the menu entirely from this page - the sheet import is for loading
+it in bulk, not the only way in.
 
-- **Change the price** — takes effect on the next order immediately
-- **Toggle availability** — a hidden dish disappears from WhatsApp but stays
-  on past orders
-- **See the margin** — price minus cost, from the sheet's PPP column
+### Adding things
 
-You can also **hide an entire cuisine** from the WhatsApp menu without
-deleting anything.
+| Button | What it does |
+|---|---|
+| **Add a dish** | Name, category, price, cost, description, pack size, serves and a photo. It is on sale the moment you save. |
+| **New category** | A section inside the cuisine you are looking at, e.g. "Festival Specials" |
+| **New cuisine** | A whole new tab. Add a category in it before adding dishes - a dish has to live in a category. |
+
+A photo can be **uploaded** or given as a **link**. Either way it is downscaled
+and stored on this server rather than hot-linked, exactly as the importer does,
+so a customer's page never depends on somebody else's host staying up. Leave
+both empty and the dish shows a drawn placeholder.
+
+> A dish added here gets the **same id the importer would give it** (cuisine +
+> category + name). So if the same dish later appears in your sheet, the import
+> updates this row instead of creating a duplicate.
+
+### Editing
+
+Each row has a quick edit for the two things that change most - **price** and
+**Available**. Saving there touches nothing else, so it cannot blank a
+description by accident.
+
+**Edit full details** opens the rest: name, cost, description, pack size,
+serves and a replacement photo. Leave the photo empty to keep the current one.
+
+> Renaming a dish **does not** change its id. Carts people are holding right
+> now, paid orders and Stripe records all point at that id, so it stays put.
+
+### Removing
+
+| Action | Effect |
+|---|---|
+| **Available** unticked | Hidden from customers, kept on past orders. Reversible. |
+| **Delete** on a dish | Gone for good |
+| **Delete the ... category** | The category and every dish in it |
+| **Delete cuisine** | The cuisine, its categories and all of their dishes |
+
+Each asks you to confirm first, and says how many dishes will go.
+
+Deleting is safe for your records: an order stores its own copy of what was
+bought, so a delivered order still shows the right dishes and prices after the
+dish is deleted. Someone holding that dish in an open cart is told it is
+unavailable at checkout - the same path an out-of-stock dish takes.
+
+**Hiding is usually the better choice** for something seasonal. Delete is for
+things that were wrong to begin with.
+
+### Also on this page
+
+- Each dish shows its **margin** - price minus cost, from the sheet's PPP
+  column.
+- **Hide from menu** takes a whole cuisine out of WhatsApp without deleting
+  anything.
+- **Search** matches dish names within the cuisine you are viewing.
 
 > Prices here are what customers pay (your MRP column). The PPP column is
-> stored as cost and is shown only as a margin figure — it never reaches a
+> stored as cost and is shown only as a margin figure - it never reaches a
 > customer, a Stripe charge or a Zoho record.
 
 ---
@@ -168,7 +222,7 @@ effect immediately** — no redeploy to rotate a key.
 | Group | What it connects |
 |---|---|
 | WhatsApp (Gallabox) | API key, secret, channel ID, webhook token |
-| Zoho CRM | Client ID, secret, data centre — connected by OAuth |
+| Zoho CRM | Domain dropdown and **Connect Zoho** |
 | Stripe | Secret key, publishable key, webhook secret, currency |
 | Uber Direct | Customer ID, client ID, client secret |
 | Meta Catalogue | Catalogue ID, system user token |
@@ -199,16 +253,12 @@ than stored in the clear.
 
 ### Zoho CRM
 
-Zoho is connected by OAuth rather than by pasting a refresh token. Enter the
-Client ID and Client Secret from Zoho's API console, pick the **data centre**
-from the dropdown, and press **Connect Zoho**.
-
-The data centre is a dropdown rather than a text field on purpose: Zoho's data
-centres are isolated, so a `.in` org rejects `.com` credentials with a generic
-error that is hard to diagnose.
-
-The card shows the exact **Authorized Redirect URI** to register on the Zoho
-client. It must match character for character.
+Zoho is connected by OAuth rather than by pasting a refresh token. The card
+is a **domain** dropdown (zoho.com, zoho.in, ...) and **Connect Zoho**. The
+Client ID and Secret come from `.env`, and the card says so if they are
+missing. The consent screen opens on the chosen domain; the data centre
+Zoho reports in its reply wins over the choice. The client needs **Multi-DC** turned on, and the
+redirect URI to register is in [zoho-setup.md](zoho-setup.md).
 
 Once connected the card shows **connected**, with **Test connection** and
 **Disconnect**. Disconnect deletes the stored refresh token and leaves the

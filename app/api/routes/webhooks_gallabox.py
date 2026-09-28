@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.core.security import verify_gallabox_token
 from app.db.session import get_session
 from app.schemas.inbound import parse_inbound
+from app.services import allowlist
 from app.services.conversation.engine import handle_event
 
 log = get_logger(__name__)
@@ -30,10 +31,24 @@ async def gallabox_webhook(
     session: AsyncSession = Depends(get_session),
     authorization: str | None = Header(default=None),
     x_gallabox_token: str | None = Header(default=None),
+    x_webhook_secret: str | None = Header(default=None),
+    token: str | None = None,
 ) -> dict:
-    """Receive one WhatsApp message and run it through the bot."""
-    if not verify_gallabox_token(x_gallabox_token or authorization):
-        log.warning("gallabox_webhook_rejected", reason="bad token")
+    """Receive one WhatsApp message and run it through the bot.
+
+    The token may arrive as `X-Gallabox-Token`, `Authorization`,
+    `X-Webhook-Secret`, or a `?token=` query parameter. Several webhook
+    consoles let you set only a URL, so the query form is there as a fallback
+    - it is the same shared secret either way, though it does end up in access
+    logs, so a header is preferable where the console allows one.
+    """
+    supplied = x_gallabox_token or authorization or x_webhook_secret or token
+    if not verify_gallabox_token(supplied):
+        # Name the headers that arrived (never their values) so a misconfigured
+        # sender can be diagnosed without a guessing game.
+        log.warning("gallabox_webhook_rejected", reason="bad token",
+                    headers_seen=sorted(request.headers.keys()),
+                    had_query_token=bool(token))
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid webhook token")
 
     try:
@@ -46,8 +61,32 @@ async def gallabox_webhook(
         return {"status": "ignored", "reason": "unexpected payload"}
 
     event = parse_inbound(body)
+
+    # Test mode: answer only the listed numbers. Checked before anything else
+    # happens, so another customer gets no record, no reply and no Zoho lead -
+    # their message simply carries on to your team in Gallabox.
+    if event.whatsapp_number and not allowlist.permits(event.whatsapp_number):
+        # Last four digits only: enough to tell the tester from a customer
+        # without writing strangers' full numbers into the logs.
+        log.info("sender_not_allowlisted", message_id=event.message_id,
+                 number_tail=event.whatsapp_number[-4:])
+        return {"status": "ignored", "reason": "sender not in BOT_ALLOWED_NUMBERS"}
+
     log.info("gallabox_webhook_received", kind=str(event.kind),
              message_id=event.message_id)
+
+    if not event.is_actionable:
+        # An envelope we could not read looks identical to a delivered message
+        # from Gallabox's side: it gets its 200 and never retries, while the
+        # customer waits for a reply that is never coming. Log the shape (keys
+        # only - the body carries the customer's own words and number) so the
+        # gap is diagnosable from the log rather than by guesswork.
+        log.warning("gallabox_webhook_unreadable",
+                    reason="no number" if not event.whatsapp_number else "unknown type",
+                    body_keys=sorted(body.keys()),
+                    whatsapp_keys=sorted((body.get("whatsapp") or {}).keys())
+                    if isinstance(body.get("whatsapp"), dict) else [],
+                    event_name=str(body.get("event") or body.get("type") or ""))
 
     handled = await handle_event(session, event)
     return {"status": "ok" if handled else "ignored"}

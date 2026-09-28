@@ -2,12 +2,15 @@ Written for: the Shero Zoho CRM administrator.
 
 # Zoho CRM setup
 
-Everything the bot needs configured in Zoho, in the order it should be done.
-Nothing here requires a developer — it is all Setup screens.
+Everything the bot needs in Zoho. Shero's CRM is on **zoho.in**.
 
-If you name anything differently, that is fine: tell us the API names and we
-change one file (`app/integrations/zoho/fields.py`). Nothing else in the
-codebase hardcodes a Zoho field name.
+The bot writes each food customer as a **Lead** and each paid order to the
+**Orders** module, linked to the Lead. It never converts a Lead and never
+writes to **Contacts**, which are Kitchen Partners in this CRM. Its writes do
+not set off Zoho workflows.
+
+Every Zoho field name the bot uses is in one file,
+`app/integrations/zoho/fields.py`.
 
 ---
 
@@ -30,17 +33,26 @@ the OAuth exchange: Admin → Settings → Zoho CRM → **Connect Zoho**.
    | Authorized Redirect URIs | `https://api.<yourdomain>/admin/settings/zoho/callback` |
 
    The redirect URI must match **character for character**, including the
-   scheme and any trailing path. The Settings page prints the exact value to
-   paste, so copy it from there rather than typing it.
+   scheme and any trailing path: `PUBLIC_BASE_URL` followed by
+   `/admin/settings/zoho/callback`. For the test tunnel that is
+   `https://shero-order-bot.loca.lt/admin/settings/zoho/callback`.
 
-4. Click **CREATE** and note the **Client ID** and **Client Secret**.
+4. Click **CREATE** and note the **Client ID** and **Client Secret**. Put them
+   in `.env` as `ZOHO_CLIENT_ID` and `ZOHO_CLIENT_SECRET`.
+5. On the client's **Settings** tab, turn on **Multi-DC** and enable every data
+   centre. Connecting always starts at `accounts.zoho.com`; with Multi-DC on,
+   an account on `.in`, `.eu` and so on can sign in there too.
 
 ### Connect
 
-In Admin → Settings → Zoho CRM, paste the Client ID and Client Secret, pick
-your **data centre** from the dropdown, and press **Connect Zoho**. You are
-sent to Zoho to approve access, and the refresh token is stored encrypted —
-there is nothing to copy back and nothing to email.
+Admin → Settings → Zoho CRM has a **domain** dropdown (zoho.com, zoho.in, ...)
+and **Connect Zoho**. Pick the domain your CRM opens on and the app was
+created on; you are sent to that Zoho domain to approve access. Zoho's reply says which data centre the account is on
+(`location=in`, `us`, `eu`, ...), and the bot stores that as
+`ZOHO_DATA_CENTER` with the refresh token, encrypted. Nobody picks the data
+centre, and there is nothing to copy back or email. Only known `location`
+values are accepted, because the client secret is sent to that data centre's
+accounts host.
 
 Scopes requested: `ZohoCRM.modules.ALL`, `ZohoCRM.settings.ALL`,
 `ZohoCRM.users.READ`.
@@ -59,132 +71,126 @@ Scopes requested: `ZohoCRM.modules.ALL`, `ZohoCRM.settings.ALL`,
 > access tokens (~15 per 10 minutes). The bot caches tokens, so this is only a
 > concern if many instances run at once.
 
-## 2. Lead Status picklist
+## 2. Fields the bot adds
 
-The bot writes the eleven spec stages into the standard **Lead Status** field.
+`python -m scripts.setup_zoho_crm` lists what is missing, and `--apply` creates
+it. It only ever adds: nothing is renamed or deleted, and running it again is
+safe. The definitions are in `app/integrations/zoho/schema.py`. Created on
+28 Sep 2026:
 
-Setup → Customization → Modules → **Leads** → Lead Status → add these values
-**exactly as written**:
-
-```
-New Enquiry
-Details Captured
-Cuisine Selected
-Cart Created
-Not Serviceable
-Outlet Selected
-Slot Selected
-Payment Link Sent
-Payment Abandoned
-Payment Failed
-Converted
-```
-
-Using the standard field rather than a custom one means Zoho's built-in lead
-funnel and conversion reports work with no extra configuration.
-
-## 3. Custom fields on Leads **and** Contacts
-
-Add each to both modules, so the data survives conversion.
-
-| Field label | Type | API name | Holds |
+| Module | Field | Type | Holds |
 |---|---|---|---|
-| WhatsApp Number | Single Line | `WhatsApp_Number` | The number that messaged us |
-| Selected Outlet | Single Line | `Selected_Outlet` | Chosen kitchen name |
-| Distance KM | Decimal | `Distance_KM` | Distance to that kitchen |
-| Cuisine Preference | Single Line | `Cuisine_Preference` | Last cuisine chosen |
-| Ad ID | Single Line | `Ad_ID` | Click-to-WhatsApp ad |
-| Campaign ID | Single Line | `Campaign_ID` | Click-to-WhatsApp campaign |
-| Apartment Unit | Single Line | `Apartment_Unit` | Apartment / unit / floor |
-| Stage Timestamps | **Multi Line** | `Stage_Timestamps` | JSON: when each stage was reached |
+| Leads | Bot Stage (`Bot_Stage`) | Picklist, the 11 stages below | Where the customer is in the ordering funnel |
+| Leads | Bot Stage History (`Bot_Stage_History`) | Multi-line | One line per stage: `2026-09-28 10:04 UTC  Cart Created` |
+| Leads | Selected Outlet (`Selected_Outlet`) | Single line | Kitchen that serves them |
+| Leads | Distance KM (`Distance_KM`) | Decimal | Distance to that kitchen |
+| Orders | Lead (`Lead`) | Lookup to Leads | The customer; shows as an "Orders" list on the Lead |
+| Orders | Outlet Name (`Outlet_Name`) | Single line | Kitchen name |
+| Orders | Delivery Slot (`Delivery_Slot`) | Single line | e.g. "Fri 25 Sep, 7:00 PM - 8:00 PM" |
+| Orders | Delivery Charge (`Delivery_Charge`) | Currency | Uber delivery fee |
+| Orders | Taxes and Fees (`Taxes_and_Fees`) | Currency | Uber's extra fees plus tax |
+| Orders | Order Total (`Order_Total`) | Currency | What the customer paid |
+| Orders | Stripe Payment ID (`Stripe_Payment_ID`) | Single line | Stripe payment reference |
+| Orders | Delivered Time (`Delivered_Time`) | Date/Time | When it was delivered |
+| Orders | Channel option **WhatsApp Bot** | Picklist option | Tells bot orders apart in reports |
 
-**About Stage Timestamps.** The spec asks for a timestamp per stage change so
-reports show where and when customers drop off. Rather than eleven date
-fields cluttering the layout, it is stored as one JSON blob:
+Bot Stage values (spec section 2): New Enquiry, Details Captured, Cuisine
+Selected, Cart Created, Not Serviceable, Outlet Selected, Slot Selected,
+Payment Link Sent, Payment Abandoned, Payment Failed, Converted.
 
-```json
-{"New Enquiry": "2026-09-22T10:00:00+00:00",
- "Details Captured": "2026-09-22T10:00:41+00:00"}
-```
+The bot's own stage has its own field rather than **Lead Status**, which the
+kitchen-partner team uses for its applicants.
 
-If you would rather have eleven individually reportable datetime fields,
-**tell us before you build this** — it is a small change now and a migration
-later.
+> Six fields were also added to the **Customers** module on 28 Sep, before
+> the bot moved to Leads (Bot Stage, Bot Stage History, Selected Outlet,
+> Distance KM, Cuisine Preference, Ad ID). The bot no longer uses them; they
+> are empty and can be deleted in Setup.
 
-## 4. The Orders module
+> **Order Total vs Grand Total.** The Orders module's own `Grand_Total` is a
+> formula over the dish lines, so it leaves out the delivery charge and fees.
+> `Order_Total` is the amount actually charged.
 
-Setup → Modules and Fields → **Create New Module**, named `Orders`.
+## 3. What goes where
 
-| Field label | Type | API name |
+**Leads** (one per WhatsApp number):
+
+| Zoho field (label) | From the bot | When |
 |---|---|---|
-| Order ID | Single Line (**primary field**) | `Name` |
-| Contact Name | **Lookup → Contacts** | `Contact_Name` |
-| Outlet | Single Line | `Outlet` |
-| Items | Multi Line | `Items` |
-| Dish Total | Currency | `Dish_Total` |
-| Delivery Charge | Currency | `Delivery_Charge` |
-| Tax | Currency | `Tax` |
-| Total | Currency | `Total` |
-| Delivery Slot | Single Line | `Delivery_Slot` |
-| Delivery Address | Multi Line | `Delivery_Address` |
-| Stripe Payment ID | Single Line | `Stripe_Payment_ID` |
-| Order Stage | **Picklist** | `Order_Stage` |
-| Delivered Time | Date/Time | `Delivered_Time` |
+| First Name / Last Name | Name the customer gave ("WhatsApp Customer" until then) | First message, then the name step |
+| Contact Number (`Phone`) | WhatsApp number, `+` and digits | First message |
+| Email | Email the customer gave | Email step |
+| Lead Source | `Whatsapp` | First message |
+| Facebook Ad ID / Facebook Ad Campaign ID | Click-to-WhatsApp ad and campaign | First message |
+| Address (`Street`), Address Second Line, PinCode (`Zip_Code`), Latitude, Longitude | The delivery address | As soon as an address is saved, and again when delivery is checked |
+| Cuisine (`Native_Cuisine_at_home`) | Cuisine of the dishes picked (Chettinad, Andhra, Kerala) | When a dish from a new cuisine is added |
+| Selected Outlet, Distance KM | Kitchen that delivers, and how far | Delivery checked |
+| Bot Stage, Bot Stage History | Funnel stage | Every stage change |
 
-`Order_Stage` picklist values:
+**Orders** (one per paid order):
+
+| Zoho field | From the bot |
+|---|---|
+| Order No | Our order number, e.g. `SHO-260928-ABCDE` |
+| Lead | The customer's Lead |
+| Customer No | Contact number |
+| Channel | `WhatsApp Bot` |
+| Order Status | See the mapping below |
+| Address, Latitude, Longitude | Delivery address and pin |
+| Cuisine | Customer's cuisine |
+| Item Details | One row per dish: name (`SAP_Name`), quantity, unit price |
+| Order Instructions | Delivery instructions |
+| Order Placed Time / Order Accepted Time | Order created / paid |
+| Order Dispatched Time / Delivered Time | Out for delivery / delivered |
+| Outlet Name, Delivery Slot, Delivery Charge, Taxes and Fees, Order Total, Stripe Payment ID | See section 2 |
+
+Our order stages -> the existing **Order Status** options:
+
+| Bot order stage | Order Status |
+|---|---|
+| Paid & Slot Booked, Sent to Kitchen | Confirmed |
+| Out for Delivery | Dispatched |
+| Delivered | Completed |
+| Cancelled, Refunded | Cancelled |
+
+## 4. How records flow
 
 ```
-Pending Payment
-Paid & Slot Booked
-Sent to Kitchen
-Out for Delivery
-Delivered
-Cancelled
-Refunded
+First message      -> Lead (found by phone, else created), Bot Stage New Enquiry
+Each step          -> Bot Stage + Bot Stage History; details as they are captured
+Payment succeeds   -> Bot Stage Converted; Order created and linked to the Lead
+Delivery updates   -> Order Status (and dispatch / delivered time) updated
 ```
 
-> `Delivery_Charge` carries the Uber delivery fee **plus** Uber's extra fees
-> as a single figure, matching what the customer saw on the summary. `Tax` is
-> only our own sales tax, if you charge one.
+The spec's "Lead -> Contact" step becomes **Bot Stage = Converted**: in this
+CRM a Contact is a Kitchen Partner, so the Lead is not converted.
 
-## 5. How records flow
+Returning customers are matched on Phone, so a number gets one Lead and every
+paid order is linked to it. Zoho's search takes about a minute to find a newly
+created record; the bot keeps the Lead's id after creating it, so this only
+matters if the bot's own database is wiped.
 
-```
-First message      -> Lead created (upsert on Phone, so never duplicated)
-Each step          -> Lead Status + Stage Timestamps updated
-Payment succeeds   -> Lead converted to Contact, Order created under it
-Delivery updates   -> Order Stage updated
-```
+Orders are filed **when paid**, as the spec says. Unpaid and changed orders
+stay in the bot's own dashboard, not in Zoho's Orders.
 
-Returning customers are matched on the WhatsApp number in the standard `Phone`
-field. An existing Contact means a new Order is filed against them and no
-second Lead is created.
+## 5. Suggested workflows
 
-**Deals are deliberately not created on conversion.** Orders live in the
-Orders module instead, which is what the spec describes.
+Not required by the bot, and not set off by it (the bot's writes skip
+workflows). A workflow on a **field update** of Bot Stage, run by a person or
+a schedule, can still use:
 
-## 6. Suggested workflows
+- **Payment Abandoned**: assign a follow-up task.
+- **Not Serviceable**: tag for an area expansion list.
+- **Payment Failed**: alert an agent to reach out.
 
-Not required by the bot, but the spec mentions re-engagement:
-
-- **Abandoned payment** — Lead Status becomes `Payment Abandoned`: assign a
-  follow-up task, or trigger the `payment_expired` template from Gallabox.
-- **Not serviceable** — Lead Status becomes `Not Serviceable`: tag for an area
-  expansion list.
-- **Payment failed** — alert an agent to reach out.
-
-## 7. Verifying it works
-
-Once the credentials are in `.env`:
+## 6. Verifying it works
 
 ```bash
-python -m scripts.check_config      # confirms nothing is missing
-curl localhost:8000/health/readiness
+python -m scripts.setup_zoho_crm     # "Nothing to do" = every field is there
 ```
 
-Then send one WhatsApp message to the bot and confirm a Lead appears with
-Lead Status `New Enquiry`. If it does not, the application log will name the
-reason — look for `zoho_ensure_lead_failed`.
+Then send one WhatsApp message to the bot: a Lead appears with Bot Stage
+`New Enquiry`. If it does not, the application log names the reason: look for
+`zoho_ensure_lead_failed` or `zoho_lead_update_failed`.
 
-Remember: the bot is built so Zoho failures never block a customer. A missing
-Lead means a configuration problem to fix, not a lost order.
+The bot is built so Zoho failures never block a customer. A missing record
+means a configuration problem to fix, not a lost order.

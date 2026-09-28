@@ -14,10 +14,39 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.config import settings
 from app.db.models import Base, Category, Cuisine, Customer, MenuItem, Outlet
+
+
+@pytest.fixture(autouse=True)
+def _answer_everyone(monkeypatch):
+    """The suite runs as production: the bot answers every number.
+
+    A developer's `.env` may restrict BOT_ALLOWED_NUMBERS to their own phone
+    for live testing on the business number. That is a property of one
+    machine and must not decide whether the tests pass. A test that wants
+    test mode sets it itself, which overrides this.
+    """
+    monkeypatch.setattr(settings, "bot_allowed_numbers", "")
+
+
+@pytest.fixture(autouse=True)
+def _templates_approved(monkeypatch):
+    """Every template counts as approved unless a test says otherwise.
+
+    The real check asks Gallabox; a test must never reach the network. Tests
+    of the not-yet-approved fallback patch this to return False.
+    """
+    from app.integrations.gallabox import template_status
+
+    async def approved(name: str) -> bool:
+        return True
+
+    monkeypatch.setattr(template_status, "is_approved", approved)
 
 
 @pytest_asyncio.fixture

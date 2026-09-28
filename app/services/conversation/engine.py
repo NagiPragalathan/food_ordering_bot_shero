@@ -27,6 +27,7 @@ from app.services.conversation.handlers import (
     location,
     menu,
     onboarding,
+    order_changes,
 )
 from app.services.customers import get_or_create_conversation, get_or_create_customer
 
@@ -99,6 +100,7 @@ async def handle_event(session: AsyncSession, event: InboundEvent) -> bool:
 
     try:
         await _dispatch(ctx)
+        await _never_silent(ctx)
     except BotFlowError as exc:
         # Expected flow failures carry a message written for the customer.
         log.info("flow_error", step=ctx.step, error=str(exc))
@@ -139,6 +141,13 @@ async def _dispatch(ctx: FlowContext) -> None:
         await _resume(ctx, step)
         return
 
+    # A voice note or photo mid-flow: nothing a step handler could read, so
+    # say so and point back at the question. At START the welcome goes out
+    # as usual - any first message deserves it.
+    if ctx.event.kind is InboundKind.MEDIA and step is not ConversationStep.START:
+        await ctx.reply_text(f"{p.MEDIA_NOT_SUPPORTED}\n\n{_hint(step)}")
+        return
+
     handler = STEP_HANDLERS.get(step)
     if handler is None:
         log.warning("no_handler_for_step", step=str(step))
@@ -149,11 +158,21 @@ async def _dispatch(ctx: FlowContext) -> None:
 
 
 async def _handle_global_intent(ctx: FlowContext) -> bool:
-    """Keywords that work from anywhere. Returns True if one fired."""
-    if _current_step(ctx) in FREE_TEXT_STEPS:
+    """Keywords that work from anywhere. Returns True if one fired.
+
+    Reads `choice` rather than `text` so a template's quick-reply button
+    counts too: tapping "Order Now" arrives as a button payload, not as typed
+    text, and would otherwise fall through to the step handler.
+    """
+    tapped = bool(ctx.event.reply_id)
+
+    # Typed words are ambiguous while capturing free text - somebody living on
+    # "Help Street" must be able to give their address. A tapped button is not
+    # ambiguous, so it still works there.
+    if not tapped and _current_step(ctx) in FREE_TEXT_STEPS:
         return False
 
-    text = ctx.text.lower().strip()
+    text = ctx.choice.lower().strip()
     if not text:
         return False
 
@@ -161,14 +180,58 @@ async def _handle_global_intent(ctx: FlowContext) -> bool:
         await onboarding.hand_over(ctx)
         return True
 
-    if text in p.RESTART_KEYWORDS:
+    # The order_summary template's buttons. Only for someone who has
+    # details: the buttons only ever reach a customer who placed an order.
+    if ctx.customer.has_details and text in p.CHANGE_MENU_KEYWORDS:
+        await order_changes.change_menu(ctx)
+        return True
+    if ctx.customer.has_details and text in p.UPDATE_LOCATION_KEYWORDS:
+        await order_changes.update_location(ctx)
+        return True
+
+    # "Get new link" button, or the expired page's prefilled message. Goes
+    # through show_cuisines so ORDER_MODE still decides link vs chat menu.
+    if text == p.NEW_LINK or text in p.NEW_LINK_KEYWORDS:
         if ctx.customer.has_details:
-            await onboarding.show_main_menu(ctx)
+            await menu.show_cuisines(ctx)
         else:
             await onboarding.start(ctx)
         return True
 
+    if text in p.RESTART_KEYWORDS:
+        # start() greets a known customer by name ("Welcome back, Asha!")
+        # before the menu, and asks a new one for their name. Jumping
+        # straight to the menu read as a cold reply to a "hi".
+        await onboarding.start(ctx)
+        return True
+
     return False
+
+
+async def _never_silent(ctx: FlowContext) -> None:
+    """Catch-all: a message that got no reply at all gets a nudge.
+
+    Every handler is meant to answer, but a stale button or an input a step
+    did not anticipate can slip through every branch. The customer cannot
+    tell that apart from a broken bot, so rather than trust each branch, the
+    engine checks the one thing that matters - did we say anything?
+
+    The one deliberate silence is a chat handed to a human: the agent answers
+    there, and the bot talking over them would be worse.
+    """
+    step = _current_step(ctx)
+    if ctx.sent or step is ConversationStep.HANDED_OVER:
+        return
+
+    log.warning("handler_sent_nothing", step=str(step), kind=str(ctx.event.kind),
+                reply_id=ctx.event.reply_id)
+    await ctx.reply_text(
+        p.UNMATCHED_FREE_TEXT if step in FREE_TEXT_STEPS else p.FALLBACK)
+
+
+def _hint(step: ConversationStep) -> str:
+    """What to do instead, phrased for the step the customer is at."""
+    return p.TYPE_YOUR_ANSWER if step in FREE_TEXT_STEPS else p.MEDIA_HINT
 
 
 async def _resume(ctx: FlowContext, step: ConversationStep) -> None:

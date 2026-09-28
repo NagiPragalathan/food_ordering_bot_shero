@@ -130,3 +130,60 @@ async def test_a_network_failure_is_reported_not_swallowed(monkeypatch):
     with pytest.raises(IntegrationError) as exc:
         await zoho_connect.exchange_code("code", "id", "secret", "com")
     assert "Could not reach Zoho" in exc.value.message
+
+
+# --- data centre from Zoho's reply -------------------------------------------
+@pytest.mark.parametrize("location,centre", [
+    ("us", "com"), ("in", "in"), ("IN", "in"), ("eu", "eu"),
+    ("au", "au"), ("jp", "jp"), ("ca", "ca"),
+])
+def test_the_callback_location_names_the_data_centre(location, centre):
+    assert zoho_connect.centre_from_location(location) == centre
+
+
+@pytest.mark.parametrize("location", [None, "", "evil.example", "https://accounts.attacker"])
+def test_an_unknown_location_is_not_trusted(location):
+    """The secret is posted to the centre's host, so the URL must not pick it."""
+    assert zoho_connect.centre_from_location(location) is None
+
+
+# --- after connecting --------------------------------------------------------
+@pytest.mark.asyncio
+async def test_the_api_client_follows_a_data_centre_saved_while_running(monkeypatch):
+    """Built at import on .com, it must call zohoapis.in once .in is saved."""
+    from app.core.config import settings
+    from app.integrations.zoho.client import ZohoClient
+
+    monkeypatch.setattr(settings, "zoho_data_center", "com")
+    client = ZohoClient()
+    first = await client._get_client()
+    assert str(first.base_url).startswith("https://www.zohoapis.com")
+
+    monkeypatch.setattr(settings, "zoho_data_center", "in")
+    second = await client._get_client()
+    assert str(second.base_url).startswith("https://www.zohoapis.in")
+    assert first.is_closed
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_the_token_refresh_keeps_secrets_out_of_the_url(monkeypatch):
+    from app.core.config import settings
+    from app.integrations.zoho import oauth
+
+    monkeypatch.setattr(settings, "zoho_client_id", "id")
+    monkeypatch.setattr(settings, "zoho_client_secret", "shh")
+    monkeypatch.setattr(settings, "zoho_refresh_token", "rt")
+    seen = {}
+
+    async def post(self, url, params=None, data=None, **kwargs):
+        seen.update(url=str(url), params=params, data=data)
+        return httpx.Response(200, json={"access_token": "at", "expires_in": 3600},
+                              request=httpx.Request("POST", url))
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+    oauth.invalidate_token()
+    assert await oauth.get_access_token(force_refresh=True) == "at"
+    assert "shh" not in seen["url"] and not seen["params"]
+    assert seen["data"]["client_secret"] == "shh"
+    oauth.invalidate_token()

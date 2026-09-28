@@ -19,9 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (BotFlowError, ConfigurationError,
                                  IntegrationError, PaymentError)
+from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import ConversationStep, Customer, OrderStage
+from app.db.models import ConversationStep, Customer, LeadStage, OrderStage
 from app.db.session import get_session
+from app.services import addresses, crm_sync, media_thumbs
 from app.services import cart as cart_service
 from app.services import kitchen as kitchen_service
 from app.services import menu as menu_service
@@ -37,35 +39,51 @@ UPSTREAM_DOWN = ("We could not work out the delivery charge just now. "
                  "Please try again shortly, or message us on WhatsApp.")
 PAYMENT_DOWN = ("We could not start the payment just now. Nothing has been "
                 "charged - please try again shortly.")
-LINK_EXPIRED = "This ordering link has expired."
 
 
 async def _customer(session: AsyncSession, token: str) -> Customer | None:
-    customer_id = order_link.read_token(token)
-    if customer_id is None:
-        return None
-    return await session.get(Customer, customer_id)
+    return await order_link.customer_for_token(session, token)
 
 
 def _expired(request: Request) -> HTMLResponse:
     """Shown when a link is old or tampered with."""
-    return templates.TemplateResponse(request, "order/expired.html", status_code=410)
+    return templates.TemplateResponse(request, "order/expired.html", {
+        "new_link_url": order_link.new_link_whatsapp_url(),
+    }, status_code=410)
 
 
 @router.get("/{token}", response_class=HTMLResponse)
 async def storefront(request: Request, token: str,
                      session: AsyncSession = Depends(get_session)):
-    """The page itself. Everything after this is JSON."""
+    """The menu page. Everything after this is JSON."""
+    return await _page(request, token, session, "order/index.html")
+
+
+@router.get("/{token}/location", response_class=HTMLResponse)
+async def location_page(request: Request, token: str,
+                        session: AsyncSession = Depends(get_session)):
+    """Address-only page for the order summary's Update location button.
+
+    The dishes stay; the customer picks an address, a time and confirms, on
+    the same JSON routes the menu page uses.
+    """
+    return await _page(request, token, session, "order/location.html")
+
+
+async def _page(request: Request, token: str, session: AsyncSession,
+                template: str) -> HTMLResponse:
     customer = await _customer(session, token)
     if customer is None:
         return _expired(request)
 
     kitchen = await kitchen_service.get_kitchen(session)
-    return templates.TemplateResponse(request, "order/index.html", {
+    return templates.TemplateResponse(request, template, {
         "token": token,
         "customer": customer,
         "kitchen": kitchen,
         "currency_symbol": "$",
+        # Public by design; see google_maps_browser_key in config.
+        "maps_browser_key": settings.google_maps_browser_key,
     })
 
 
@@ -74,7 +92,7 @@ async def menu_json(token: str, session: AsyncSession = Depends(get_session)) ->
     """The whole live menu, grouped for the page to render at once."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": LINK_EXPIRED}
+        return order_link.dead_link_response()
 
     cuisines = []
     for cuisine in await menu_service.list_cuisines(session):
@@ -97,6 +115,9 @@ async def menu_json(token: str, session: AsyncSession = Depends(get_session)) ->
                     # page falls back to a drawn placeholder rather than a
                     # broken image.
                     "image_url": item.image_url or "",
+                    # Card-sized copy for the list and the cart; image_url
+                    # stays the full photo for the dish's own sheet.
+                    "thumb_url": media_thumbs.thumb_url(item.image_url),
                     "description": item.description or "",
                     "category": category.name,
                     "cuisine": cuisine.name,
@@ -106,20 +127,8 @@ async def menu_json(token: str, session: AsyncSession = Depends(get_session)) ->
             cuisines.append({"name": cuisine.name, "slug": cuisine.slug,
                              "categories": categories})
 
-    return {"ok": True, "cuisines": cuisines, "saved": _saved_address(customer)}
-
-
-def _saved_address(customer: Customer) -> dict:
-    """Pre-fill the form from whatever the bot already captured."""
-    return {
-        "address_line1": customer.address_line1 or "",
-        "apartment_unit": customer.apartment_unit or "",
-        "delivery_instructions": customer.delivery_instructions or "",
-        "contact_number": customer.contact_number or customer.whatsapp_number,
-        "postal_code": customer.postal_code or "",
-        "name": customer.name or "",
-        "email": customer.email or "",
-    }
+    # Addresses are served by order_addresses.py, not bundled with the menu.
+    return {"ok": True, "cuisines": cuisines}
 
 
 @router.get("/{token}/cart")
@@ -127,7 +136,7 @@ async def read_cart(token: str, session: AsyncSession = Depends(get_session)) ->
     """The saved cart, so reopening the link picks up where it left off."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": LINK_EXPIRED}
+        return order_link.dead_link_response()
 
     _, lines = await cart_service.for_customer(session, customer)
     return _cart_response(lines)
@@ -143,7 +152,7 @@ async def update_cart(request: Request, token: str,
     """
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": LINK_EXPIRED}
+        return order_link.dead_link_response()
 
     body = await request.json()
     retailer_id = str(body.get("retailer_id") or "").strip()
@@ -173,6 +182,8 @@ async def update_cart(request: Request, token: str,
     lines = cart_service.set_quantity(conversation, retailer_id=retailer_id,
                                       name=item.name, price=item.price,
                                       quantity=quantity)
+    await crm_sync.advance_stage(customer, LeadStage.CART_CREATED, forward_only=True)
+    await _note_cuisine(session, customer, retailer_id)
     return _cart_response(lines)
 
 
@@ -181,11 +192,23 @@ async def clear_cart(token: str,
                      session: AsyncSession = Depends(get_session)) -> dict:
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": LINK_EXPIRED}
+        return order_link.dead_link_response()
 
     conversation, _ = await cart_service.for_customer(session, customer)
     cart_service.clear(conversation)
     return _cart_response([])
+
+
+async def _note_cuisine(session: AsyncSession, customer: Customer,
+                        retailer_id: str) -> None:
+    """The web menu has no cuisine step, so the dishes say which it is.
+
+    Written to Zoho only when it changes, not on every tap of +.
+    """
+    cuisine = await menu_service.cuisine_slug_for(session, retailer_id)
+    if cuisine and cuisine != customer.cuisine_preference:
+        customer.cuisine_preference = cuisine
+        await crm_sync.push_details(customer, cuisine=cuisine)
 
 
 def _cart_response(lines: list[dict]) -> dict:
@@ -203,21 +226,24 @@ async def check_address(request: Request, token: str,
     """Serviceability check, then the bookable slots (spec steps 10 and 13)."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": LINK_EXPIRED}
+        return order_link.dead_link_response()
 
     body = await request.json()
-    postal_code = str(body.get("postal_code") or "").strip()
-    if not postal_code:
-        return {"ok": False, "error": "Enter your ZIP code."}
+    try:
+        address = await addresses.get_owned(session, customer, body.get("address_id"))
+    except addresses.AddressError as exc:
+        return {"ok": False, "error": str(exc)}
 
+    # A map pin is exact; a typed address falls back to its ZIP.
     point = await kitchen_service.resolve_location(
-        latitude=_as_float(body.get("latitude")),
-        longitude=_as_float(body.get("longitude")),
-        postal_code=postal_code,
+        latitude=address.latitude,
+        longitude=address.longitude,
+        postal_code=address.postal_code,
     )
     check = await kitchen_service.check_service(session, point,
-                                               postal_code=postal_code)
+                                               postal_code=address.postal_code)
     if not check.is_serviceable:
+        await crm_sync.advance_stage(customer, LeadStage.NOT_SERVICEABLE)
         return {"ok": False, "serviceable": False,
                 "error": check.reason or "We do not deliver to that area yet."}
 
@@ -230,10 +256,17 @@ async def check_address(request: Request, token: str,
         return {"ok": False, "error": "There are no delivery slots available "
                                       "right now. Please try again later."}
 
-    # Remember the location so the bot does not re-ask on WhatsApp.
+    # Remember the address so the bot does not re-ask on WhatsApp, and so it
+    # is the one pre-selected next time.
+    await addresses.use_for_order(session, customer, address)
     if point is not None:
         customer.latitude, customer.longitude = point.latitude, point.longitude
-    customer.postal_code = postal_code
+
+    await crm_sync.advance_stage(customer, LeadStage.OUTLET_SELECTED, forward_only=True)
+    await crm_sync.push_details(
+        customer, **addresses.crm_details(address), outlet_name=kitchen.name,
+        distance_km=check.distance_km,
+    )
 
     return {
         "ok": True,
@@ -249,7 +282,7 @@ async def quote(request: Request, token: str,
     """Price the cart with delivery, for the summary screen (spec step 14)."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": LINK_EXPIRED}
+        return order_link.dead_link_response()
 
     body = await request.json()
     # The cart is read from the database, not from the request: the page is
@@ -269,12 +302,17 @@ async def quote(request: Request, token: str,
         return {"ok": False, "error": "Choose a delivery slot."}
 
     try:
+        address = await addresses.get_owned(session, customer, body.get("address_id"))
+    except addresses.AddressError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    try:
         priced = await pricing.price_cart(
             session, cart,
             outlet=kitchen,
             dropoff_latitude=customer.latitude,
             dropoff_longitude=customer.longitude,
-            dropoff_address=_dropoff(body, customer),
+            dropoff_address=_dropoff(address),
             slot_starts_at=slots.as_utc(slot.starts_at),
         )
     except BotFlowError as exc:
@@ -286,6 +324,7 @@ async def quote(request: Request, token: str,
         log.error("web_quote_failed", error=str(exc))
         return {"ok": False, "error": UPSTREAM_DOWN}
 
+    await crm_sync.advance_stage(customer, LeadStage.SLOT_SELECTED, forward_only=True)
     return {
         "ok": True,
         "lines": [{"name": line.name, "quantity": line.quantity,
@@ -306,7 +345,7 @@ async def confirm(request: Request, token: str,
     """Create the order, hold the slot, and send the payment link to WhatsApp."""
     customer = await _customer(session, token)
     if customer is None:
-        return {"ok": False, "error": LINK_EXPIRED}
+        return order_link.dead_link_response()
 
     body = await request.json()
     conversation, stored = await cart_service.for_customer(session, customer)
@@ -314,9 +353,10 @@ async def confirm(request: Request, token: str,
     if not cart:
         return {"ok": False, "error": "Your cart is empty."}
 
-    address = str(body.get("address_line1") or "").strip()
-    if not address:
-        return {"ok": False, "error": "Enter your delivery address."}
+    try:
+        address = await addresses.get_owned(session, customer, body.get("address_id"))
+    except addresses.AddressError as exc:
+        return {"ok": False, "error": str(exc)}
 
     kitchen = await kitchen_service.get_kitchen(session)
     if kitchen is None:
@@ -326,13 +366,9 @@ async def confirm(request: Request, token: str,
     if slot is None:
         return {"ok": False, "error": "Choose a delivery slot."}
 
-    # Save the details on the customer so WhatsApp and the CRM agree.
-    customer.address_line1 = address
-    customer.apartment_unit = str(body.get("apartment_unit") or "").strip() or None
-    customer.delivery_instructions = (
-        str(body.get("delivery_instructions") or "").strip() or None)
-    customer.contact_number = (
-        str(body.get("contact_number") or "").strip() or customer.whatsapp_number)
+    # Copy the chosen address onto the customer so WhatsApp and the CRM
+    # agree. The contact number is their WhatsApp number, never page input.
+    await addresses.use_for_order(session, customer, address)
 
     draft = None   # set once the order exists, so cleanup knows what to undo
     try:
@@ -341,7 +377,7 @@ async def confirm(request: Request, token: str,
             outlet=kitchen,
             dropoff_latitude=customer.latitude,
             dropoff_longitude=customer.longitude,
-            dropoff_address=_dropoff(body, customer),
+            dropoff_address=_dropoff(address),
             slot_starts_at=slots.as_utc(slot.starts_at),
         )
         order = await orders.create_draft_order(
@@ -352,7 +388,10 @@ async def confirm(request: Request, token: str,
         )
         draft = order
         await slots.hold_slot(session, slot_id=slot.id, order_id=order.id)
-        pay_url = await payments.create_payment_link(session, order, customer)
+        # The full summary, with Change menu and Update location, goes to
+        # WhatsApp; the page then hands the customer over to the chat.
+        pay_url = await payments.create_payment_link(session, order, customer,
+                                                     with_summary=True)
     except BotFlowError as exc:
         await _release(session, draft)
         return {"ok": False, "error": exc.customer_message}
@@ -377,7 +416,8 @@ async def confirm(request: Request, token: str,
     log.info("web_order_confirmed", order_number=order.order_number,
              customer_id=str(customer.id), total=str(order.total))
 
-    return {"ok": True, "order_number": order.order_number, "pay_url": pay_url}
+    return {"ok": True, "order_number": order.order_number, "pay_url": pay_url,
+            "whatsapp_url": order_link.whatsapp_chat_url()}
 
 
 # --- helpers -----------------------------------------------------------------
@@ -414,16 +454,9 @@ def _clean_cart(raw) -> list[dict]:
     return cart
 
 
-def _dropoff(body: dict, customer: Customer) -> dict:
+def _dropoff(address) -> dict:
     return {
-        "street": str(body.get("address_line1") or customer.address_line1 or ""),
-        "unit": str(body.get("apartment_unit") or customer.apartment_unit or ""),
-        "postal_code": str(body.get("postal_code") or customer.postal_code or ""),
+        "street": address.address_line1,
+        "unit": address.apartment_unit or "",
+        "postal_code": address.postal_code,
     }
-
-
-def _as_float(value) -> float | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None

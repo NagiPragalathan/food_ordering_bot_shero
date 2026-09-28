@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Shero Home Food</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Map for pinning the delivery address. Optional: the form works without it. -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
   <script>
     /* Warm, food-forward palette: deep cocoa surfaces, saffron accents and a
        chilli-red call to action against cream. */
@@ -59,7 +62,7 @@
 
 <!-- Category rail -->
 <div class="sticky top-[108px] z-20 border-b border-cream-200 bg-cream-100/95 backdrop-blur">
-  <nav id="cuisines" class="no-bar mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 pt-2.5 sm:px-6"></nav>
+  <nav id="cuisines" class="no-bar mx-auto flex max-w-6xl gap-2.5 overflow-x-auto px-4 pb-1 pt-4 sm:px-6"></nav>
   <nav id="chips" class="no-bar mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 py-2.5 sm:px-6"></nav>
 </div>
 
@@ -103,53 +106,20 @@
   </span>
 </button>
 
-<!-- Sheet: cart / address / summary / done -->
-<div id="sheet" class="fixed inset-0 z-40 hidden">
-  <div id="scrim" class="absolute inset-0 bg-black/40"></div>
-  <section class="absolute inset-x-0 bottom-0 flex max-h-[92vh] flex-col rounded-t-2xl bg-white sm:inset-x-auto sm:left-1/2 sm:bottom-auto sm:top-1/2 sm:w-[32rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:shadow-2xl">
-    <header class="flex items-center justify-between border-b border-cream-200 px-4 py-3">
-      <h2 id="sheet-title" class="text-base font-semibold">Your cart</h2>
-      <button id="sheet-close" class="rounded-lg p-1 text-cocoa-700/45 hover:bg-cream-100" aria-label="Close">✕</button>
-    </header>
-    <div id="sheet-body" class="flex-1 overflow-y-auto px-4 py-4"></div>
-    <footer id="sheet-foot" class="border-t border-cream-200 bg-white px-4 py-3"></footer>
-  </section>
-</div>
-
-<p id="toast" class="fixed inset-x-4 bottom-24 z-50 hidden rounded-xl bg-red-600 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+{% include "order/_sheet.html" %}
+{% include "order/_address_book.html" %}
+{% include "order/_checkout.html" %}
 
 <script>
 (function () {
-  const TOKEN = {{ token | tojson }};
-  const BASE  = '/order/' + TOKEN;
-  const $ = (id) => document.getElementById(id);
+  const ui = window.SheroUI({{ token | tojson }});
+  const { $, esc, money, toast, api, openSheet, closeSheet } = ui;
 
   let MENU = [];        // [{name, slug, categories:[{name, items:[...]}]}]
   let ITEMS = {};       // retailer_id -> item
   let CART = {};        // retailer_id -> quantity  (mirror of the server)
   let activeCuisine = 'all';
   let activeChip = 'all';
-  let slotId = null;
-
-  const money = (n) => '$' + Number(n || 0).toFixed(2);
-
-  function toast(msg) {
-    const t = $('toast');
-    t.textContent = msg;
-    t.classList.remove('hidden');
-    clearTimeout(t._timer);
-    t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
-  }
-
-  async function api(path, payload) {
-    const res = await fetch(BASE + path, payload ? {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    } : undefined);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.json();
-  }
 
   // --- cart (server is the source of truth) -------------------------------
   function applyCart(data) {
@@ -248,7 +218,7 @@
     [{ slug: 'all', name: 'All cuisines' }].concat(MENU).forEach(c => {
       const b = document.createElement('button');
       const on = c.slug === activeCuisine;
-      b.className = 'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-semibold transition ' +
+      b.className = 'shrink-0 rounded-full px-5 py-2 text-[13px] font-semibold transition ' +
         (on ? 'bg-cocoa-800 text-white shadow-sm'
             : 'border border-cream-200 bg-white text-cocoa-700/80 hover:border-cocoa-700/30');
       b.textContent = c.name;
@@ -341,9 +311,11 @@
     thumb.className = 'flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-saffron-50 text-3xl';
     if (item.image_url) {
       const img = document.createElement('img');
-      img.src = item.image_url;
+      img.src = item.thumb_url || item.image_url;
       img.alt = '';
       img.loading = 'lazy';
+      img.decoding = 'async';
+      img.width = 80; img.height = 80;   // reserve the box: no jump as it loads
       img.className = 'h-full w-full object-cover';
       img.addEventListener('error', () => { thumb.textContent = '🍲'; });
       thumb.appendChild(img);
@@ -480,23 +452,6 @@
     return wrap;
   }
 
-  // --- the sheet ----------------------------------------------------------
-  function openSheet(title, bodyHtml, footHtml) {
-    $('sheet-title').textContent = title;
-    $('sheet-body').innerHTML = bodyHtml;
-    $('sheet-foot').innerHTML = footHtml;
-    $('sheet').classList.remove('hidden');
-  }
-  function closeSheet() { $('sheet').classList.add('hidden'); }
-  $('scrim').addEventListener('click', closeSheet);
-  $('sheet-close').addEventListener('click', closeSheet);
-
-  function esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s == null ? '' : s;
-    return d.innerHTML;
-  }
-
   async function showCart() {
     const lines = Object.keys(CART).map(id => ({ id, qty: CART[id], item: ITEMS[id] }))
                         .filter(l => l.item);
@@ -510,7 +465,7 @@
     }
 
     const thumb = (item) => item.image_url
-      ? '<img src="' + esc(item.image_url) + '" alt="" loading="lazy" ' +
+      ? '<img src="' + esc(item.thumb_url || item.image_url) + '" alt="" loading="lazy" ' +
         'class="h-14 w-14 shrink-0 rounded-lg object-cover">'
       : '<div class="flex h-14 w-14 shrink-0 items-center justify-center ' +
         'rounded-lg bg-saffron-50 text-2xl">🍲</div>';
@@ -560,135 +515,17 @@
       }));
   }
 
-  function field(id, label, value, extra) {
-    return '<label class="mb-2.5 block"><span class="mb-1 block text-xs font-medium text-cocoa-700/80">' +
-      label + '</span><input id="' + id + '" value="' + esc(value || '') + '" ' + (extra || '') +
-      ' class="w-full rounded-lg border border-cream-200 px-3 py-2.5 text-sm outline-none focus:border-chilli-500"></label>';
-  }
-
-  let SAVED = {};
-  function showAddress() {
-    openSheet('Delivery details',
-      field('f-address', 'Street address', SAVED.address_line1) +
-      '<div class="grid grid-cols-2 gap-2">' +
-        field('f-apartment', 'Apartment / unit', SAVED.apartment_unit) +
-        field('f-zip', 'ZIP code', SAVED.postal_code, 'inputmode="numeric"') +
-      '</div>' +
-      field('f-contact', 'Contact number', SAVED.contact_number) +
-      field('f-instructions', 'Driver instructions', SAVED.delivery_instructions) +
-      '<div id="slots-wrap" class="mt-3 hidden"><h3 class="mb-2 text-sm font-semibold">Pick a delivery time</h3>' +
-      '<div id="slots" class="grid grid-cols-2 gap-2"></div></div>',
-      '<button id="check" class="w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white">' +
-      'Check delivery &amp; show times</button>');
-
-    $('check').addEventListener('click', checkAddress);
-  }
-
-  function addressPayload() {
-    return {
-      address_line1: ($('f-address') || {}).value?.trim() || '',
-      apartment_unit: ($('f-apartment') || {}).value?.trim() || '',
-      postal_code: ($('f-zip') || {}).value?.trim() || '',
-      contact_number: ($('f-contact') || {}).value?.trim() || '',
-      delivery_instructions: ($('f-instructions') || {}).value?.trim() || '',
-    };
-  }
-
-  async function checkAddress() {
-    const payload = addressPayload();
-    if (!payload.address_line1) { toast('Enter your street address.'); return; }
-    if (!payload.postal_code) { toast('Enter your ZIP code.'); return; }
-
-    const btn = $('check');
-    btn.disabled = true; btn.textContent = 'Checking…';
-    try {
-      const data = await api('/address', payload);
-      if (!data.ok) { toast(data.error); return; }
-
-      SAVED = Object.assign(SAVED, payload);
-      slotId = null;
-      const box = $('slots');
-      box.innerHTML = '';
-      data.slots.forEach(s => {
-        const b = document.createElement('button');
-        b.className = 'rounded-xl border border-cream-200 bg-white px-2 py-2.5 text-[12px] leading-tight';
-        b.textContent = s.label;
-        b.addEventListener('click', () => {
-          slotId = s.id;
-          Array.from(box.children).forEach(x => {
-            x.className = 'rounded-xl border border-cream-200 bg-white px-2 py-2.5 text-[12px] leading-tight';
-          });
-          b.className = 'rounded-xl border-2 border-herb-600 bg-herb-500/10 px-2 py-2.5 text-[12px] font-semibold leading-tight text-herb-700';
-          $('sheet-foot').innerHTML =
-            '<button id="go-summary" class="w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white">See the total</button>';
-          $('go-summary').addEventListener('click', showSummary);
-        });
-        box.appendChild(b);
-      });
-      $('slots-wrap').classList.remove('hidden');
-      $('slots-wrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    } catch (err) {
-      toast('Could not check that address: ' + err.message);
-    } finally {
-      btn.disabled = false; btn.textContent = 'Check delivery & show times';
-    }
-  }
-
-  async function showSummary() {
-    if (!slotId) { toast('Pick a delivery time.'); return; }
-    const btn = $('go-summary');
-    btn.disabled = true; btn.textContent = 'Pricing…';
-    try {
-      const data = await api('/quote', Object.assign({ slot_id: slotId }, SAVED));
-      if (!data.ok) { toast(data.error); return; }
-
-      const rows = data.lines.map(l =>
-        '<div class="flex justify-between py-1 text-sm"><span>' + l.quantity + ' × ' +
-        esc(l.name) + '</span><span class="tabular-nums">' + money(l.line_total) + '</span></div>').join('');
-      const row = (k, v) => '<div class="flex justify-between py-0.5 text-sm text-cocoa-700/80"><span>' +
-        k + '</span><span class="tabular-nums">' + money(v) + '</span></div>';
-
-      openSheet('Confirm your order',
-        rows + '<hr class="my-2 border-cream-200">' +
-        row('Subtotal', data.dish_total) + row('Delivery', data.delivery_fee) +
-        row('Taxes &amp; fees', Number(data.extra_fees) + Number(data.tax)) +
-        '<hr class="my-2 border-cream-200">' +
-        '<div class="flex justify-between text-base font-bold"><span>Total</span>' +
-        '<span class="tabular-nums">' + money(data.total) + '</span></div>' +
-        '<p class="mt-3 text-xs text-cocoa-700/60">Delivery: ' + esc(data.slot_label) + '</p>',
-        '<button id="place" class="w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white">' +
-        'Confirm &amp; get payment link</button>');
-
-      $('place').addEventListener('click', placeOrder);
-    } catch (err) {
-      toast('Could not price your order: ' + err.message);
-    } finally {
-      if ($('go-summary')) { btn.disabled = false; btn.textContent = 'See the total'; }
-    }
-  }
-
-  async function placeOrder() {
-    const btn = $('place');
-    btn.disabled = true; btn.textContent = 'Placing your order…';
-    try {
-      const data = await api('/confirm', Object.assign({ slot_id: slotId }, SAVED));
-      if (!data.ok) { toast(data.error); return; }
-
-      openSheet('Order placed',
-        '<div class="py-4 text-center">' +
-        '<div class="text-4xl">✅</div>' +
-        '<p class="mt-3 text-sm">Order <strong>' + esc(data.order_number) + '</strong></p>' +
-        '<p class="mt-1 text-sm text-cocoa-700/80">We have sent the payment link to your WhatsApp, ' +
-        'or pay right here. Your slot is held for 30 minutes.</p></div>',
-        '<a href="' + esc(data.pay_url) + '" class="block w-full rounded-xl bg-chilli-500 py-3 text-center text-sm font-semibold text-white">Pay now</a>');
-
-      applyCart({ cart: [], count: 0, subtotal: 0 });
-    } catch (err) {
-      toast('Could not place the order: ' + err.message);
-    } finally {
-      if ($('place')) { btn.disabled = false; btn.textContent = 'Confirm & get payment link'; }
-    }
-  }
+  // --- delivery address and checkout (shared with location.html) -------
+  const checkout = window.SheroCheckout(ui, {
+    onPlaced: () => applyCart({ cart: [], count: 0, subtotal: 0 }),
+  });
+  const book = window.SheroAddressBook({
+    api, openSheet, toast, esc, $, checkDelivery: checkout.checkDelivery,
+    kitchen: {{ {"lat": kitchen.latitude, "lng": kitchen.longitude} | tojson if kitchen else "null" }},
+    googleKey: {{ maps_browser_key | tojson }},
+  });
+  checkout.attach(book);
+  const showAddress = () => book.open();
 
   // --- boot ---------------------------------------------------------------
   $('cart-bar').addEventListener('click', showCart);
@@ -729,7 +566,6 @@
 
       MENU = menu.cuisines;
       MENU.forEach(c => c.categories.forEach(cat => cat.items.forEach(i => { ITEMS[i.id] = i; })));
-      SAVED = menu.saved || {};
 
       const total = Object.keys(ITEMS).length;
       $('sub').textContent = total + ' dishes · home delivery';

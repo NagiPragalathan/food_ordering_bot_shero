@@ -1,32 +1,123 @@
-Written for: whoever submits the templates in Gallabox for Meta approval.
+Written for: whoever manages the WhatsApp templates for the Shero number.
 
 # WhatsApp templates
 
-The 10 templates from section 3 of the spec. These must be created in Gallabox
-and **approved by Meta before go-live** — approval usually takes minutes but
-can take up to 24 hours, and a rejected template blocks that notification
-entirely.
+Thirteen templates: the 10 from section 3 of the spec, plus a welcome
+opener, the web order summary and the menu link.
+They must be **approved by Meta before go-live** — approval usually takes
+minutes but can take up to 24 hours, and a rejected template blocks that
+notification entirely.
 
 Replies inside a live conversation (welcome, menu, questions) are *not*
-templates and need no approval. Only these 10 do, because they are sent
-outside the 24-hour customer service window.
+templates and need no approval. Only these do, because they are sent outside
+the 24-hour customer service window.
 
-This page is generated from `app/integrations/gallabox/templates.py`, which is
-also what the code sends — so the two cannot drift. The parameter count is
-validated before any send, so a mismatch fails loudly here rather than as a
-generic error from Meta.
+They are defined in `app/integrations/gallabox/templates.py`, which is also
+what the code sends — so the wording here and the wording on the WABA cannot
+drift. The parameter count is validated before any send, so a mismatch fails
+loudly in our code rather than as a generic error from Meta.
+
+---
+
+## Creating them
+
+You do not have to type these into a dashboard. One command creates every
+template that does not exist yet and submits it to Meta:
+
+```bash
+python -m scripts.submit_templates --submit     # create the missing ones
+python -m scripts.submit_templates --status     # what Meta has decided so far
+python -m scripts.submit_templates              # just show the definitions
+```
+
+`--submit` goes through Gallabox, which forwards each template to Meta on our
+behalf. It needs `GALLABOX_ACCOUNT_ID` (the 24-hex id in any Gallabox
+dashboard URL) on top of the API key the bot already sends with — **not** a
+Meta system-user token, which belongs to the Business Manager that owns the
+WABA.
+
+Re-running is safe: anything already on the channel is reported, not
+duplicated.
+
+> `--submit --via-meta` uses the Graph API instead, for a WABA where you do
+> hold `META_SYSTEM_USER_TOKEN` and `META_WABA_ID`. Same definitions, same
+> component payloads.
+
+### Templates belong to one channel
+
+A template lives on the WhatsApp channel it was created for. Templates on the
+other Shero numbers are invisible to this one, which is why a brand-new
+sending number can send nothing at all until these are created and approved.
+
+### Fixing a rejected one
+
+The Gallabox dev API can create and list templates but **cannot edit or delete
+them** — both return 404. A template that comes back `error` or `rejected`
+keeps its name, so it has to be deleted in **Gallabox → Templates** before
+`--submit` can create a corrected one.
+
+To make that rare, `template_admin.check_body()` enforces Meta's body rules
+before anything is submitted. The one that has actually bitten us:
+
+> **A body may not start or end with a variable.** Trailing punctuation does
+> not count — `...for delivery at {{4}}.` is still "ending on a variable" and
+> is refused. Put words after the last `{{n}}`.
 
 ## Before you submit
 
 - **Category matters.** Utility templates are cheaper and are not subject to
-  marketing opt-out. The two Marketing ones below are marketing by nature
-  (re-engagement and a feedback request) and cannot be reclassified.
-- **Language:** English (`en`). Add more locales later by extending the
-  registry.
+  marketing opt-out. The three Marketing ones below are marketing by nature
+  (re-engagement, feedback, and the welcome opener) and cannot be
+  reclassified. `allow_category_change` is sent as true, so Meta may re-file a
+  template rather than reject it.
+- **Language:** English (`en`) — matching what `messages.template_message`
+  sends. A template approved as `en` cannot be sent as `en_US`.
+- **Formatting:** WhatsApp uses `*bold*`, not `**bold**`. Double asterisks
+  appear literally to the customer.
 - **Dynamic URL buttons** point at the short redirect on the client's domain,
-  configured in Meta as `https://pay.<domain>/{{1}}`. The bot supplies the
-  order number as the button parameter. Do **not** configure the raw Stripe
-  URL — Stripe checkout URLs exceed the WhatsApp button length limit.
+  `PAY_REDIRECT_BASE_URL` + `/{{1}}`. The bot supplies the order number as the
+  button parameter. Do **not** configure the raw Stripe URL — Stripe checkout
+  URLs exceed the WhatsApp button length limit.
+
+> **The URL is baked into the approved template.** Four templates carry a
+> dynamic-URL button, so moving from a test tunnel to the real domain means
+> deleting and re-submitting those four. Set `PAY_REDIRECT_BASE_URL` to the
+> production domain before submitting for go-live.
+
+---
+
+## Welcome
+
+## 11. `shero_welcome`
+
+- **Category:** Marketing
+- **Trigger:** Business-initiated opener, outside the 24-hour window
+- **Parameters:** `{{1}}` = customer_name
+- **Buttons:** quick reply — Order Now
+
+**Body:**
+
+```
+👋 Hi {{1}}! Welcome to *Shero Home Food* ❤️🇺🇸
+
+Looking for a delicious Indian vegetarian meal delivered to your home? 🍱
+
+We make ordering simple. Tap the button below to browse our menu, build your cart and pay securely.
+```
+
+`{{1}}` is filled from `customer.greeting_name`, so a number we have never
+heard from is greeted as **"Hi there!"** rather than "Hi ,". Send it with
+`python -m scripts.send_welcome <number>`, which creates the lead first — see
+[conversation-flow.md](conversation-flow.md) under *Opening a conversation*.
+
+Tapping **Order Now** sends the button's own text back to us as a button
+reply, which `_handle_global_intent` treats as a restart keyword and runs
+onboarding from. That is why the label must stay in `prompts.RESTART_KEYWORDS`
+— a test enforces it. Since the conversation is still at its first step, a lead
+we contacted first is **asked for its name** before anything else.
+
+A tapped button works even where typed text is ignored (mid-address capture,
+so that somebody on "Order Street" can still give their address).
 
 ---
 
@@ -37,7 +128,7 @@ generic error from Meta.
 - **Category:** Utility
 - **Trigger:** Order summary confirmed (step 14-15)
 - **Parameters:** `{{1}}` = customer_name, `{{2}}` = order_number, `{{3}}` = amount, `{{4}}` = slot_label
-- **Button:** "Pay Now" — dynamic URL, `https://pay.<domain>/{{1}}` (parameter: order number)
+- **Button:** "Pay Now" — dynamic URL, `<pay base>/{{1}}` (parameter: order number)
 
 **Body:**
 
@@ -45,12 +136,66 @@ generic error from Meta.
 Hi {{1}}, your Shero order #{{2}} comes to ${{3}} for the {{4}} delivery slot. Tap below to pay securely. The link is valid for 30 minutes.
 ```
 
+## 13. `menu_link`
+
+- **Category:** Utility
+- **Trigger:** Order Now, or a request for a new link - the web menu
+- **Parameters:** none in the body
+- **Buttons:** "View Menu" (dynamic URL, `<PUBLIC_BASE_URL>/order/{{1}}`,
+  parameter: the customer's signed link token), then quick reply
+  **Get new link**
+
+**Body:**
+
+```
+Here is our full menu 🍛
+
+Tap View Menu to browse all our dishes, add what you like to your cart and choose a delivery time - we will send your payment link right back here. The link is personal to you and works for a few hours.
+```
+
+Exists because a plain link message can carry only one button. Until it is
+approved the bot sends a single View Menu message instead, whose footer says
+to type "new link". Creating it refuses a `localhost` `PUBLIC_BASE_URL`,
+because the URL is baked into the approved template.
+
+## 12. `order_summary`
+
+- **Category:** Utility
+- **Trigger:** A web order is confirmed on the ordering page. Sent instead of
+  `payment_link`, which stays the fallback while this one is not approved.
+- **Parameters:** `{{1}}` = customer_name, `{{2}}` = order_number,
+  `{{3}}` = items, `{{4}}` = delivery_address, `{{5}}` = slot_label,
+  `{{6}}` = amount
+- **Buttons:** "Pay Now" (dynamic URL, `<pay base>/{{1}}`, parameter: order
+  number), then quick replies **Change menu** and **Update location**
+
+**Body:**
+
+```
+Hi {{1}}, here is your Shero order #{{2}}.
+
+*Items:* {{3}}
+*Deliver to:* {{4}}
+*Delivery:* {{5}}
+*Total:* ${{6}}
+
+Tap Pay Now to pay securely - the link is valid for 30 minutes. Need a change? Use the buttons below.
+```
+
+The layout lives in the body because a parameter may not contain line breaks:
+the items arrive as one line ("2 x Drumstick Sambar, 1 x Beans Sambar",
+capped, with "and N more"). **Change menu** and **Update location** release
+the unpaid order (slot hold and Stripe link), put its dishes back in the cart
+and send a fresh menu link; Update location's link opens the page on the
+address step. A paid order is never released - the customer is told to type
+*agent*.
+
 ## 2. `payment_reminder`
 
 - **Category:** Utility
 - **Trigger:** 15 minutes unpaid (step 15)
 - **Parameters:** `{{1}}` = customer_name, `{{2}}` = order_number, `{{3}}` = slot_label
-- **Button:** "Pay Now" — dynamic URL, `https://pay.<domain>/{{1}}` (parameter: order number)
+- **Button:** "Pay Now" — dynamic URL, `<pay base>/{{1}}` (parameter: order number)
 
 **Body:**
 
@@ -68,15 +213,18 @@ Hi {{1}}, your order #{{2}} is waiting for payment. Complete it to keep your {{3
 **Body:**
 
 ```
-Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} for delivery at {{4}}.
+Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} for delivery at {{4}}. Thank you for ordering with Shero!
 ```
+
+> The closing sentence is not decoration: without it the body ends on `{{4}}`,
+> which Meta refuses.
 
 ## 4. `payment_failed`
 
 - **Category:** Utility
 - **Trigger:** Stripe payment failed (step 16)
 - **Parameters:** `{{1}}` = customer_name, `{{2}}` = order_number
-- **Button:** "Retry Payment" — dynamic URL, `https://pay.<domain>/{{1}}` (parameter: order number)
+- **Button:** "Retry Payment" — dynamic URL, `<pay base>/{{1}}` (parameter: order number)
 
 **Body:**
 
@@ -89,7 +237,7 @@ Hi {{1}}, your payment for order #{{2}} didn't go through. Please try again.
 - **Category:** Marketing
 - **Trigger:** Link expired unpaid (step 15)
 - **Parameters:** `{{1}}` = customer_name
-- **Button:** "Order Now" — dynamic URL, `https://pay.<domain>/{{1}}` (parameter: order number)
+- **Button:** "Order Now" — dynamic URL, `<pay base>/{{1}}` (parameter: order number)
 
 **Body:**
 
@@ -161,8 +309,10 @@ Sorry, your order #{{1}} has been cancelled. A full refund has been started.
 **Body:**
 
 ```
-How was your Shero meal today? Rate your order #{{1}}.
+How was your Shero meal today? Rate order #{{1}} using the buttons below.
 ```
+
+> "using the buttons below" is there so the body does not end on `{{1}}`.
 
 ---
 
@@ -178,12 +328,14 @@ How was your Shero meal today? Rate your order #{{1}}.
 | `amount` | `48.19` | Two decimal places, no currency symbol — put the symbol in the template body |
 | `slot_label` | `Mon 22 Sep, 6:00 PM - 7:00 PM` | In the outlet's timezone |
 | `outlet_name` | `Shero Edison` | |
+| `items` | `2 x Drumstick Sambar, 1 x Beans Sambar` | One line, capped at 400 characters |
+| `delivery_address` | `6360 Lawyers Hill Road, Apt 4, 21075` | Street, unit and ZIP |
 
 ## After approval
 
-Nothing to change in the code — the template names are already wired up. Just
-confirm each one shows as **Approved** in Gallabox, then run one test order
-end to end in Stripe test mode to see them fire in sequence:
+Nothing to change in the code — the template names are already wired up. Check
+`--status` until everything reads `approved`, then run one test order end to
+end in Stripe test mode to see them fire in sequence:
 
 ```
 payment_link -> (wait 15 min) payment_reminder -> pay -> payment_success

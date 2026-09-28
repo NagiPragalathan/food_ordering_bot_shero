@@ -15,6 +15,8 @@ from __future__ import annotations
 # stale button from an earlier step is recognisable rather than misread.
 MENU_ORDER = "menu:order"
 MENU_TALK = "menu:talk"
+CHANGE_NAME = "email:change_name"
+NEW_LINK = "link:new"
 CHECK_AVAILABILITY = "cuisine:check_availability"
 CUISINE_PREFIX = "cuisine:"
 CATEGORY_PREFIX = "cat:"
@@ -41,13 +43,20 @@ WELCOME_ASK_NAME = (
 )
 NAME_REASK = "Sorry, I did not catch that. Please type your full name."
 ASK_EMAIL = "Thanks {name}! What is your email ID? We will send your receipt there."
+# Shown under the email question, so a mistyped name - or a greeting the bot
+# took as one - can be put right before anything else is asked.
+BTN_CHANGE_NAME = "Change name"
+ASK_NAME_AGAIN = "No problem - what is your full name?"
 EMAIL_REASK = (
     "That does not look like a valid email address. "
     "Please enter it again, for example asha@example.com"
 )
-WELCOME_BACK = "Welcome back, {name}! \U0001F44B"
+WELCOME_BACK = "Welcome back to Shero Home Food, {name}! \U0001F44B"
 MAIN_MENU = "What would you like to do?"
-BTN_ORDER_ONLINE = "Order Online"
+# One button is enough here: ordering is what people came for. A human is
+# still reachable by typing "agent" (see AGENT_KEYWORDS), and the Talk to Us
+# button still exists on the order_cancelled template, where it is needed.
+BTN_ORDER_NOW = "Order Now"
 BTN_TALK_TO_US = "Talk to Us"
 
 HANDOVER = (
@@ -67,9 +76,46 @@ ORDER_LINK_PROMPT = (
     "{url}\n\n"
     "_The link is personal to you and works for the next few hours._"
 )
-ORDER_LINK_FOLLOWUP = (
-    "Tap the link above to build your order. Send *menu* if you need a fresh link."
+# Get new link is a quick reply on the menu_link template. NEW_LINK is the id
+# of the separate button message sent before that template existed; a tap
+# on one still left in a chat is still honoured.
+BTN_NEW_LINK = "Get new link"
+# Typed on the expired page's WhatsApp button, and accepted as typed words.
+NEW_LINK_REQUEST = "New menu link"
+NEW_LINK_KEYWORDS = {"new menu link", "new link", "menu link", "get new link",
+                     "new menu"}
+
+# The order_summary template's quick replies. A template quick reply comes
+# back carrying its own label, so these are matched as (lower-cased) text.
+CHANGE_MENU_KEYWORDS = {"change menu"}
+UPDATE_LOCATION_KEYWORDS = {"update location"}
+ORDER_RELEASED = "No problem - I have released order #{order} and kept your cart."
+CHANGE_MENU_BODY = (
+    "Tap below to add or remove dishes, then pick your delivery time again."
 )
+UPDATE_LOCATION_BODY = (
+    "Tap *Update address* below to choose or add your delivery address. "
+    "Your dishes stay as they are - you just pick a delivery time again."
+)
+# cta_url button labels are capped at 20 characters.
+UPDATE_LOCATION_BUTTON = "Update address"
+ORDER_ALREADY_PAID = (
+    "Your order #{order} is already paid, so it can't be changed here. "
+    "Type *agent* and our team will help."
+)
+# Sent as a tappable button (cta_url) rather than a bare link, so the body
+# carries no URL. ORDER_LINK_PROMPT is the fallback for when the button
+# cannot be sent, and still spells the address out.
+ORDER_LINK_BUTTON_BODY = (
+    "Here is our full menu \U0001F35B\n\n"
+    "Tap below to browse all our dishes, add what you like to your cart, "
+    "choose a delivery time and we will send your payment link right back "
+    "here."
+)
+ORDER_LINK_BUTTON_LABEL = "View Menu"
+# Footer limit is 60 characters. The plain link message has no room for a
+# Get new link button, so it says what to type instead.
+ORDER_LINK_FOOTER = "Link expired? Just type: new link"
 CUISINE_LIST_BUTTON = "View options"
 CHECK_AVAILABILITY_LABEL = "Check Availability"
 CHECK_AVAILABILITY_DESC = "See if we deliver to your area"
@@ -172,6 +218,15 @@ FALLBACK = (
     "Sorry, I did not understand that. "
     "Please use the buttons above, or type 'menu' to start again."
 )
+# At a free-text step (name, email, address...) "menu" is read as the answer,
+# so pointing people at it there would send them round in circles.
+TYPE_YOUR_ANSWER = "Please type your answer to the question above."
+UNMATCHED_FREE_TEXT = "Sorry, I did not understand that. " + TYPE_YOUR_ANSWER
+MEDIA_NOT_SUPPORTED = (
+    "Sorry, I can only read typed messages and button taps - "
+    "not voice notes, photos or files."
+)
+MEDIA_HINT = "Please use the buttons above, or type 'menu' to start again."
 GENERIC_ERROR = (
     "Something went wrong on our side. Please try again in a moment, "
     "or type 'agent' to talk to our team."
@@ -179,7 +234,11 @@ GENERIC_ERROR = (
 NO_KITCHEN = (
     "We are not taking orders just now. Please try again shortly."
 )
-RESTART_KEYWORDS = {"menu", "start", "restart", "hi", "hello", "hey"}
+# "order" and its variants are here so a template quick-reply button
+# labelled "Order Now" starts the flow, as well as the typed word.
+RESTART_KEYWORDS = {"menu", "start", "restart", "hi", "hello", "hey",
+                    "order", "order now", "order online", "view menu",
+                    "see menu", "browse menu"}
 AGENT_KEYWORDS = {"agent", "human", "support", "help", "talk to us"}
 
 

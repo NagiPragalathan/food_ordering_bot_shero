@@ -52,6 +52,11 @@ class FakeGallabox:
         rows = [(r.id, r.title) for s in sections for r in s.rows]
         self.sent.append(SentMessage("list", to, body, {"rows": rows}))
 
+    async def send_cta_url(self, to, body, *, url, display_text,
+                           header=None, footer=None):
+        self.sent.append(SentMessage("cta_url", to, body,
+                                     {"url": url, "label": display_text}))
+
     async def request_location(self, to, body):
         self.sent.append(SentMessage("location_request", to, body))
 
@@ -215,8 +220,10 @@ async def test_full_order_journey(session, outlet, menu, bot):
     assert conversation.step == ConversationStep.MAIN_MENU
 
     # Step 5: main menu.
-    assert [b[1] for b in bot.last().payload["buttons"]] == [
-        "Order Online", "Talk to Us"]
+    # One button: ordering is what people came for. A human is still
+    # reachable by typing "agent" - covered just below, and load-bearing
+    # now that the Talk to Us button is gone from this step.
+    assert [b[1] for b in bot.last().payload["buttons"]] == ["Order Now"]
 
     # Step 6: cuisines come from the imported menu, plus Check Availability.
     await handle_event(session, reply("menu:order"))
@@ -362,6 +369,31 @@ async def test_talk_to_us_hands_over_and_stops_the_bot(session, outlet, menu, bo
     assert bot.sent == []
 
 
+async def test_typing_agent_reaches_a_human_without_a_button(
+        session, outlet, menu, bot):
+    """The main menu offers only Order Now, so the typed word is the way out."""
+    await _sign_up(session, bot)
+    bot.clear()
+
+    await handle_event(session, text("agent"))
+
+    _, conversation = await _state(session)
+    assert conversation.step == ConversationStep.HANDED_OVER
+    assert "handover" in bot.kinds()
+
+
+async def test_a_stale_talk_to_us_button_is_still_honoured(
+        session, outlet, menu, bot):
+    """Somebody may tap a Talk to Us button sent before this step changed."""
+    await _sign_up(session, bot)
+    bot.clear()
+
+    await handle_event(session, reply("menu:talk"))
+
+    _, conversation = await _state(session)
+    assert conversation.step == ConversationStep.HANDED_OVER
+
+
 async def test_out_of_range_location_ends_politely(session, far_outlet, menu, bot):
     """Only the far kitchen exists, so a nearby pin is out of its range."""
     await _sign_up(session, bot)
@@ -491,3 +523,265 @@ async def test_native_catalogue_cart_is_adopted(session, outlet, menu, bot):
     assert conversation.step == ConversationStep.CART_REVIEW
     cart = conversation.context["cart"]
     assert {line["retailer_id"] for line in cart} == {DRUMSTICK, RASAM}
+
+
+# --- template buttons --------------------------------------------------------
+async def test_a_template_quick_reply_button_starts_the_flow(session, outlet, menu, bot):
+    """A marketing template's "Order Now" button must work like typing it.
+
+    The tap arrives as a button payload, not as text, so the global-keyword
+    check has to read `choice` rather than `text`.
+    """
+    await _sign_up(session, bot)
+    bot.clear()
+
+    await handle_event(session, reply("ORDER"))
+
+    _, conversation = await _state(session)
+    assert conversation.step != ConversationStep.START
+    assert "did not understand" not in bot.last().body.lower()
+
+
+async def test_a_tapped_button_works_even_mid_address_capture(session, outlet, menu, bot):
+    """Typed words are ambiguous during free-text capture; a tap is not.
+
+    Someone giving an address on "Order Street" must not be hijacked, but a
+    deliberate button press should still be honoured.
+    """
+    await _sign_up(session, bot)
+    await _add_drumstick(session, bot)
+    await handle_event(session, reply("cart:checkout"))
+    await handle_event(session, pin(*NEARBY))
+
+    _, conversation = await _state(session)
+    assert conversation.step == ConversationStep.AWAIT_ADDRESS
+
+    # Typed: treated as the address, not as a keyword.
+    await handle_event(session, text("12 Order Street"))
+    customer, _ = await _state(session)
+    assert customer.address_line1 == "12 Order Street"
+
+
+async def test_typed_order_also_starts_the_flow(session, outlet, menu, bot):
+    await _sign_up(session, bot)
+    bot.clear()
+
+    await handle_event(session, text("Order"))
+
+    assert "did not understand" not in bot.last().body.lower()
+
+
+# --- outreach to somebody we do not know yet ---------------------------------
+async def test_welcome_to_an_unknown_number_then_order_now_asks_for_the_name(
+        session, outlet, menu, bot, monkeypatch):
+    """The client's case: a lead that does not exist yet.
+
+    We greet them as "there", and the moment they tap Order Now the flow must
+    ask who they are - otherwise every later message has no name to use.
+    """
+    from app.services import outreach
+
+    async def noop(customer):
+        return None
+
+    monkeypatch.setattr(outreach, "ensure_lead", noop)
+    customer, created = await outreach.send_welcome(session, PHONE)
+    assert created is True
+    assert bot.last().payload["values"] == ["there"]
+    bot.clear()
+
+    # They tap Order Now; the button sends its own label back to us.
+    await handle_event(session, reply("Order Now"))
+
+    _, conversation = await _state(session)
+    assert conversation.step == ConversationStep.AWAIT_NAME
+    assert "full name" in bot.last().body.lower()
+
+
+async def test_the_name_given_after_outreach_is_used_from_then_on(
+        session, outlet, menu, bot, monkeypatch):
+    from app.services import outreach
+
+    async def noop(customer):
+        return None
+
+    monkeypatch.setattr(outreach, "ensure_lead", noop)
+    await outreach.send_welcome(session, PHONE)
+    await handle_event(session, reply("Order Now"))
+    await handle_event(session, text("Asha Menon"))
+
+    customer, _ = await _state(session)
+    assert customer.name == "Asha Menon"
+    assert customer.greeting_name == "Asha Menon"
+    assert "Asha Menon" in bot.last().body
+
+
+# --- messages the client switched off ------------------------------------------
+async def test_the_payment_reminder_is_not_sent_when_switched_off(
+        session, outlet, menu, bot, monkeypatch):
+    """SEND_PAYMENT_REMINDER=false. The nudge goes, the expiry stays."""
+    from app.core.config import settings
+    from app.db.models import Order, PaymentStatus
+    from app.services import payments
+
+    monkeypatch.setattr(settings, "send_payment_reminder", False)
+
+    order = Order(customer_id=None, order_number="SHO-TEST-1",
+                  payment_status=PaymentStatus.LINK_SENT)
+    customer = type("C", (), {"whatsapp_number": "1", "greeting_name": "Asha"})()
+
+    bot.clear()
+    sent = await payments.send_reminder(session, order, customer)
+
+    assert sent is False
+    assert bot.sent == []
+    assert order.reminder_sent_at is None
+
+
+async def test_the_payment_reminder_still_works_when_switched_on(
+        session, outlet, menu, bot, monkeypatch):
+    from app.core.config import settings
+    from app.db.models import Order, PaymentStatus
+    from app.services import payments
+
+    monkeypatch.setattr(settings, "send_payment_reminder", True)
+
+    order = Order(customer_id=None, order_number="SHO-TEST-2",
+                  payment_status=PaymentStatus.LINK_SENT, slot_label="Wed 7-8 PM")
+    customer = type("C", (), {"whatsapp_number": "1", "greeting_name": "Asha"})()
+
+    bot.clear()
+    sent = await payments.send_reminder(session, order, customer)
+
+    assert sent is True
+    assert bot.last().body == "payment_reminder"
+
+
+# --- the menu link is a button, not a bare URL ---------------------------------
+def _with_signed_links(monkeypatch):
+    """Ordering links need a signing secret; without one the bot correctly
+    falls back to chat browsing, which is a different path."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "admin_session_secret", "test-signing-secret")
+    monkeypatch.setattr(settings, "public_base_url", "https://shero.test")
+    monkeypatch.setattr(settings, "order_mode", "web")
+
+
+async def test_the_menu_link_is_one_message_with_both_buttons(
+        session, outlet, menu, bot, monkeypatch):
+    """menu_link: View Menu and Get new link together, in a single message."""
+    _with_signed_links(monkeypatch)
+    await _sign_up(session, bot)
+    bot.clear()
+
+    await handle_event(session, reply("menu:order"))
+
+    assert len(bot.sent) == 1
+    sent = bot.last()
+    assert sent.kind == "template" and sent.body == "menu_link"
+    # The button parameter is the signed token alone - the approved template
+    # already holds https://<host>/order/.
+    assert "http" not in sent.payload["button_value"]
+    assert "." in sent.payload["button_value"]
+
+
+async def test_until_the_template_is_approved_a_plain_link_message_goes(
+        session, outlet, menu, bot, monkeypatch):
+    """Still one message: View Menu only, and the footer says to type new link."""
+    from app.core.exceptions import IntegrationError
+
+    async def not_approved(*args, **kwargs):
+        raise IntegrationError("gallabox", "template not approved")
+
+    _with_signed_links(monkeypatch)
+    await _sign_up(session, bot)
+    bot.clear()
+    monkeypatch.setattr(bot, "send_template", not_approved)
+
+    await handle_event(session, reply("menu:order"))
+
+    assert bot.kinds() == ["cta_url"]
+    assert bot.last().payload["label"] == "View Menu"
+    assert "/order/" in bot.last().payload["url"]
+    assert "http" not in bot.last().body
+
+
+async def test_a_provider_that_refuses_both_still_gets_the_link(
+        session, outlet, menu, bot, monkeypatch):
+    """Not every WhatsApp provider passes cta_url through. Nobody is stranded."""
+    from app.core.exceptions import IntegrationError
+
+    async def refuse(*args, **kwargs):
+        raise IntegrationError("gallabox", "interactive type not supported")
+
+    _with_signed_links(monkeypatch)
+    await _sign_up(session, bot)
+    bot.clear()
+    monkeypatch.setattr(bot, "send_template", refuse)
+    monkeypatch.setattr(bot, "send_cta_url", refuse)
+
+    await handle_event(session, reply("menu:order"))
+
+    sent = bot.sent[0]
+    assert sent.kind == "text"
+    assert "/order/" in sent.body          # the address is spelled out instead
+
+
+async def test_the_button_label_fits_whatsapps_limit():
+    from app.services.conversation import prompts as p
+    from app.integrations.gallabox.messages import BUTTON_TITLE_LIMIT
+
+    assert len(p.ORDER_LINK_BUTTON_LABEL) <= BUTTON_TITLE_LIMIT
+
+
+# --- changing the name from the email step ----------------------------------------
+async def test_the_email_question_offers_a_change_name_button(session, outlet, menu, bot):
+    await handle_event(session, text("hi"))
+    await handle_event(session, text("Asha Menon"))
+
+    sent = bot.last()
+    assert sent.kind == "buttons"
+    assert "Thanks Asha Menon" in sent.body
+    assert sent.payload["buttons"] == [("email:change_name", "Change name")]
+
+
+async def test_change_name_goes_back_and_the_new_name_replaces_the_old(
+        session, outlet, menu, bot):
+    """The case that prompted it: a greeting the bot took as a name."""
+    await handle_event(session, text("hi"))
+    await handle_event(session, text("hello"))          # saved as the name
+
+    await handle_event(session, reply("email:change_name"))
+    customer, conversation = await _state(session)
+    assert conversation.step == ConversationStep.AWAIT_NAME
+    assert "full name" in bot.last().body
+
+    await handle_event(session, text("Asha Menon"))
+    customer, conversation = await _state(session)
+    assert customer.name == "Asha Menon"
+    assert conversation.step == ConversationStep.AWAIT_EMAIL
+    assert "Thanks Asha Menon" in bot.last().body
+
+
+async def test_a_bad_email_still_offers_the_change_name_button(session, outlet, menu, bot):
+    await handle_event(session, text("hi"))
+    await handle_event(session, text("Asha Menon"))
+    await handle_event(session, text("not-an-email"))
+
+    sent = bot.last()
+    assert sent.kind == "buttons"
+    assert "valid email" in sent.body
+    assert sent.payload["buttons"] == [("email:change_name", "Change name")]
+
+
+async def test_typing_the_words_change_name_is_treated_as_an_email(
+        session, outlet, menu, bot):
+    """Only the tapped button goes back; typed text at this step is an answer."""
+    await handle_event(session, text("hi"))
+    await handle_event(session, text("Asha Menon"))
+    await handle_event(session, text("change name"))
+
+    _, conversation = await _state(session)
+    assert conversation.step == ConversationStep.AWAIT_EMAIL
+    assert "valid email" in bot.last().body
