@@ -101,6 +101,11 @@ things that were wrong to begin with.
 - **Hide from menu** takes a whole cuisine out of WhatsApp without deleting
   anything.
 - **Search** matches dish names within the cuisine you are viewing.
+- **Sync to Zoho** (top right) sends every dish to Zoho's Products module
+  and every kitchen to its Vendors module, creating or updating each. Adding
+  or editing a dish here updates its Product on its own; run the sync after
+  a sheet import, or after editing kitchens in Settings. It is greyed out
+  until Zoho is connected. Details in [zoho-setup.md](zoho-setup.md).
 
 > Prices here are what customers pay (your MRP column). The PPP column is
 > stored as cost and is shown only as a margin figure - it never reaches a
@@ -211,6 +216,36 @@ customer** and updates the stage in Zoho. A double-tap is safe: the second
 press does nothing rather than sending a second message.
 
 Thirty minutes after delivery, the feedback request goes out automatically.
+
+---
+
+## Customers
+
+Everyone who has messaged the bot, newest first, with their funnel stage,
+where the chat is, orders and saved addresses, and whether they are in Zoho.
+Search by name, number or email.
+
+| Button | What it does |
+|---|---|
+| **Push to Zoho** | Finds or creates the customer's Zoho record (their Lead, or their Contact once they have paid), then sends their name, email, default address, kitchen, distance, cuisine, Bot Stage and stage history. A paid customer still held as a Lead is converted to a Contact, and any of their orders filed under the Lead are moved to the Contact. Any **paid** order Zoho does not have yet is filed in Orders under that record, linked to its kitchen's Vendor, with one Order Item per dish linked to the dish's Product; an order already there gets those links and items brought up to date. A record deleted in Zoho is recreated. Safe to press again - nothing is filed twice. If Zoho refuses something, the error is shown at the top of the page. |
+| **Push all to Zoho** | The same for every customer on the page not marked *In Zoho*. |
+| **Delete** | Removes the customer **here only**: chat state, saved addresses, orders and their slot holds (held or booked delivery windows are freed). Their next WhatsApp message starts from the welcome, as a new customer. Zoho is not touched - delete the Lead or Contact there yourself if you want it gone. Meant for clearing test data; it asks for confirmation and cannot be undone. |
+
+The **Zoho** column is checked against Zoho on every load, never taken from
+the saved id alone:
+
+| Badge | Meaning |
+|---|---|
+| Zoho Lead / Zoho Contact | The record exists in Zoho and every paid order is there |
+| N order(s) to push | The record exists, but paid orders are missing in Zoho |
+| Deleted in Zoho | The bot had a link, Zoho no longer has the record; the link is dropped so the next push recreates it |
+| Not in Zoho | Never pushed |
+| Zoho Lead (could not check) | Zoho did not answer; nothing is changed |
+| Zoho not connected | No Zoho connection; nothing can be checked or pushed |
+
+Zoho record ids belong to one org. Connecting the bot to a **different** org
+(Settings → Connect Zoho) drops every saved link and says so, because those
+ids mean nothing there; Push to Zoho recreates the records. Code: `app/services/customer_admin.py`, `crm_sync.push_customer`.
 
 ---
 
@@ -341,13 +376,29 @@ a customer question:
 | Search | Matches dish names *and* category names |
 | Category rail | "All Items" plus every category; the ☰ button jumps to one |
 | Tapping a dish | Opens full details: image, description, pack size, serves, cuisine |
-| `+` / `−` | Saves to the customer's cart immediately, server-side |
+| `+` / `−` | The count changes on the tap; it is saved to the customer's cart in the background. Fast taps on one dish are sent one at a time, so the saved count is always the last one shown. Up to 20 of a dish |
 | Selected dishes | Tinted and outlined in the list |
 | Bottom bar | Item count and running total; opens the cart |
+| Waiting on the server | Placeholder cards while the menu loads; a spinner on every button that waits (checking delivery, working out the total, placing the order, saving or searching an address); the address sheet opens at once on "Loading your saved addresses…", with Try again if that fails |
 
 **The cart is saved against the customer, not the browser.** Closing the page
 and reopening the link restores it, and it is the same cart the WhatsApp bot
 sees. Ordering links expire after six hours.
+
+### Brand
+
+The ordering pages, the payment result pages and this dashboard use the Shero
+logo and its colours: teal `#029B99`, with the red `#C7010A` of the logo's dot
+for small highlights (the Delivery tag, category markers). The palette is
+defined once in `app/templates/_brand.html`; the logo files are in
+`app/static/brand/`, and the full-size original in `docs/brand/`.
+
+In the dashboard, the sign-in page and the sidebar use the teal gradient
+panel; the Dashboard opens on a teal welcome banner with shortcuts. Admin
+pages are written with Tailwind's `stone` greys, which `admin/base.html`
+redefines as a teal-tinted grey - so a new admin page is on-brand without
+extra work. Shared stat tiles, cards, badges and empty states live in
+`admin/_macros.html` (`ui.stat` takes an optional `icon` SVG path).
 
 ---
 

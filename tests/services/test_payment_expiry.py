@@ -122,3 +122,29 @@ async def test_order_now_on_an_expired_order_opens_the_menu(session, customer, m
 
     assert response.status_code == 302
     assert response.headers["location"].startswith("https://shero.test/order/")
+
+
+async def test_pay_now_redirects_to_stripe_for_a_live_link(session, customer, monkeypatch):
+    """SQLite gives the expiry stamp back without a timezone; the redirect
+    once crashed comparing it with an aware "now" (a 500 on every Pay Now)."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.routes import pay
+    from app.db.session import get_session
+
+    monkeypatch.setattr(settings, "admin_session_secret", "s")
+    order = await _unpaid_order(session, customer, minutes_ago=5)
+    order.order_number = "SHO-260929-LIVE1"
+    order.checkout_url = "https://checkout.stripe.com/c/pay/cs_test_live"
+    await session.flush()
+    await session.refresh(order)              # reload exactly as SQLite stores it
+    assert order.payment_link_expires_at.tzinfo is None
+
+    app = FastAPI()
+    app.include_router(pay.router)
+    app.dependency_overrides[get_session] = lambda: session
+    response = TestClient(app).get("/pay/SHO-260929-LIVE1", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://checkout.stripe.com/c/pay/cs_test_live"

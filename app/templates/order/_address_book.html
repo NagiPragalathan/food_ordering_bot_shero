@@ -4,7 +4,8 @@
    still works as plain typed fields. #}
 <script>
 window.SheroAddressBook = function (deps) {
-  const { api, openSheet, toast, esc, $, checkDelivery, kitchen, googleKey } = deps;
+  const { api, openSheet, toast, esc, $, checkDelivery, kitchen, googleKey,
+          busy, loading, SPINNER } = deps;
 
   let LIST = [];          // saved addresses from the server
   let LABELS = ['Home', 'Office', 'Other'];
@@ -17,20 +18,21 @@ window.SheroAddressBook = function (deps) {
   const btn = 'rounded-xl py-3 text-sm font-semibold';
 
   function contactBox() {
-    return '<div class="mt-3 flex items-center gap-2 rounded-lg bg-cream-100 px-3 py-2.5 text-sm">' +
-      '<span>📞</span><div class="min-w-0 flex-1"><div class="text-xs text-cocoa-700/70">' +
+    return '<div class="mt-3 flex items-center gap-2 rounded-lg bg-mist-100 px-3 py-2.5 text-sm">' +
+      '<span>📞</span><div class="min-w-0 flex-1"><div class="text-xs text-ink-700/70">' +
       'The driver will call</div><div class="font-semibold tabular-nums">+' + esc(CONTACT) +
-      '</div></div><span class="text-[11px] text-cocoa-700/60">your WhatsApp number</span></div>';
+      '</div></div><span class="text-[11px] text-ink-700/60">your WhatsApp number</span></div>';
   }
 
   // --- the list ---------------------------------------------------------------
   async function open() {
+    loading('Delivery address', 'Loading your saved addresses…');
     try {
       const data = await api('/addresses');
-      if (!data.ok) { toast(data.error); return; }
+      if (!data.ok) { failed(data.error); return; }
       LIST = data.addresses; LABELS = data.labels || LABELS; CONTACT = data.contact_number || '';
     } catch (err) {
-      toast('Could not load your addresses: ' + err.message);
+      failed('Could not load your addresses: ' + err.message);
       return;
     }
     if (!LIST.length) { showForm(null); return; }
@@ -38,31 +40,39 @@ window.SheroAddressBook = function (deps) {
     showList();
   }
 
+  // The sheet is already open on the spinner, so say what went wrong there.
+  function failed(message) {
+    openSheet('Delivery address',
+      '<p class="py-10 text-center text-sm text-ink-700/70">' + esc(message) + '</p>',
+      '<button id="addr-retry" class="w-full bg-brand-500 text-white ' + btn + '">Try again</button>');
+    $('addr-retry').addEventListener('click', open);
+  }
+
   function card(a) {
     const on = a.id === selected;
     return '<div class="addr mb-2 flex cursor-pointer gap-3 rounded-xl border-2 p-3 ' +
-      (on ? 'border-herb-600 bg-herb-500/5' : 'border-cream-200 bg-white') + '" data-id="' + a.id + '">' +
+      (on ? 'border-herb-600 bg-herb-500/5' : 'border-mist-200 bg-white') + '" data-id="' + a.id + '">' +
       '<div class="text-xl">' + icon(a.label) + '</div>' +
       '<div class="min-w-0 flex-1"><div class="text-sm font-semibold">' + esc(a.label) + '</div>' +
-      '<div class="text-[13px] leading-snug text-cocoa-700/80 [overflow-wrap:anywhere]">' +
+      '<div class="text-[13px] leading-snug text-ink-700/80 [overflow-wrap:anywhere]">' +
       esc(a.address_line1) + (a.apartment_unit ? ', ' + esc(a.apartment_unit) : '') +
       ' · ' + esc(a.postal_code) + '</div>' +
       (a.latitude != null ? '<div class="mt-0.5 text-[11px] text-herb-700">📍 Pinned on the map</div>' : '') +
       '<div class="mt-1.5 flex gap-3 text-xs font-semibold">' +
-      '<button class="edit text-chilli-600" data-id="' + a.id + '">Edit</button>' +
-      '<button class="del text-cocoa-700/60" data-id="' + a.id + '">Delete</button></div></div>' +
-      '<div class="pt-1 text-herb-600">' + (on ? '●' : '<span class="text-cream-200">●</span>') + '</div></div>';
+      '<button class="edit text-brand-600" data-id="' + a.id + '">Edit</button>' +
+      '<button class="del text-ink-700/60" data-id="' + a.id + '">Delete</button></div></div>' +
+      '<div class="pt-1 text-herb-600">' + (on ? '●' : '<span class="text-mist-200">●</span>') + '</div></div>';
   }
 
   function showList() {
     openSheet('Delivery address',
       LIST.map(card).join('') +
-      '<button id="addr-new" class="mt-1 w-full rounded-xl border-2 border-dashed border-chilli-300 ' +
-      'py-3 text-sm font-semibold text-chilli-600">+ Add a new address</button>' +
+      '<button id="addr-new" class="mt-1 w-full rounded-xl border-2 border-dashed border-brand-300 ' +
+      'py-3 text-sm font-semibold text-brand-600">+ Add a new address</button>' +
       contactBox() +
       '<div id="slots-wrap" class="mt-4 hidden"><h3 class="mb-2 text-sm font-semibold">Pick a delivery time</h3>' +
       '<div id="slots" class="grid grid-cols-2 gap-2"></div></div>',
-      '<button id="check" class="w-full bg-chilli-500 text-white ' + btn + '">' +
+      '<button id="check" class="w-full bg-brand-500 text-white ' + btn + '">' +
       'Check delivery &amp; show times</button>');
 
     document.querySelectorAll('#sheet-body .addr').forEach(el =>
@@ -94,9 +104,9 @@ window.SheroAddressBook = function (deps) {
 
   // --- the form ---------------------------------------------------------------
   function input(id, label, value, extra) {
-    return '<label class="mb-2.5 block"><span class="mb-1 block text-xs font-medium text-cocoa-700/80">' +
+    return '<label class="mb-2.5 block"><span class="mb-1 block text-xs font-medium text-ink-700/80">' +
       label + '</span><input id="' + id + '" value="' + esc(value || '') + '" ' + (extra || '') +
-      ' class="w-full rounded-lg border border-cream-200 px-3 py-2.5 text-sm outline-none focus:border-chilli-500"></label>';
+      ' class="w-full rounded-lg border border-mist-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500"></label>';
   }
 
   function showForm(a) {
@@ -108,7 +118,7 @@ window.SheroAddressBook = function (deps) {
     openSheet(a ? 'Edit address' : 'Add a delivery address',
       '<div class="mb-3 flex gap-2">' + LABELS.map(l =>
         '<button type="button" class="chip flex-1 rounded-full border px-3 py-2 text-sm font-semibold ' +
-        (l === preset ? 'border-herb-600 bg-herb-500/10 text-herb-700' : 'border-cream-200 bg-white') +
+        (l === preset ? 'border-herb-600 bg-herb-500/10 text-herb-700' : 'border-mist-200 bg-white') +
         '" data-label="' + esc(l) + '">' + icon(l) + ' ' + esc(l) + '</button>').join('') + '</div>' +
       '<div id="custom-wrap" class="' + (preset === 'Other' ? '' : 'hidden') + '">' +
       input('f-label', 'Name this address', preset === 'Other' && label !== 'Other' ? label : '',
@@ -116,19 +126,18 @@ window.SheroAddressBook = function (deps) {
 
       '<form id="addr-search" class="mb-2 flex gap-2">' +
         '<input id="f-search" type="search" autocomplete="off" placeholder="Search your address, e.g. 12 Maple St Edison" ' +
-        'class="min-w-0 flex-1 rounded-lg border border-cream-200 px-3 py-2.5 text-sm outline-none focus:border-chilli-500">' +
-        '<button class="rounded-lg bg-cocoa-800 px-4 text-sm font-semibold text-white">Search</button>' +
+        'class="min-w-0 flex-1 rounded-lg border border-mist-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500">' +
+        '<button id="f-search-go" class="rounded-lg bg-ink-800 px-4 text-sm font-semibold text-white">Search</button>' +
       '</form>' +
-      '<div id="map-wrap" class="relative mb-2 overflow-hidden rounded-xl border border-cream-200">' +
-        '<div id="map" class="h-52 w-full bg-cream-100"></div>' +
+      '<div id="map-wrap" class="relative mb-2 overflow-hidden rounded-xl border border-mist-200">' +
+        '<div id="map" class="h-52 w-full bg-mist-100"></div>' +
         // A fixed pin over the centre: the customer moves the map, not the pin,
         // which is far easier with a thumb than dragging a marker.
         '<div class="pointer-events-none absolute left-1/2 top-1/2 z-[500] -translate-x-1/2 -translate-y-full text-3xl">📍</div>' +
         '<button type="button" id="locate-me" class="absolute bottom-2 left-2 z-[500] rounded-lg bg-white ' +
-        'px-3 py-2 text-xs font-semibold text-cocoa-800 shadow">◎ Use my current location</button>' +
+        'px-3 py-2 text-xs font-semibold text-ink-800 shadow">◎ Use my current location</button>' +
       '</div>' +
-      '<p id="map-hint" class="mb-3 text-[11px] text-cocoa-700/60">Move the map so the pin sits on your door, ' +
-      'search the address, or tap “Use my current location”. We fill in the street for you.</p>' +
+      '<p id="map-hint" class="mb-3 min-h-[1rem] text-[11px] text-ink-700/60">' + HINT + '</p>' +
 
       input('f-address', 'Street address', editing.address_line1) +
       '<div class="grid grid-cols-2 gap-2">' +
@@ -138,7 +147,7 @@ window.SheroAddressBook = function (deps) {
       input('f-instructions', 'Driver instructions', editing.delivery_instructions) +
       contactBox(),
       '<div class="flex gap-2">' +
-      (LIST.length ? '<button id="addr-back" class="flex-1 border border-cream-200 bg-white ' + btn + '">Back</button>' : '') +
+      (LIST.length ? '<button id="addr-back" class="flex-1 border border-mist-200 bg-white ' + btn + '">Back</button>' : '') +
       '<button id="addr-save" class="flex-[2] bg-herb-600 text-white ' + btn + '">Save address</button></div>');
 
     let chosen = preset;
@@ -148,7 +157,7 @@ window.SheroAddressBook = function (deps) {
         document.querySelectorAll('#sheet-body .chip').forEach(x => {
           const on = x === c;
           x.classList.toggle('border-herb-600', on); x.classList.toggle('bg-herb-500/10', on);
-          x.classList.toggle('text-herb-700', on); x.classList.toggle('border-cream-200', !on);
+          x.classList.toggle('text-herb-700', on); x.classList.toggle('border-mist-200', !on);
           x.classList.toggle('bg-white', !on);
         });
         $('custom-wrap').classList.toggle('hidden', chosen !== 'Other');
@@ -175,8 +184,7 @@ window.SheroAddressBook = function (deps) {
     if (!payload.address_line1) { toast('Enter your street address.'); return; }
     if (!payload.postal_code) { toast('Enter your ZIP code.'); return; }
 
-    const b = $('addr-save');
-    b.disabled = true; b.textContent = 'Saving…';
+    const done = busy($('addr-save'), 'Saving…');
     try {
       const data = await api('/addresses', payload);
       if (!data.ok) { toast(data.error); return; }
@@ -187,7 +195,7 @@ window.SheroAddressBook = function (deps) {
     } catch (err) {
       toast('Could not save the address: ' + err.message);
     } finally {
-      if ($('addr-save')) { b.disabled = false; b.textContent = 'Save address'; }
+      done();
     }
   }
 
@@ -276,7 +284,13 @@ window.SheroAddressBook = function (deps) {
     };
   }
 
+  const HINT = 'Move the map so the pin sits on your door, search the address, ' +
+               'or tap “Use my current location”. We fill in the street for you.';
+
   async function fillFrom(pin) {
+    const hint = $('map-hint');
+    if (hint) hint.innerHTML = '<span class="inline-flex items-center gap-1.5 text-brand-700">' +
+                               SPINNER + 'Finding the street for this spot…</span>';
     try {
       const data = await api('/locate?lat=' + pin.lat + '&lng=' + pin.lng);
       if (!data.ok) { toast(data.error); return; }
@@ -285,12 +299,15 @@ window.SheroAddressBook = function (deps) {
     } catch (err) {
       // Not fatal: the pin is still saved, and the street can be typed.
       console.warn('locate failed', err);
+    } finally {
+      if ($('map-hint')) $('map-hint').textContent = HINT;
     }
   }
 
   async function search(pin) {
     const q = ($('f-search').value || '').trim();
     if (q.length < 3) { toast('Type at least a street and town.'); return; }
+    const done = busy($('f-search-go'), 'Searching');
     try {
       const data = await api('/search?q=' + encodeURIComponent(q));
       if (!data.ok) { toast(data.error); return; }
@@ -301,13 +318,15 @@ window.SheroAddressBook = function (deps) {
       if (map) map.setView(data.lat, data.lng, 18);
     } catch (err) {
       toast('Could not search just now: ' + err.message);
+    } finally {
+      done();
     }
   }
 
   function locateMe(pin) {
     if (!navigator.geolocation) { toast('Your browser cannot share its location. Move the map instead.'); return; }
     const b = $('locate-me');
-    b.textContent = 'Finding you…';
+    b.innerHTML = '<span class="inline-flex items-center gap-1.5">' + SPINNER + 'Finding you…</span>';
     navigator.geolocation.getCurrentPosition((pos) => {
       b.textContent = '◎ Use my current location';
       pin.lat = +pos.coords.latitude.toFixed(6); pin.lng = +pos.coords.longitude.toFixed(6);

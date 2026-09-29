@@ -8,7 +8,7 @@ from app.integrations.gallabox.messages import Button
 from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
 from app.services.conversation.validators import clean_email, clean_name
-from app.services.crm_sync import ensure_lead, push_details
+from app.services.crm_sync import ensure_record, push_details
 
 log = get_logger(__name__)
 
@@ -19,7 +19,7 @@ async def start(ctx: FlowContext) -> None:
     The spec's returning-customer rule: if a Contact exists, greet by name and
     skip straight to the main menu.
     """
-    await ensure_lead(ctx.customer)
+    await ensure_record(ctx.customer)
 
     if ctx.customer.has_details:
         # One message, greeting and button together, rather than a greeting

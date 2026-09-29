@@ -19,15 +19,16 @@ from urllib.parse import urlencode
 
 import httpx
 
-from app.core.config import ZOHO_HOSTS, settings
+from app.core.config import ZOHO_HOSTS, is_unset, settings
 from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
 # What the bot actually does: read/write leads and orders, read users for
-# owner assignment, and read module metadata to validate custom fields.
-SCOPES = "ZohoCRM.modules.ALL,ZohoCRM.settings.ALL,ZohoCRM.users.READ"
+# owner assignment, module metadata to create and check custom fields, and
+# which org the token belongs to (record ids are only valid in that org).
+SCOPES = "ZohoCRM.modules.ALL,ZohoCRM.settings.ALL,ZohoCRM.users.READ,ZohoCRM.org.READ"
 
 # The domain suffix picked next to Connect Zoho: where the consent screen
 # opens. Zoho's reply still has the final say (see centre_from_location).
@@ -150,3 +151,42 @@ def _explain(code: str) -> str:
                                  f"{redirect_uri()}",
         "access_denied": "Access was declined on the Zoho consent screen.",
     }.get(code, f"Zoho rejected the connection ({code}).")
+
+
+# --- which org -----------------------------------------------------------------
+async def record_org(session, *, updated_by: str | None = None) -> tuple[str | None, int]:
+    """Remember which Zoho org the bot is connected to; forget links to any other.
+
+    Zoho record ids belong to one org. After connecting a different org, the
+    ids the bot saved point at records that do not exist there, so they are
+    dropped and Push to Zoho (or the customer's next message) recreates the
+    records. Returns (org id, number of customers whose links were dropped).
+    """
+    # Imported here: this module is also used by the settings routes before
+    # the CRM layer is wanted, and the CRM layer reaches back into settings.
+    from app.core.exceptions import ConfigurationError
+    from app.integrations.zoho import crm
+    from app.services import customer_admin
+    from app.services.settings_store import save_many
+
+    try:
+        org_id = await crm.org_id()
+    except (IntegrationError, ConfigurationError) as exc:
+        log.warning("zoho_org_lookup_failed", error=str(exc))
+        return None, 0
+
+    previous = settings.zoho_org_id
+    dropped = 0
+    if org_id and previous and org_id != previous:
+        dropped = await customer_admin.forget_zoho_links(session)
+        log.info("zoho_org_changed", previous=previous, current=org_id,
+                 links_dropped=dropped)
+    if org_id and org_id != previous:
+        await save_many(session, {"ZOHO_ORG_ID": org_id}, updated_by=updated_by)
+    return org_id, dropped
+
+
+def is_connected() -> bool:
+    """Credentials and a refresh token are in place (not whether they work)."""
+    return not (is_unset(settings.zoho_client_id) or is_unset(settings.zoho_client_secret)
+                or is_unset(settings.zoho_refresh_token))

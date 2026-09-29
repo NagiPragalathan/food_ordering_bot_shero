@@ -150,7 +150,8 @@ Log events worth alerting on:
 
 | Event | Means |
 |---|---|
-| `zoho_ensure_lead_failed` (sustained) | Zoho credentials or setup broken |
+| `zoho_ensure_record_failed` (sustained) | Zoho credentials or setup broken |
+| `stripe_expiry_rejected_machine_clock_wrong` | The server's clock is wrong: sync it (NTP). Payment links still go out, but Stripe rejects every webhook signature until the clock is right |
 | `uber_quote_failed` | Customers cannot check out |
 | `stripe_webhook_rejected` | Wrong webhook secret |
 | `kitchen_alert_failed` | A paid order may not have reached the kitchen |

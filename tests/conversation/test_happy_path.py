@@ -584,7 +584,7 @@ async def test_welcome_to_an_unknown_number_then_order_now_asks_for_the_name(
     async def noop(customer):
         return None
 
-    monkeypatch.setattr(outreach, "ensure_lead", noop)
+    monkeypatch.setattr(outreach, "ensure_record", noop)
     customer, created = await outreach.send_welcome(session, PHONE)
     assert created is True
     assert bot.last().payload["values"] == ["there"]
@@ -605,7 +605,7 @@ async def test_the_name_given_after_outreach_is_used_from_then_on(
     async def noop(customer):
         return None
 
-    monkeypatch.setattr(outreach, "ensure_lead", noop)
+    monkeypatch.setattr(outreach, "ensure_record", noop)
     await outreach.send_welcome(session, PHONE)
     await handle_event(session, reply("Order Now"))
     await handle_event(session, text("Asha Menon"))

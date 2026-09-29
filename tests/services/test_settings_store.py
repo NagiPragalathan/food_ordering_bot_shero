@@ -157,6 +157,59 @@ async def test_save_many_reports_only_real_changes(session, monkeypatch):
     assert changed == ["ZOHO_DATA_CENTER"]
 
 
+# --- clearing: "Disconnect Zoho" must really disconnect ----------------------
+@pytest.fixture
+def env_token_blank(monkeypatch):
+    """The environment holds no Zoho token, as on the test machine."""
+    from app.services import settings_store
+
+    monkeypatch.setenv("ZOHO_REFRESH_TOKEN", "")
+    monkeypatch.setattr(settings, "zoho_refresh_token", "")
+    settings_store._applied.clear()
+    yield
+    settings_store._applied.clear()
+
+
+async def test_clearing_a_token_takes_effect_in_memory_at_once(session, env_token_blank):
+    """Otherwise the server keeps using the forgotten token until a restart."""
+    await save(session, "ZOHO_REFRESH_TOKEN", "1000.tok")
+    await session.flush()
+    await apply_overrides(session)
+    assert settings.zoho_refresh_token == "1000.tok"
+
+    await save(session, "ZOHO_REFRESH_TOKEN", "")
+    assert settings.zoho_refresh_token == ""
+
+
+async def test_a_clearable_blank_clears_even_where_the_override_was_never_loaded(
+        session, env_token_blank):
+    """A script that disconnects starts with the environment's blank in memory."""
+    await save(session, "ZOHO_REFRESH_TOKEN", "1000.tok")
+    await session.flush()
+    object.__setattr__(settings, "zoho_refresh_token", "")     # never applied here
+
+    changed = await save_many(session, {"ZOHO_REFRESH_TOKEN": ""},
+                              allow_blank={"ZOHO_REFRESH_TOKEN"})
+    assert changed == ["ZOHO_REFRESH_TOKEN"]
+    assert await stored_keys(session) == set()
+
+
+async def test_the_periodic_refresh_drops_an_override_removed_elsewhere(
+        session, env_token_blank):
+    await save(session, "ZOHO_REFRESH_TOKEN", "1000.tok")
+    await session.flush()
+    await apply_overrides(session)
+    assert settings.zoho_refresh_token == "1000.tok"
+
+    row = (await session.execute(
+        select(AppSetting).where(AppSetting.key == "ZOHO_REFRESH_TOKEN"))).scalar_one()
+    await session.delete(row)                       # as another process would
+    await session.flush()
+
+    await apply_overrides(session)
+    assert settings.zoho_refresh_token == ""
+
+
 # --- the editable surface ----------------------------------------------------
 def test_every_grouped_field_is_editable():
     grouped = {key for fields in SETTING_GROUPS.values() for key, _, _ in fields}

@@ -8,7 +8,7 @@ Every step from section 1 of the spec, with where it lives in the code.
 
 | # | Step | Conversation step | Handler |
 |---|---|---|---|
-| 1-2 | Entry, returning check. A known customer's "hi" / "hello" / "menu" gets one message: "Welcome back to Shero Home Food, {name}! 👋 What would you like to do?" with **Order Now**. The name comes from our own database, not Zoho | `START` | `onboarding.start` |
+| 1-2 | Entry, returning check. A known customer's "hi" / "hello" / "menu" gets one message: "Welcome back to Shero Home Food, {name}! 👋 What would you like to do?" with **Order Now**. The name comes from our own database, or from the Zoho record found by the phone number when ours has none | `START` | `onboarding.start` |
 | 3 | Ask name | `AWAIT_NAME` | `onboarding.handle_name` |
 | 4 | Ask email, with a **Change name** button | `AWAIT_EMAIL` | `onboarding.handle_email` |
 | 5 | Main menu (one button: **Order Now**) | `MAIN_MENU` | `onboarding.handle_main_menu` |
@@ -94,8 +94,9 @@ is recognisable rather than misread. All defined in `prompts.py`.
 
 ## Lead stages
 
-Set locally first, then mirrored to the customer's Zoho **Lead**: Bot Stage
-and Bot Stage History (see [zoho-setup.md](zoho-setup.md)). A repeated stage
+Set locally first, then mirrored to the customer's Zoho record - the **Lead**,
+or the **Contact** it became on their first payment: Bot Stage and Bot Stage History,
+and on a Lead also Zoho's own Lead Status, so its stage bar shows the funnel (see [zoho-setup.md](zoho-setup.md)). A repeated stage
 keeps its original timestamp, so drop-off reports show when a customer
 *first* reached a point.
 
@@ -103,7 +104,7 @@ keeps its original timestamp, so drop-off reports show when a customer
 |---|---|---|
 | New Enquiry | First message | |
 | Details Captured | Name + email | |
-| Cuisine Selected | Cuisine chosen | |
+| Cuisine Selected | Cuisine chosen | First dish added (the menu has no cuisine step; sent to Zoho with Cart Created) |
 | Cart Created | Cart sent | First dish added; also when Change menu / Update location releases an order |
 | Not Serviceable | Step 6a or 10 | Address outside the delivery area |
 | Outlet Selected | Kitchen confirmed as serviceable | Address checked (also pushes street, unit, ZIP, kitchen and distance to Zoho) |
@@ -111,7 +112,7 @@ keeps its original timestamp, so drop-off reports show when a customer
 | Payment Link Sent | Summary confirmed | Confirm & continue on WhatsApp |
 | Payment Abandoned | Link expired | |
 | Payment Failed | Stripe reported failure | |
-| Converted | Payment succeeded | |
+| Converted | Payment succeeded: the Lead is converted to a Contact and the Order is filed under it | |
 
 The web page only moves a customer **forward** through the funnel
 (`crm_sync.FUNNEL`), so adding a dish after picking a time does not rewind

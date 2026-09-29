@@ -120,6 +120,10 @@ class MenuItem(Base, UUIDPrimaryKey, Timestamps):
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # The Zoho Product this dish is, once synced (found again by Product Code
+    # = retailer_id if this is lost). See services/catalogue_sync.py.
+    zoho_product_id: Mapped[str | None] = mapped_column(String(40), index=True)
+
     category: Mapped[Category] = relationship(back_populates="items")
 
     def __repr__(self) -> str:  # pragma: no cover

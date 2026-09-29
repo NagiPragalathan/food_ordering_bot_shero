@@ -199,8 +199,8 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     orders.set_stage(order, OrderStage.PAID_SLOT_BOOKED)
     await session.flush()
 
-    outlet = await session.get(Outlet, order.outlet_id) if order.outlet_id else None
-    outlet_name = outlet.name if outlet else "Shero"
+    ctx = await crm_sync.order_context(session, order)
+    outlet, outlet_name = ctx.outlet, ctx.outlet_name or "Shero"
 
     # 2. Confirmation to the customer. The money is taken by now, so a
     # WhatsApp failure must not stop the CRM record and the kitchen alert.
@@ -217,8 +217,8 @@ async def handle_payment_success(session: AsyncSession, order: Order,
         log.error("payment_success_message_failed", order_number=order.order_number,
                   error=str(exc))
 
-    # 3. Lead -> Contact and the Order record (spec step 16).
-    await crm_sync.convert_and_record_order(customer, order, outlet_name)
+    # 3. Lead -> Contact, the Order record and its Order Items (spec step 16).
+    await crm_sync.convert_and_record_order(customer, order, ctx)
 
     # 4. Kitchen alert (spec step 17).
     await notify_kitchen(session, order, outlet, customer)

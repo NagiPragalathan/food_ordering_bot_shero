@@ -1,0 +1,147 @@
+{% extends "admin/base.html" %}
+{% import "admin/_macros.html" as ui %}
+{% block title %}Customers{% endblock %}
+{% block heading %}Customers{% endblock %}
+{% block subheading %}
+<p class="text-xs text-stone-500">Everyone who has messaged the bot, newest first.</p>
+{% endblock %}
+
+{% block actions %}
+{% if unsynced and zoho_connected %}
+<form method="post" action="{{ url_for('admin_customers_push_all') }}" data-busy="Pushing…">
+  <button class="whitespace-nowrap rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold
+                 text-white hover:bg-brand-700">
+    Push all to Zoho ({{ unsynced }})
+  </button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+<form method="get" action="{{ url_for('admin_customers') }}" class="mb-5 flex gap-2">
+  <input name="q" value="{{ query }}" placeholder="Name, number or email..."
+         class="w-64 rounded-lg border border-stone-300 px-3 py-1.5 text-sm outline-none
+                focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+  <button class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm hover:bg-stone-50">
+    Find
+  </button>
+  {% if query %}
+  <a href="{{ url_for('admin_customers') }}" class="px-2 py-1.5 text-sm text-stone-500 hover:text-stone-800">Clear</a>
+  {% endif %}
+</form>
+
+{% if rows %}
+<div class="overflow-hidden rounded-xl border border-stone-200 bg-white">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="border-b border-stone-200 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
+        <tr>
+          <th class="px-4 py-2.5 font-medium">Customer</th>
+          <th class="px-4 py-2.5 font-medium">Stage</th>
+          <th class="px-4 py-2.5 font-medium">Orders</th>
+          <th class="px-4 py-2.5 font-medium">Zoho</th>
+          <th class="px-4 py-2.5 font-medium">Last seen</th>
+          <th class="px-4 py-2.5"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-stone-100">
+        {% for row in rows %}
+        {% set c = row.customer %}
+        <tr class="hover:bg-stone-50/70">
+          <td class="px-4 py-3">
+            <div class="font-medium">{{ c.name or '—' }}</div>
+            <div class="text-xs text-stone-500">+{{ c.whatsapp_number }}</div>
+            {% if c.email %}<div class="text-xs text-stone-500">{{ c.email }}</div>{% endif %}
+          </td>
+          <td class="px-4 py-3">
+            {% if c.is_converted %}{{ ui.badge(c.lead_stage, 'good') }}
+            {% else %}{{ ui.badge(c.lead_stage) }}{% endif %}
+            {% if row.step %}<div class="mt-1 text-[11px] text-stone-400">chat: {{ row.step }}</div>{% endif %}
+          </td>
+          <td class="px-4 py-3 text-xs text-stone-600">
+            {{ row.orders }} order(s){% if row.paid_orders %}, {{ row.paid_orders }} paid{% endif %}
+            <div class="text-stone-400">{{ row.addresses }} address(es)</div>
+          </td>
+          <td class="px-4 py-3">
+            {# Checked against Zoho on every load - never just the saved id. #}
+            {% if row.zoho_state == 'offline' %}{{ ui.badge('Zoho not connected') }}
+            {% elif row.in_zoho %}{{ ui.badge('Zoho ' ~ row.zoho_label, 'good') }}
+            {% elif row.zoho_state == 'ok' %}{{ ui.badge(row.unsynced_orders ~ ' order(s) to push', 'warn') }}
+            {% elif row.zoho_state == 'missing' %}{{ ui.badge('Deleted in Zoho', 'warn') }}
+            {% elif row.zoho_state == 'unverified' %}{{ ui.badge('Zoho ' ~ row.zoho_label ~ ' (could not check)') }}
+            {% else %}{{ ui.badge('Not in Zoho', 'warn') }}{% endif %}
+          </td>
+          <td class="whitespace-nowrap px-4 py-3 text-xs text-stone-500">
+            {{ (c.last_seen_at or c.created_at).strftime('%d %b, %H:%M') }}
+          </td>
+          <td class="px-4 py-3">
+            <div class="flex justify-end gap-2">
+              {% if zoho_connected %}
+              <form method="post" action="{{ url_for('admin_customer_push', customer_id=c.id) }}"
+                    data-busy="Pushing…">
+                <button class="whitespace-nowrap rounded-lg border border-brand-300 bg-white px-3 py-1.5
+                               text-xs font-semibold text-brand-700 hover:bg-brand-50">
+                  {{ 'Push again' if row.in_zoho else 'Push to Zoho' }}
+                </button>
+              </form>
+              {% endif %}
+              <form method="post" action="{{ url_for('admin_customer_delete', customer_id=c.id) }}"
+                    data-busy="Deleting…"
+                    data-confirm="Delete {{ c.name or ('+' ~ c.whatsapp_number) }} and all their chats, addresses and orders here? Zoho is not changed. This cannot be undone.">
+                <button class="whitespace-nowrap rounded-lg border border-red-200 bg-white px-3 py-1.5
+                               text-xs font-semibold text-red-700 hover:bg-red-50">
+                  Delete
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% if not zoho_connected %}
+<p class="mt-3 text-xs font-medium text-amber-800">
+  Zoho is not connected, so nothing here can be checked or pushed.
+  <a href="{{ url_for('admin_settings') }}" class="underline">Connect it in Settings.</a>
+</p>
+{% endif %}
+<p class="mt-3 text-xs text-stone-500">
+  The Zoho column is checked against Zoho on every load: a record deleted there shows as
+  <b>Deleted in Zoho</b> and its link is dropped, so the next push recreates it.
+  <b>Push to Zoho</b> sends the customer's details, address and Bot Stage to their Lead
+  (their Contact once they have paid), converts a paid customer still held as a Lead, and
+  files any paid order Zoho does not have yet. A record deleted in Zoho is recreated.
+  <b>Delete</b> removes the customer here only - use it to clear test data; their next
+  WhatsApp message starts from the beginning.
+</p>
+{% else %}
+  <div class="rounded-xl border border-dashed border-stone-300 bg-white py-16 text-center">
+    <p class="text-sm text-stone-500">{{ 'No customers match.' if query else 'Nobody has messaged the bot yet.' }}</p>
+  </div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Confirm deletes, and show a spinner on the pressed button: a Zoho push
+  // can take a few seconds and a button that does nothing reads as broken.
+  document.querySelectorAll('form[data-busy]').forEach(form => {
+    form.addEventListener('submit', event => {
+      if (form.dataset.confirm && !confirm(form.dataset.confirm)) {
+        event.preventDefault();
+        return;
+      }
+      const button = form.querySelector('button');
+      button.disabled = true;
+      button.classList.add('opacity-70', 'cursor-wait');
+      button.innerHTML = '<span class="inline-flex items-center gap-1.5">' +
+        '<span class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 ' +
+        'border-current border-t-transparent"></span>' + form.dataset.busy + '</span>';
+    });
+  });
+</script>
+{% endblock %}

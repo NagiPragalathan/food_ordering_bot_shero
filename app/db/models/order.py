@@ -92,6 +92,9 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
 
     # --- External references -------------------------------------------------
     zoho_order_id: Mapped[str | None] = mapped_column(String(40), index=True)
+    # Zoho Order Item record per cart line: {retailer_id: zoho id}. Lets a
+    # re-push update the lines instead of filing them twice.
+    zoho_item_ids: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     uber_quote_id: Mapped[str | None] = mapped_column(String(128))
     uber_quote_raw: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 

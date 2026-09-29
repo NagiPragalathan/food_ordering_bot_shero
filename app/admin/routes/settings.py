@@ -204,9 +204,14 @@ async def zoho_callback(
 
     # A token cached from before (another account or data centre) is stale.
     zoho_oauth.invalidate_token()
-    log.info("zoho_connected", centre=centre, by=current_user.email)
-    response = redirect(url, flash=(
-        "success", f"Zoho connected (data centre: zoho.{centre})."))
+    org_id, dropped = await zoho_connect.record_org(session, updated_by=current_user.email)
+    log.info("zoho_connected", centre=centre, org=org_id, by=current_user.email)
+    message = f"Zoho connected (data centre: zoho.{centre})."
+    if dropped:
+        message += (f" This is a different Zoho org from before, so the links "
+                    f"{dropped} customer(s) had to the old CRM were dropped. "
+                    "Push to Zoho on the Customers page recreates them.")
+    response = redirect(url, flash=("success", message))
     response.delete_cookie("zoho_oauth_state")
     response.delete_cookie("zoho_oauth_centre")
     return response

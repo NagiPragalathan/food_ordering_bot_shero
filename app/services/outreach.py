@@ -22,7 +22,7 @@ from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.services import allowlist
 from app.services import customers as customer_service
-from app.services.crm_sync import ensure_lead
+from app.services.crm_sync import ensure_record
 
 log = get_logger(__name__)
 
@@ -63,7 +63,7 @@ async def send_welcome(session: AsyncSession, whatsapp_number: str) -> tuple[Cus
     # Zoho should know about the lead before we message them, but a CRM that is
     # unreachable must not stop us saying hello.
     try:
-        await ensure_lead(customer)
+        await ensure_record(customer)
     except IntegrationError as exc:
         log.warning("outreach_lead_sync_failed",
                     customer_id=str(customer.id), error=str(exc))

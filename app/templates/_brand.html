@@ -1,0 +1,22 @@
+{# Shero brand, shared by the ordering pages and the dashboard.
+
+   The colours come from the logo (docs/brand/shero-logo-original.png):
+   teal #029B99 and the red dot #C7010A. Include this before a page's
+   tailwind.config, which spreads SHERO_COLORS into its palette:
+
+     brand   the logo teal - headers, buttons, links, selected states
+     accent  the logo red - small highlights only, as in the logo
+     ink     dark text, teal-tinted so it sits with the brand
+     mist    page backgrounds and borders #}
+<link rel="icon" type="image/png" sizes="64x64" href="/static/brand/favicon-64.png">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<meta name="theme-color" content="#029B99">
+<script>
+  window.SHERO_COLORS = {
+    brand:  { 50:'#E6F5F5', 100:'#C4E9E8', 200:'#93D6D4', 300:'#5CC0BD', 400:'#2DAEAB',
+              500:'#029B99', 600:'#028582', 700:'#026B69', 800:'#03524F', 900:'#043A38' },
+    accent: { 50:'#FDECEC', 100:'#F9CDCE', 500:'#C7010A', 600:'#A80109', 700:'#870108' },
+    ink:    { 700:'#25403F', 800:'#172E2D', 900:'#0D1F1E' },
+    mist:   { 50:'#F8FBFB', 100:'#EFF6F5', 200:'#DCE9E8' },
+  };
+</script>

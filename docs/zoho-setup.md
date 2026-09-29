@@ -2,27 +2,79 @@ Written for: the Shero Zoho CRM administrator.
 
 # Zoho CRM setup
 
-Everything the bot needs in Zoho. Shero's CRM is on **zoho.in**.
-
-The bot writes each food customer as a **Lead** and each paid order to the
-**Orders** module, linked to the Lead. It never converts a Lead and never
-writes to **Contacts**, which are Kitchen Partners in this CRM. Its writes do
-not set off Zoho workflows.
+Everything the bot needs in Zoho. The bot has a Zoho CRM of its own (a fresh
+org on **zoho.in**), separate from the kitchen-partner CRM; see section 7 for
+what was left behind there.
 
 Every Zoho field name the bot uses is in one file,
-`app/integrations/zoho/fields.py`.
+`app/integrations/zoho/fields.py`; what the setup script creates is in
+`app/integrations/zoho/schema.py`.
 
 ---
 
-## 1. API credentials
+## 1. How records flow
+
+The spec (section 2), as the bot does it:
+
+```
+First message      -> Lead (found by phone in Contacts, then Leads; else created)
+                      Bot Stage = New Enquiry
+Each step          -> Bot Stage + Bot Stage History; details as they are captured
+Payment succeeds   -> the Lead is converted to a Contact (Zoho's own conversion)
+                      Bot Stage = Converted; an Order is filed under the Contact,
+                      linked to the kitchen's Vendor, with one Order Item per
+                      dish linked to the dish's Product
+Later orders       -> Bot Stage moves on the Contact; each paid order filed under it
+Delivery updates   -> the Order's Order Status (and dispatch / delivered time)
+Menu edits         -> the dish's Product (Admin -> Menu -> Sync to Zoho does them all)
+```
+
+Zoho has modules for the things an order is made of, so the bot links to
+them instead of copying names into text:
+
+| The bot's | Zoho module | Matched by |
+|---|---|---|
+| Customer | **Leads**, then **Contacts** | Phone / Mobile |
+| Paid order | **Orders** (custom, created by the setup script) | Order number |
+| Dish on an order | **Order Items** (custom, created by the setup script) | Remembered per order line |
+| Menu dish | **Products** (Zoho's own) | Product Code = the dish's `retailer_id` |
+| Kitchen (outlet) | **Vendors** (Zoho's own) | Outlet Code = the outlet's code, or its name |
+
+A Contact, an Order and a Product each show an **Order Items** related list;
+a Vendor shows its **Orders**. Delivery slots and addresses have no Zoho
+module: the slot is on the Order as text and as a Delivery Time, the address
+as fields on the Order and on the Contact.
+
+- **One record per WhatsApp number.** Returning customers are matched on
+  Phone or Mobile (with or without the `+`), Contacts first. Somebody who
+  paid before is found as a Contact and greeted by name, even if the bot's
+  own database was cleared.
+- **Conversion happens once**, on the first payment. Zoho retires the Lead;
+  the Contact keeps every bot field (they have the same names on both
+  modules, and the bot writes them to the Contact right after converting,
+  so no conversion-mapping setup is needed). If Zoho refuses the
+  conversion, the customer stays a Lead with Bot Stage Converted and the
+  order is linked to the Lead; the admin's **Push to Zoho** retries it and
+  moves such orders to the Contact.
+- **No Account is created**, because the bot never sets Company on a Lead;
+  Zoho's API does not require it, whatever the layout says.
+- **Orders are filed when paid**, as the spec says. Unpaid and changed orders
+  stay in the bot's own dashboard, not in Zoho.
+- The bot's creates and updates do not set off Zoho workflows. A conversion
+  cannot skip them, so workflows on Contacts run for each new customer.
+
+## 2. Connect the CRM
 
 **You do not need to generate a refresh token by hand.** The dashboard does
-the OAuth exchange: Admin → Settings → Zoho CRM → **Connect Zoho**.
+the OAuth exchange: Admin → Settings → Zoho CRM → pick **zoho.in** → **Connect
+Zoho**.
 
-### Create the client
+### Create the API client (in the new account)
 
-1. Go to the API console for **your data centre** — `api-console.zoho.com`,
-   `.in`, `.eu`, `.au`, `.jp` or `.ca`. It must match the domain you log in at.
+Sign in to the **new** Zoho account first: the client must belong to the org
+the bot writes to.
+
+1. Open the API console for the data centre: **api-console.zoho.in**.
 2. Click **Add Client** → **Server-based Applications**.
 3. Fill it in:
 
@@ -32,165 +84,225 @@ the OAuth exchange: Admin → Settings → Zoho CRM → **Connect Zoho**.
    | Homepage URL | your dashboard root, e.g. `https://api.<yourdomain>` |
    | Authorized Redirect URIs | `https://api.<yourdomain>/admin/settings/zoho/callback` |
 
-   The redirect URI must match **character for character**, including the
-   scheme and any trailing path: `PUBLIC_BASE_URL` followed by
-   `/admin/settings/zoho/callback`. For the test tunnel that is
+   The redirect URI must match **character for character**: `PUBLIC_BASE_URL`
+   followed by `/admin/settings/zoho/callback`. For the test tunnel that is
    `https://shero-order-bot.loca.lt/admin/settings/zoho/callback`.
 
-4. Click **CREATE** and note the **Client ID** and **Client Secret**. Put them
-   in `.env` as `ZOHO_CLIENT_ID` and `ZOHO_CLIENT_SECRET`.
-5. On the client's **Settings** tab, turn on **Multi-DC** and enable every data
-   centre. Connecting always starts at `accounts.zoho.com`; with Multi-DC on,
-   an account on `.in`, `.eu` and so on can sign in there too.
+4. Click **CREATE** and note the **Client ID** and **Client Secret**. Enter
+   them in Admin → Settings (Zoho card) or in `.env` as `ZOHO_CLIENT_ID` and
+   `ZOHO_CLIENT_SECRET`.
+5. On the client's **Settings** tab, turn on **Multi-DC** and enable every
+   data centre.
 
 ### Connect
 
-Admin → Settings → Zoho CRM has a **domain** dropdown (zoho.com, zoho.in, ...)
-and **Connect Zoho**. Pick the domain your CRM opens on and the app was
-created on; you are sent to that Zoho domain to approve access. Zoho's reply says which data centre the account is on
-(`location=in`, `us`, `eu`, ...), and the bot stores that as
-`ZOHO_DATA_CENTER` with the refresh token, encrypted. Nobody picks the data
-centre, and there is nothing to copy back or email. Only known `location`
-values are accepted, because the client secret is sent to that data centre's
-accounts host.
+Admin → Settings → Zoho CRM: choose **zoho.in** and press **Connect Zoho**;
+approve access while signed in to the new account. Zoho's reply says which
+data centre the account is on, and the bot stores that as `ZOHO_DATA_CENTER`
+with the refresh token, encrypted. Connecting replaces the bot's previous
+connection; nothing changes in the previously connected CRM. The bot records
+which org it is connected to (`ZOHO_ORG_ID`); connecting a **different** org
+drops the record ids it saved for the old one, since they mean nothing there,
+and the Customers page's Push to Zoho recreates the records.
 
 Scopes requested: `ZohoCRM.modules.ALL`, `ZohoCRM.settings.ALL`,
-`ZohoCRM.users.READ`.
-
-> **Local testing.** Against a dev server, use `http://localhost:8000` as the
-> Homepage URL and
-> `http://localhost:8000/admin/settings/zoho/callback` as the redirect URI.
-> Zoho accepts `http` for `localhost` only; everything else must be `https`.
+`ZohoCRM.users.READ`, `ZohoCRM.org.READ`.
 
 > **Reconnecting.** The flow forces the consent screen every time, because
 > Zoho returns a refresh token only on first consent. If it ever reports that
 > no refresh token came back, remove the app under Zoho Accounts → Connected
 > Apps and connect again.
 
-> The refresh token does not expire, but Zoho limits how often it can mint new
-> access tokens (~15 per 10 minutes). The bot caches tokens, so this is only a
-> concern if many instances run at once.
+## 3. Prepare the CRM
 
-## 2. Fields the bot adds
+```bash
+python -m scripts.setup_zoho_crm           # dry run: lists what is missing
+python -m scripts.setup_zoho_crm --apply   # creates it
+```
 
-`python -m scripts.setup_zoho_crm` lists what is missing, and `--apply` creates
-it. It only ever adds: nothing is renamed or deleted, and running it again is
-safe. The definitions are in `app/integrations/zoho/schema.py`. Created on
-28 Sep 2026:
+It only ever adds - nothing is renamed or deleted - and running it again is
+safe. On a fresh org it creates:
 
-| Module | Field | Type | Holds |
-|---|---|---|---|
-| Leads | Bot Stage (`Bot_Stage`) | Picklist, the 11 stages below | Where the customer is in the ordering funnel |
-| Leads | Bot Stage History (`Bot_Stage_History`) | Multi-line | One line per stage: `2026-09-28 10:04 UTC  Cart Created` |
-| Leads | Selected Outlet (`Selected_Outlet`) | Single line | Kitchen that serves them |
-| Leads | Distance KM (`Distance_KM`) | Decimal | Distance to that kitchen |
-| Orders | Lead (`Lead`) | Lookup to Leads | The customer; shows as an "Orders" list on the Lead |
-| Orders | Outlet Name (`Outlet_Name`) | Single line | Kitchen name |
-| Orders | Delivery Slot (`Delivery_Slot`) | Single line | e.g. "Fri 25 Sep, 7:00 PM - 8:00 PM" |
-| Orders | Delivery Charge (`Delivery_Charge`) | Currency | Uber delivery fee |
-| Orders | Taxes and Fees (`Taxes_and_Fees`) | Currency | Uber's extra fees plus tax |
-| Orders | Order Total (`Order_Total`) | Currency | What the customer paid |
-| Orders | Stripe Payment ID (`Stripe_Payment_ID`) | Single line | Stripe payment reference |
-| Orders | Delivered Time (`Delivered_Time`) | Date/Time | When it was delivered |
-| Orders | Channel option **WhatsApp Bot** | Picklist option | Tells bot orders apart in reports |
+| What | Details |
+|---|---|
+| The **Orders** module | Custom module, plural *Orders*, singular *Order*; its display field **Name** holds the order number |
+| The **Order Items** module | Custom module, plural *Order Items*, singular *Order Item*; its display field **Name** holds `order number / dish` |
+| 10 fields on **Leads** and the same 10 on **Contacts** | See the table below |
+| 24 fields on **Orders** | See the table below |
+| 7 fields on **Order Items** | See the table below |
+| 5 fields on **Products** and 3 on **Vendors** | See the tables below; the rest of a dish or kitchen goes in Zoho's own fields |
+| **Lead Source** options `WhatsApp` and `Meta Ad` | On Leads and Contacts |
+| **Lead Status** options: the 11 Bot Stage values | So Zoho's own stage bar on a Lead, and its Leads-by-Status reports, show the funnel |
 
-Bot Stage values (spec section 2): New Enquiry, Details Captured, Cuisine
-Selected, Cart Created, Not Serviceable, Outlet Selected, Slot Selected,
-Payment Link Sent, Payment Abandoned, Payment Failed, Converted.
+If Zoho will not create a module through the API, the script prints the
+two-minute manual step and can be run again afterwards.
+Custom modules need a paid edition (a trial counts); on the free edition the
+Orders and Order Items modules cannot exist, and orders are logged as not
+filed. Products and Vendors are Zoho's own modules and exist in every edition.
 
-The bot's own stage has its own field rather than **Lead Status**, which the
-kitchen-partner team uses for its applicants.
+Fields on **Leads and Contacts**:
 
-> Six fields were also added to the **Customers** module on 28 Sep, before
-> the bot moved to Leads (Bot Stage, Bot Stage History, Selected Outlet,
-> Distance KM, Cuisine Preference, Ad ID). The bot no longer uses them; they
-> are empty and can be deleted in Setup.
-
-> **Order Total vs Grand Total.** The Orders module's own `Grand_Total` is a
-> formula over the dish lines, so it leaves out the delivery charge and fees.
-> `Order_Total` is the amount actually charged.
-
-## 3. What goes where
-
-**Leads** (one per WhatsApp number):
-
-| Zoho field (label) | From the bot | When |
+| Field (API name) | Type | Holds |
 |---|---|---|
-| First Name / Last Name | Name the customer gave ("WhatsApp Customer" until then) | First message, then the name step |
-| Contact Number (`Phone`) | WhatsApp number, `+` and digits | First message |
+| Address Line 2 (`Address_Line_2`) | Single line | Flat / unit |
+| Latitude, Longitude | Single line | The delivery pin |
+| Ad ID (`Ad_ID`), Campaign ID (`Campaign_ID`) | Single line | Click-to-WhatsApp ad and campaign |
+| Cuisine Preference (`Cuisine_Preference`) | Single line | e.g. `Chettinad`, `North Indian` |
+| Bot Stage (`Bot_Stage`) | Picklist, the 11 stages | Where the customer is in the ordering funnel |
+| Bot Stage History (`Bot_Stage_History`) | Multi-line | One line per stage: `2026-09-28 10:04 UTC  Cart Created` |
+| Selected Outlet (`Selected_Outlet`) | Single line | Kitchen that serves them |
+| Distance KM (`Distance_KM`) | Decimal | Distance to that kitchen |
+
+Bot Stage values: New Enquiry, Details Captured, Cuisine Selected, Cart
+Created, Not Serviceable, Outlet Selected, Slot Selected, Payment Link Sent,
+Payment Abandoned, Payment Failed, Converted.
+
+Fields on **Orders**:
+
+| Field (API name) | Type | Holds |
+|---|---|---|
+| Name | Display field | Order number, e.g. `SHO-260928-ABCDE` |
+| Contact (`Contact`) | Lookup to Contacts | The customer; shows as an "Orders" list on the Contact |
+| Lead (`Lead`) | Lookup to Leads | Only when the conversion failed |
+| Customer No (`Customer_No`) | Phone | Contact number for the delivery |
+| Channel | Picklist | `WhatsApp Bot` |
+| Order Status (`Order_Status`) | Picklist | The bot's order stages, verbatim (below) |
+| Address, Latitude, Longitude | Single line | Where it was delivered |
+| Cuisine, Outlet Name, Delivery Slot | Single line | e.g. `Fri 25 Sep, 7:00 PM - 8:00 PM` |
+| Outlet (`Outlet`) | Lookup to Vendors | The kitchen that cooked it; shows as an "Orders" list on the Vendor |
+| Delivery Time (`Delivery_Time`) | Date/Time | Start of the delivery slot, for date filters |
+| Items | Multi-line | One dish per line: `2 x Sambar @ 9.50 = 19.00` (the Order Items records are the structured version) |
+| Dish Total, Delivery Charge, Taxes and Fees, Order Total | Currency | Amounts as charged (in `STRIPE_CURRENCY`) |
+| Stripe Payment ID | Single line | Stripe payment reference |
+| Delivery Instructions | Multi-line | What the customer typed |
+| Order Placed Time, Paid Time, Dispatched Time, Delivered Time | Date/Time | When each happened |
+
+Order Status values: Pending Payment, Paid & Slot Booked, Sent to Kitchen,
+Out for Delivery, Delivered, Cancelled, Refunded. The bot sets Paid & Slot
+Booked on payment, then the delivery stages as the kitchen advances the order,
+and Cancelled or Refunded from a refund.
+
+> If the Orders module was created by hand with a display field other than
+> Name, set `ZOHO_ORDERS_NAME_FIELD` to its API name; the dry run says so.
+
+Fields on **Order Items** (one record per dish on a paid order):
+
+| Field (API name) | Type | Holds |
+|---|---|---|
+| Name | Display field | `SHO-260928-ABCDE / Sambar` |
+| Order (`Order`) | Lookup to Orders | The order; shows as an "Order Items" list on it |
+| Product (`Product`) | Lookup to Products | The dish; empty only if the dish is no longer on the menu |
+| Contact (`Contact`) | Lookup to Contacts | The customer; shows as an "Order Items" list on the Contact |
+| Dish Code (`Dish_Code`) | Single line | The dish's `retailer_id` |
+| Quantity, Unit Price, Line Total | Number, Currency | As ordered |
+
+Fields on **Products** (Zoho's own module; one per menu dish). The bot fills
+Zoho's Product Name, Product Code (the dish's `retailer_id`), Unit Price,
+Product Active (hidden dishes are inactive) and Description, plus:
+
+| Field (API name) | Type | Holds |
+|---|---|---|
+| Cuisine, Dish Category (`Dish_Category`) | Single line | Where the dish sits on the menu |
+| Pack Size (`Pack_Size`), Serves | Single line | From the sheet |
+| Photo URL (`Photo_URL`) | URL | The dish photo, when it has a public URL |
+
+Product Name is unique in Zoho. Two dishes with the same name in different
+categories get the second one named `Sambar (Kerala, Curries)`.
+
+Fields on **Vendors** (Zoho's own module; one per kitchen). The bot fills
+Zoho's Vendor Name, Phone, Email, Street, City, State, Zip Code, Country,
+Address - Latitude / Longitude (the kitchen's pin) and Description, plus:
+
+| Field (API name) | Type | Holds |
+|---|---|---|
+| Outlet Code (`Outlet_Code`) | Single line | The outlet's code in Settings |
+| Kitchen WhatsApp (`Kitchen_WhatsApp`) | Phone | Where kitchen alerts go |
+| Delivery Radius KM (`Delivery_Radius_KM`) | Decimal | Delivery area |
+
+State and Country are picklists in Zoho; a value the org's lists do not
+have is left blank rather than failing the record.
+
+## 4. What goes where
+
+**Leads, then Contacts** (one per WhatsApp number):
+
+| Zoho field | From the bot | When |
+|---|---|---|
+| First Name / Last Name | Name the customer gave (`WhatsApp Customer` until then) | First message, then the name step |
+| Phone | WhatsApp number, `+` and digits | First message |
 | Email | Email the customer gave | Email step |
-| Lead Source | `Whatsapp` | First message |
-| Facebook Ad ID / Facebook Ad Campaign ID | Click-to-WhatsApp ad and campaign | First message |
-| Address (`Street`), Address Second Line, PinCode (`Zip_Code`), Latitude, Longitude | The delivery address | As soon as an address is saved, and again when delivery is checked |
-| Cuisine (`Native_Cuisine_at_home`) | Cuisine of the dishes picked (Chettinad, Andhra, Kerala) | When a dish from a new cuisine is added |
+| Lead Source | `WhatsApp`, or `Meta Ad` from a click-to-WhatsApp ad | First message |
+| Ad ID / Campaign ID | The ad and campaign | First message |
+| Street (`Mailing Street` on a Contact), Address Line 2, Zip Code (`Mailing Zip`), Latitude, Longitude | The delivery address | As soon as an address is saved, and again when delivery is checked |
+| Cuisine Preference | Cuisine of the dishes picked | When a dish from a new cuisine is added |
 | Selected Outlet, Distance KM | Kitchen that delivers, and how far | Delivery checked |
 | Bot Stage, Bot Stage History | Funnel stage | Every stage change |
+| Lead Status (Leads only) | The same stage, so Zoho's stage bar shows it | Every stage change |
 
-**Orders** (one per paid order):
+On conversion the Contact receives all of the above plus Bot Stage Converted,
+and the address the paid order went to.
 
-| Zoho field | From the bot |
-|---|---|
-| Order No | Our order number, e.g. `SHO-260928-ABCDE` |
-| Lead | The customer's Lead |
-| Customer No | Contact number |
-| Channel | `WhatsApp Bot` |
-| Order Status | See the mapping below |
-| Address, Latitude, Longitude | Delivery address and pin |
-| Cuisine | Customer's cuisine |
-| Item Details | One row per dish: name (`SAP_Name`), quantity, unit price |
-| Order Instructions | Delivery instructions |
-| Order Placed Time / Order Accepted Time | Order created / paid |
-| Order Dispatched Time / Delivered Time | Out for delivery / delivered |
-| Outlet Name, Delivery Slot, Delivery Charge, Taxes and Fees, Order Total, Stripe Payment ID | See section 2 |
+**Orders, Order Items, Products and Vendors**:
 
-Our order stages -> the existing **Order Status** options:
+| Zoho record | From the bot | When |
+|---|---|---|
+| Order | The paid order: totals, address, slot, Stripe reference, status, kitchen (Vendor link), delivery time | Payment succeeds; status on each kitchen step |
+| Order Item | Each cart line: dish (Product link), code, quantity, unit price, line total, the customer (Contact link) | Right after the Order |
+| Product | Each dish ordered (created or brought up to date), and every dish on **Sync to Zoho** or an admin edit | Before its Order Item; Admin → Menu |
+| Vendor | The kitchen that cooked the order, and every kitchen on **Sync to Zoho** | Before the Order; Admin → Menu |
 
-| Bot order stage | Order Status |
-|---|---|
-| Paid & Slot Booked, Sent to Kitchen | Confirmed |
-| Out for Delivery | Dispatched |
-| Delivered | Completed |
-| Cancelled, Refunded | Cancelled |
-
-## 4. How records flow
-
-```
-First message      -> Lead (found by phone, else created), Bot Stage New Enquiry
-Each step          -> Bot Stage + Bot Stage History; details as they are captured
-Payment succeeds   -> Bot Stage Converted; Order created and linked to the Lead
-Delivery updates   -> Order Status (and dispatch / delivered time) updated
-```
-
-The spec's "Lead -> Contact" step becomes **Bot Stage = Converted**: in this
-CRM a Contact is a Kitchen Partner, so the Lead is not converted.
-
-Returning customers are matched on Phone, so a number gets one Lead and every
-paid order is linked to it. Zoho's search takes about a minute to find a newly
-created record; the bot keeps the Lead's id after creating it, so this only
-matters if the bot's own database is wiped.
-
-Orders are filed **when paid**, as the spec says. Unpaid and changed orders
-stay in the bot's own dashboard, not in Zoho's Orders.
+Products and Vendors are matched by code, so a dish renamed on the menu
+stays one Product, and a Product or Vendor deleted in Zoho is recreated on
+the next order or sync. Nothing is ever deleted in Zoho by the bot.
 
 ## 5. Suggested workflows
 
-Not required by the bot, and not set off by it (the bot's writes skip
-workflows). A workflow on a **field update** of Bot Stage, run by a person or
-a schedule, can still use:
+Not required by the bot. A workflow on a **field update** of Bot Stage can
+use:
 
-- **Payment Abandoned**: assign a follow-up task.
-- **Not Serviceable**: tag for an area expansion list.
+- **Payment Abandoned**: assign a follow-up task or send the re-engagement
+  template.
+- **Not Serviceable**: tag for an area-expansion list.
 - **Payment Failed**: alert an agent to reach out.
+
+Workflows on **Contact created** run for every converted customer - keep
+them to what a food customer should get.
 
 ## 6. Verifying it works
 
 ```bash
-python -m scripts.setup_zoho_crm     # "Nothing to do" = every field is there
+python -m scripts.setup_zoho_crm     # "Every field and option is already there"
 ```
 
-Then send one WhatsApp message to the bot: a Lead appears with Bot Stage
-`New Enquiry`. If it does not, the application log names the reason: look for
-`zoho_ensure_lead_failed` or `zoho_lead_update_failed`.
+Then:
+
+1. Admin → Menu → **Sync to Zoho**: every dish appears in Products and every
+   kitchen in Vendors.
+2. Send one WhatsApp message to the bot: a Lead appears with Bot Stage
+   `New Enquiry`.
+3. Order and pay (test card): the Lead disappears from Leads, a Contact
+   appears with Bot Stage `Converted`, an Order appears under it with the
+   kitchen in Outlet, and the Order's **Order Items** list has one row per
+   dish, each pointing at its Product.
+4. Admin → Orders → advance the order: its Order Status follows.
+
+If a record is missing, the application log names the reason:
+`zoho_ensure_record_failed`, `zoho_record_update_failed`,
+`zoho_lead_convert_failed`, `zoho_order_create_failed`,
+`zoho_order_item_failed`, `zoho_product_sync_failed` or
+`zoho_vendor_sync_failed`. Admin → Customers → **Push to Zoho** resends
+everything for one customer once the cause is fixed, including the Order
+Items and kitchen link of orders filed earlier.
 
 The bot is built so Zoho failures never block a customer. A missing record
 means a configuration problem to fix, not a lost order.
+
+## 7. The previously connected CRM
+
+Until 29 Sep 2026 the bot wrote to the kitchen-partner CRM. Fields it added
+there are empty and can be deleted in that org's Setup: on **Leads** Bot
+Stage, Bot Stage History, Selected Outlet, Distance KM; on **Orders** Lead,
+Outlet Name, Delivery Slot, Delivery Charge, Taxes and Fees, Order Total,
+Stripe Payment ID, Delivered Time and the Channel option `WhatsApp Bot`; on
+**Customers** Bot Stage, Bot Stage History, Selected Outlet, Distance KM,
+Cuisine Preference, Ad ID. The bot no longer touches that org.

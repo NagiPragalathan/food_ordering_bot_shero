@@ -141,13 +141,13 @@ Your channel already shows **FB Business Verification: Verified** and
 
 | What | Where | `.env` variable |
 |---|---|---|
-| Client ID | api-console.zoho.com → Self Client / Server-based app | `ZOHO_CLIENT_ID` |
+| Client ID | api-console.zoho.in, signed in to the bot's own Zoho account → Server-based app | `ZOHO_CLIENT_ID` |
 | Client Secret | same | `ZOHO_CLIENT_SECRET` |
 | Admin user (or our email added as Administrator) | | — |
 | Your Zoho edition/plan | determines API call limits | — |
 
 Required OAuth scopes: `ZohoCRM.modules.ALL`, `ZohoCRM.settings.ALL`,
-`ZohoCRM.users.READ`.
+`ZohoCRM.users.READ`, `ZohoCRM.org.READ`.
 
 **You do not need to produce a refresh token.** Create a *Server-based
 Application* in Zoho's API console, register the redirect URI, turn on
@@ -155,8 +155,8 @@ Multi-DC, then press **Connect Zoho** in Settings and approve access. The data
 centre (`.com`, `.in`, ...) is detected from your login. Full steps in
 [zoho-setup.md](zoho-setup.md).
 
-**We also need your approval to create** the custom fields, the Lead Status
-picklist values and the Orders module listed in
+**We also need your approval to create** the Orders module, the custom fields
+and the Lead Source options listed in
 [zoho-setup.md](zoho-setup.md). That document is written so your Zoho admin
 can action it directly.
 

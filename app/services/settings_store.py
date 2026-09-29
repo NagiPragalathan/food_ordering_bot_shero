@@ -46,6 +46,8 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("ZOHO_REFRESH_TOKEN", "Refresh Token", True),
         ("ZOHO_DATA_CENTER", "Data Centre (com / in / eu / au / jp / ca)", False),
         ("ZOHO_ORDERS_MODULE", "Orders Module API Name", False),
+        ("ZOHO_ORDER_ITEMS_MODULE", "Order Items Module API Name", False),
+        ("ZOHO_ORG_ID", "Org ID (recorded by Connect Zoho)", False),
     ],
     "Stripe": [
         ("STRIPE_SECRET_KEY", "Secret Key", True),
@@ -153,6 +155,13 @@ async def apply_overrides(session: AsyncSession) -> int:
     overrides = await load_overrides(session)
     applied = 0
 
+    # An override that was applied earlier but is gone now (cleared by
+    # another process, say a script's disconnect) falls back to the
+    # environment, so the minute-ly refresh really does drop a token.
+    for key in _applied - set(overrides):
+        _restore_default(key)
+    _applied.clear()
+
     for key, value in overrides.items():
         field = key.lower()
         if not hasattr(settings, field):
@@ -164,11 +173,29 @@ async def apply_overrides(session: AsyncSession) -> int:
             log.warning("setting_bad_value", key=key)
             continue
         object.__setattr__(settings, field, coerced)
+        _applied.add(key)
         applied += 1
 
     if applied:
         log.info("settings_overrides_applied", count=applied)
     return applied
+
+
+_applied: set[str] = set()      # override keys currently applied in this process
+
+
+def _restore_default(key: str) -> None:
+    """Put the environment's value back on the live settings, right away.
+
+    Without this a cleared override lingers in memory until a restart, and
+    "Disconnect Zoho" would keep using the forgotten refresh token.
+    """
+    field = key.lower()
+    if not hasattr(settings, field):
+        return
+    fresh = type(settings)()            # re-reads .env and the environment
+    object.__setattr__(settings, field, getattr(fresh, field))
+    _applied.discard(key)
 
 
 def _coerce(field: str, value: str):
@@ -200,6 +227,7 @@ async def save(session: AsyncSession, key: str, value: str, *,
         if row is not None:
             await session.delete(row)
             log.info("setting_cleared", key=key, updated_by=updated_by)
+        _restore_default(key)
         return
 
     stored = encrypt(value) if is_secret else value
@@ -235,7 +263,10 @@ async def save_many(session: AsyncSession, values: dict[str, str], *,
         _, is_secret = EDITABLE_KEYS[key]
         if is_secret and not (value or "").strip() and key not in clearable:
             continue
-        if str(_current_value(key)) == (value or "").strip():
+        # "Clear it" must reach the database even when this process never
+        # loaded the override (a script, or a server before startup finished):
+        # the in-memory value is blank then, which is not the same thing.
+        if key not in clearable and str(_current_value(key)) == (value or "").strip():
             continue
         await save(session, key, value, updated_by=updated_by)
         changed.append(key)

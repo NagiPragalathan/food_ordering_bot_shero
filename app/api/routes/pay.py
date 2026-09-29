@@ -25,6 +25,7 @@ from app.integrations.stripe_gw import checkout
 from app.services import order_link
 from app.services import orders as order_service
 from app.services import payments
+from app.services.slots import as_utc
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/pay", tags=["payment"])
@@ -147,10 +148,12 @@ async def redirect_to_checkout(
             order.order_number,
         )
 
+    # as_utc: SQLite hands the stamp back without a timezone, and comparing
+    # that with an aware "now" raises.
     expired = (
         order.payment_status in (PaymentStatus.EXPIRED, PaymentStatus.REFUNDED)
         or (order.payment_link_expires_at is not None
-            and order.payment_link_expires_at <= datetime.now(timezone.utc))
+            and as_utc(order.payment_link_expires_at) <= datetime.now(timezone.utc))
     )
     if expired:
         # The payment_expired template's Order Now button lands here: send
@@ -196,26 +199,34 @@ def _page(title: str, message: str, order_number: str,
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)} - Shero Home Food</title>
+<link rel="icon" type="image/png" href="/static/brand/favicon-64.png">
+<meta name="theme-color" content="#029B99">
 <style>
+  /* Shero brand colours, as in templates/_brand.html. */
   :root {{ color-scheme: light dark; }}
   body {{ font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
          display: grid; place-items: center; min-height: 100vh; margin: 0;
-         background: #faf7f2; color: #241c16; }}
+         background: #EFF6F5; color: #0D1F1E; }}
   .card {{ background: #fff; padding: 2.5rem 2rem; border-radius: 16px;
-          box-shadow: 0 10px 30px rgba(0,0,0,.08); max-width: 26rem;
+          border-top: 4px solid #029B99;
+          box-shadow: 0 10px 30px rgba(13,31,30,.08); max-width: 26rem;
           text-align: center; }}
-  h1 {{ font-size: 1.35rem; margin: 0 0 .75rem; }}
-  p {{ line-height: 1.6; margin: 0; color: #5a4c42; }}
-  .ref {{ margin-top: 1.25rem; font-size: .85rem; color: #9a8a7c; }}
+  .logo {{ width: 72px; height: 72px; border-radius: 16px; margin: 0 auto 1rem;
+          display: block; }}
+  h1 {{ font-size: 1.35rem; margin: 0 0 .75rem; color: #026B69; }}
+  p {{ line-height: 1.6; margin: 0; color: #25403F; }}
+  .ref {{ margin-top: 1.25rem; font-size: .85rem; color: #5b7472; }}
   @media (prefers-color-scheme: dark) {{
-    body {{ background: #17120f; color: #f3ece6; }}
-    .card {{ background: #221b17; box-shadow: none; }}
-    p {{ color: #c8b8aa; }}
+    body {{ background: #0D1F1E; color: #E6F5F5; }}
+    .card {{ background: #172E2D; box-shadow: none; }}
+    h1 {{ color: #5CC0BD; }}
+    p {{ color: #C4E9E8; }}
   }}
 </style>
 </head>
 <body>
   <div class="card">
+    <img class="logo" src="/static/brand/shero-logo-192.png" alt="Shero Home Food">
     <h1>{html.escape(title)}</h1>
     <p>{message}</p>
     {reference}

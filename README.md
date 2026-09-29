@@ -68,12 +68,12 @@ and `alembic upgrade head` works as-is. Production still runs Postgres.
 | Steps 1–19 conversation flow | Complete, including the Check Availability shortcut |
 | Menu (3 cuisines, 287 dishes) | Imported from the client's sheet |
 | Web ordering page | Complete — search, category filters, saved cart, address, slot, pay |
-| Admin dashboard | Complete — menu, import, orders, chat tester, settings |
+| Admin dashboard | Complete — menu, import, orders, customers (delete / push to Zoho), chat tester, settings |
 | Delivery area + serviceability | Complete — radius, ZIP list, or both |
 | Delivery slots + holds | Complete, generated from the kitchen's operating hours |
 | Uber Direct delivery quote | Complete |
 | Stripe checkout, expiry, refunds | Complete, with the short Pay Now redirect |
-| Zoho Leads (funnel stage), Orders | Complete; fields added by `scripts/setup_zoho_crm.py` |
+| Zoho: Lead through the funnel, Contact on payment, Orders + Order Items modules, dishes as Products, kitchens as Vendors | Complete; the CRM is prepared by `scripts/setup_zoho_crm.py` |
 | 10 WhatsApp templates | Defined and validated in code; **await Meta approval** |
 | Order fulfilment (steps 17–19) | Complete — dashboard + ops API |
 | Scheduled reminder / expiry / feedback | Complete |
@@ -104,12 +104,13 @@ app/
 ├── integrations/   gallabox, zoho, meta, uber, stripe_gw, geo
 ├── services/       business logic + the conversation state machine
 ├── admin/          the dashboard (auth, routes)
-├── templates/      server-rendered admin pages
+├── templates/      server-rendered admin and ordering pages (_brand.html = colours)
+├── static/brand/   Shero logo and favicon
 ├── api/routes/     webhooks, payment redirect, ops API, health
 └── workers/        scheduled jobs
 alembic/            migrations
 docs/               see docs/README.md
-scripts/            check_config, check_gallabox, simulate_chat
+scripts/            check_config, check_gallabox, simulate_chat, setup_zoho_crm
 tests/              287 tests
 ```
 

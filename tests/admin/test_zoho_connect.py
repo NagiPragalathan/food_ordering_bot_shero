@@ -187,3 +187,44 @@ async def test_the_token_refresh_keeps_secrets_out_of_the_url(monkeypatch):
     assert "shh" not in seen["url"] and not seen["params"]
     assert seen["data"]["client_secret"] == "shh"
     oauth.invalidate_token()
+
+
+# --- which org: record ids belong to one CRM -------------------------------------
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous,current,dropped,kept_id", [
+    ("org-old", "org-new", 1, None),      # a different org: the old links mean nothing
+    ("org-old", "org-old", 0, "L1"),      # reconnecting the same org keeps them
+    ("", "org-new", 0, "L1"),             # first connect ever: nothing to compare with
+])
+async def test_connecting_records_the_org_and_drops_links_to_another(
+        session, customer, monkeypatch, previous, current, dropped, kept_id):
+    from app.core.config import settings
+    from app.integrations.zoho import crm
+
+    monkeypatch.setattr(settings, "zoho_org_id", previous)
+
+    async def org_id():
+        return current
+    monkeypatch.setattr(crm, "org_id", org_id)
+    customer.zoho_lead_id = "L1"
+    await session.flush()
+
+    assert await zoho_connect.record_org(session) == (current, dropped)
+    assert customer.zoho_lead_id == kept_id
+    assert settings.zoho_org_id == current
+
+
+@pytest.mark.asyncio
+async def test_an_org_lookup_failure_changes_nothing(session, customer, monkeypatch):
+    from app.core.config import settings
+    from app.integrations.zoho import crm
+
+    monkeypatch.setattr(settings, "zoho_org_id", "org-old")
+
+    async def org_id():
+        raise IntegrationError("zoho", "503")
+    monkeypatch.setattr(crm, "org_id", org_id)
+    customer.zoho_lead_id = "L1"
+
+    assert await zoho_connect.record_org(session) == (None, 0)
+    assert customer.zoho_lead_id == "L1" and settings.zoho_org_id == "org-old"

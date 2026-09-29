@@ -8,20 +8,16 @@
   <!-- Map for pinning the delivery address. Optional: the form works without it. -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
+  {% include "_brand.html" %}
   <script>
-    /* Warm, food-forward palette: deep cocoa surfaces, saffron accents and a
-       chilli-red call to action against cream. */
+    /* Shero brand (templates/_brand.html): logo teal on near-white, the logo
+       red for small highlights. Herb green stays for "veg" and success. */
     tailwind.config = { theme: { extend: {
       colors: {
-        cream:   { 50:'#FDFBF7', 100:'#F7F1E8', 200:'#EDE2D3' },
-        cocoa:   { 700:'#3A2A22', 800:'#2B1E18', 900:'#1D1411' },
-        saffron: { 50:'#FEF7EA', 100:'#FDEBC9', 300:'#F6CE7E',
-                   500:'#EDA93C', 600:'#D9912A' },
-        chilli:  { 50:'#FDF0EC', 100:'#FADCD2', 300:'#EFA48C',
-                   500:'#D2542F', 600:'#B94525', 700:'#96361C' },
-        herb:    { 500:'#3E8E5A', 600:'#2F7549', 700:'#245C39' },
+        ...window.SHERO_COLORS,
+        herb: { 500:'#3E8E5A', 600:'#2F7549', 700:'#245C39' },
       },
-      boxShadow: { card: '0 1px 2px rgba(29,20,17,.06), 0 4px 16px rgba(29,20,17,.05)' },
+      boxShadow: { card: '0 1px 2px rgba(13,31,30,.06), 0 4px 16px rgba(13,31,30,.05)' },
     } } };
   </script>
   <style>
@@ -30,62 +26,69 @@
     .no-bar { -ms-overflow-style: none; scrollbar-width: none; }
     @keyframes rise { from { transform: translateY(6px); opacity: 0 } to { transform: none; opacity: 1 } }
     .rise { animation: rise .18s ease-out both }
+    /* The cart count gives a small pop when it changes. */
+    @keyframes bump { 40% { transform: scale(1.18) } }
+    .bump { display: inline-block; animation: bump .28s ease-out }
+    @media (prefers-reduced-motion: reduce) { .rise, .bump { animation: none } }
   </style>
 </head>
-<body class="bg-cream-100 pb-28 text-cocoa-900">
+<body class="bg-mist-100 pb-28 text-ink-900">
 
 <!-- Brand header -->
-<header class="sticky top-0 z-30 bg-cocoa-800 text-white shadow-sm">
+<header class="sticky top-0 z-30 bg-brand-500 text-white shadow-sm">
   <div class="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6">
-    <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-lg">🍛</div>
+    <img src="/static/brand/shero-logo-192.png" alt="Shero Home Food" width="40" height="40"
+         class="h-10 w-10 shrink-0 rounded-lg ring-1 ring-white/40">
     <div class="min-w-0 flex-1">
       <div class="truncate text-[15px] font-semibold leading-tight">Shero Home Food</div>
       <div id="sub" class="truncate text-[11px] text-white/70">
         {% if kitchen %}{{ kitchen.name }}{% else %}Loading menu…{% endif %}
       </div>
     </div>
-    <span class="shrink-0 rounded-full bg-chilli-500 px-3 py-1 text-[11px] font-semibold">Delivery</span>
+    <span class="shrink-0 rounded-full bg-accent-500 px-3 py-1 text-[11px] font-semibold">Delivery</span>
   </div>
 
   <!-- Search -->
   <div class="mx-auto max-w-6xl px-4 pb-3 sm:px-6">
     <div class="flex items-center gap-2 rounded-xl bg-white px-3 py-2.5">
-      <svg class="h-4 w-4 shrink-0 text-cocoa-700/45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <svg class="h-4 w-4 shrink-0 text-ink-700/45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
         <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5" stroke-linecap="round"/>
       </svg>
       <input id="search" placeholder="Search dishes, categories…"
-             class="w-full bg-transparent text-sm text-cocoa-800 outline-none placeholder:text-cocoa-700/45">
-      <button id="clear-search" class="hidden text-cocoa-700/45 hover:text-cocoa-700/80" aria-label="Clear search">✕</button>
+             class="w-full bg-transparent text-sm text-ink-800 outline-none placeholder:text-ink-700/45">
+      <button id="clear-search" class="hidden text-ink-700/45 hover:text-ink-700/80" aria-label="Clear search">✕</button>
     </div>
   </div>
 </header>
 
 <!-- Category rail -->
-<div class="sticky top-[108px] z-20 border-b border-cream-200 bg-cream-100/95 backdrop-blur">
+<div class="sticky top-[108px] z-20 border-b border-mist-200 bg-mist-100/95 backdrop-blur">
   <nav id="cuisines" class="no-bar mx-auto flex max-w-6xl gap-2.5 overflow-x-auto px-4 pb-1 pt-4 sm:px-6"></nav>
   <nav id="chips" class="no-bar mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 py-2.5 sm:px-6"></nav>
 </div>
 
 <div class="mx-auto flex max-w-6xl gap-6 px-4 py-4 sm:px-6">
   <main id="list" class="min-w-0 flex-1">
-    <div class="flex flex-col items-center py-24 text-cocoa-700/45">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-cream-200 border-t-chilli-500"></div>
-      <p class="mt-3 text-sm">Loading delicious items…</p>
+    <div class="animate-pulse" aria-label="Loading the menu">
+      <div class="mb-3 h-4 w-40 rounded bg-mist-200"></div>
+      <div class="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
+        <div class="flex items-center gap-3 rounded-xl border border-mist-200 bg-white p-3"><div class="h-20 w-20 shrink-0 rounded-lg bg-mist-100"></div><div class="flex-1 space-y-2"><div class="h-3 w-3/4 rounded bg-mist-100"></div><div class="h-2.5 w-1/2 rounded bg-mist-100"></div><div class="h-3 w-16 rounded bg-brand-100"></div></div><div class="h-10 w-10 rounded-lg bg-mist-100"></div></div><div class="flex items-center gap-3 rounded-xl border border-mist-200 bg-white p-3"><div class="h-20 w-20 shrink-0 rounded-lg bg-mist-100"></div><div class="flex-1 space-y-2"><div class="h-3 w-3/4 rounded bg-mist-100"></div><div class="h-2.5 w-1/2 rounded bg-mist-100"></div><div class="h-3 w-16 rounded bg-brand-100"></div></div><div class="h-10 w-10 rounded-lg bg-mist-100"></div></div><div class="flex items-center gap-3 rounded-xl border border-mist-200 bg-white p-3"><div class="h-20 w-20 shrink-0 rounded-lg bg-mist-100"></div><div class="flex-1 space-y-2"><div class="h-3 w-3/4 rounded bg-mist-100"></div><div class="h-2.5 w-1/2 rounded bg-mist-100"></div><div class="h-3 w-16 rounded bg-brand-100"></div></div><div class="h-10 w-10 rounded-lg bg-mist-100"></div></div><div class="flex items-center gap-3 rounded-xl border border-mist-200 bg-white p-3"><div class="h-20 w-20 shrink-0 rounded-lg bg-mist-100"></div><div class="flex-1 space-y-2"><div class="h-3 w-3/4 rounded bg-mist-100"></div><div class="h-2.5 w-1/2 rounded bg-mist-100"></div><div class="h-3 w-16 rounded bg-brand-100"></div></div><div class="h-10 w-10 rounded-lg bg-mist-100"></div></div><div class="flex items-center gap-3 rounded-xl border border-mist-200 bg-white p-3"><div class="h-20 w-20 shrink-0 rounded-lg bg-mist-100"></div><div class="flex-1 space-y-2"><div class="h-3 w-3/4 rounded bg-mist-100"></div><div class="h-2.5 w-1/2 rounded bg-mist-100"></div><div class="h-3 w-16 rounded bg-brand-100"></div></div><div class="h-10 w-10 rounded-lg bg-mist-100"></div></div><div class="flex items-center gap-3 rounded-xl border border-mist-200 bg-white p-3"><div class="h-20 w-20 shrink-0 rounded-lg bg-mist-100"></div><div class="flex-1 space-y-2"><div class="h-3 w-3/4 rounded bg-mist-100"></div><div class="h-2.5 w-1/2 rounded bg-mist-100"></div><div class="h-3 w-16 rounded bg-brand-100"></div></div><div class="h-10 w-10 rounded-lg bg-mist-100"></div></div>
+      </div>
     </div>
   </main>
 
   <!-- Desktop only: the cart stays on screen instead of behind a bar. -->
   <aside id="side-cart"
-         class="sticky top-[200px] hidden h-fit w-80 shrink-0 rounded-2xl border border-cream-200 bg-white p-4 shadow-card lg:block">
+         class="sticky top-[200px] hidden h-fit w-80 shrink-0 rounded-2xl border border-mist-200 bg-white p-4 shadow-card lg:block">
     <h2 class="mb-2 text-sm font-semibold">Your cart</h2>
     <div id="side-lines" class="max-h-[46vh] space-y-1 overflow-y-auto"></div>
-    <div id="side-foot" class="mt-3 border-t border-cream-200 pt-3"></div>
+    <div id="side-foot" class="mt-3 border-t border-mist-200 pt-3"></div>
   </aside>
 </div>
 
 <!-- Jump to a category -->
 <button id="index-btn"
-        class="fixed bottom-24 right-5 z-30 flex h-12 w-12 lg:hidden items-center justify-center rounded-full bg-cocoa-700 text-white shadow-lg hover:bg-cocoa-800"
+        class="fixed bottom-24 right-5 z-30 flex h-12 w-12 lg:hidden items-center justify-center rounded-full bg-brand-700 text-white shadow-lg hover:bg-brand-800"
         aria-label="Jump to a category">
   <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
     <path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/>
@@ -94,7 +97,7 @@
 
 <!-- Cart bar -->
 <button id="cart-bar"
-        class="fixed inset-x-0 bottom-0 z-30 hidden items-center justify-between gap-3 bg-cocoa-800 px-5 py-3.5 text-white lg:!hidden shadow-[0_-2px_12px_rgba(0,0,0,.18)]">
+        class="fixed inset-x-0 bottom-0 z-30 hidden items-center justify-between gap-3 bg-brand-700 px-5 py-3.5 text-white lg:!hidden shadow-[0_-2px_12px_rgba(0,0,0,.18)]">
   <span class="flex items-center gap-2 text-sm">
     <span id="bar-count" class="rounded-full bg-white/20 px-2.5 py-0.5 text-[12px] font-semibold">0 items</span>
     <span id="bar-total" class="font-bold tabular-nums">$0.00</span>
@@ -122,29 +125,107 @@
   let activeChip = 'all';
 
   // --- cart (server is the source of truth) -------------------------------
-  function applyCart(data) {
-    CART = {};
-    (data.cart || []).forEach(l => { CART[l.retailer_id] = l.quantity; });
-    $('bar-count').textContent = data.count + (data.count === 1 ? ' item' : ' items');
-    $('bar-total').textContent = money(data.subtotal);
-    $('cart-bar').classList.toggle('hidden', !data.count);
-    $('cart-bar').classList.toggle('flex', !!data.count);
-    renderSideCart(data);
-    renderList();
+  const MAX_QTY = 20;           // the checkout accepts up to 20 of a dish
+  const LINES = {};             // retailer_id -> last line the server sent (name, price)
+  const WANT = {};              // retailer_id -> quantity the customer last asked for
+  const SYNCING = {};           // retailer_id -> a request for it is in flight
+
+  // What the cart looks like right now, from local state: the bar and the
+  // side panel follow every tap at once instead of waiting for the server.
+  function cartView() {
+    const cart = Object.keys(CART).map(id => {
+      const item = ITEMS[id], line = LINES[id] || {};
+      return { retailer_id: id, quantity: CART[id],
+               name: item ? item.name : line.name,
+               unit_price: item ? item.price : Number(line.unit_price || 0) };
+    });
+    return { cart,
+             count: cart.reduce((n, l) => n + l.quantity, 0),
+             subtotal: cart.reduce((n, l) => n + l.quantity * l.unit_price, 0) };
   }
 
-  async function setQty(id, qty) {
-    // Optimistic, so tapping + feels instant; the server reply is authoritative.
-    CART[id] = Math.max(0, qty);
-    if (!CART[id]) delete CART[id];
-    renderList();
+  function renderCart() {
+    const view = cartView();
+    const bar = $('cart-bar');
+    const before = $('bar-count').textContent;
+    $('bar-count').textContent = view.count + (view.count === 1 ? ' item' : ' items');
+    $('bar-total').textContent = money(view.subtotal);
+    bar.classList.toggle('hidden', !view.count);
+    bar.classList.toggle('flex', !!view.count);
+    if (view.count && before !== $('bar-count').textContent) replayBump($('bar-count'));
+    renderSideCart(view);
+  }
+
+  function replayBump(el) {
+    el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
+  }
+
+  // The server's cart is the truth, except for dishes the customer is still
+  // tapping: those keep their local count until their own reply lands.
+  function applyCart(data) {
+    const before = CART, next = {};
+    (data.cart || []).forEach(l => { next[l.retailer_id] = l.quantity; LINES[l.retailer_id] = l; });
+    Object.keys(SYNCING).forEach(id => {
+      if (!SYNCING[id]) return;
+      if (before[id]) next[id] = before[id]; else delete next[id];
+    });
+    CART = next;
+    new Set([...Object.keys(before), ...Object.keys(next)]).forEach(id => {
+      if ((before[id] || 0) !== (next[id] || 0)) updateCard(id);
+    });
+    renderCart();
+  }
+
+  function setQty(id, qty) {
+    qty = Math.max(0, Math.min(MAX_QTY, qty));
+    if (qty === MAX_QTY && (CART[id] || 0) === MAX_QTY) { toast('That is the most of one dish per order.'); return; }
+    WANT[id] = qty;
+    if (qty) CART[id] = qty; else delete CART[id];
+    updateCard(id);
+    renderCart();
+    if (!SYNCING[id]) sync(id);
+  }
+
+  // One request per dish at a time; if more taps came in meanwhile, send
+  // the latest count when this one returns. Exact quantities, so a retried
+  // or reordered request can never add a dish twice.
+  async function sync(id) {
+    SYNCING[id] = true;
     try {
-      const data = await api('/cart', { retailer_id: id, quantity: qty });
-      if (!data.ok) { toast(data.error); return; }
-      applyCart(data);
+      for (;;) {
+        const qty = WANT[id];
+        const data = await api('/cart', { retailer_id: id, quantity: qty });
+        if (!data.ok) { SYNCING[id] = false; toast(data.error); return resync(); }
+        if (WANT[id] === qty) { SYNCING[id] = false; applyCart(data); return; }
+      }
     } catch (err) {
+      SYNCING[id] = false;
       toast('Could not update your cart: ' + err.message);
+      return resync();
     }
+  }
+
+  // After a failure, show what the server really holds.
+  async function resync() {
+    try {
+      const data = await api('/cart');
+      if (data.ok) applyCart(data);
+    } catch (err) {
+      console.warn('cart resync failed', err);
+    }
+  }
+
+  // Refresh one dish's card in place: its tint and its +/- control. The
+  // photo is left alone, so nothing reloads or flickers.
+  function updateCard(id) {
+    const item = ITEMS[id];
+    if (!item) return;
+    const qty = CART[id] || 0;
+    document.querySelectorAll('#list article[data-id="' + CSS.escape(id) + '"]').forEach(row => {
+      row.classList.toggle('border-brand-300', !!qty); row.classList.toggle('bg-brand-50', !!qty);
+      row.classList.toggle('border-mist-200', !qty); row.classList.toggle('bg-white', !qty);
+      row.lastElementChild.replaceWith(control(item));
+    });
   }
 
   // The desktop panel mirrors the bar; both read the same server response.
@@ -154,26 +235,26 @@
     if (!lines || !foot) return;
 
     if (!data.count) {
-      lines.innerHTML = '<p class="py-6 text-center text-xs text-cocoa-700/45">Nothing added yet.</p>';
+      lines.innerHTML = '<p class="py-6 text-center text-xs text-ink-700/45">Nothing added yet.</p>';
       foot.innerHTML = '';
       return;
     }
 
     lines.innerHTML = (data.cart || []).map(l =>
-      '<div class="border-b border-cream-200 py-2 last:border-0">' +
+      '<div class="border-b border-mist-200 py-2 last:border-0">' +
         '<div class="flex items-start justify-between gap-2">' +
           '<span class="min-w-0 text-sm [overflow-wrap:anywhere]">' + esc(l.name) + '</span>' +
-          '<button class="line-remove shrink-0 rounded p-0.5 text-cocoa-700/45 hover:bg-chilli-50 hover:text-chilli-600" ' +
+          '<button class="line-remove shrink-0 rounded p-0.5 text-ink-700/45 hover:bg-brand-50 hover:text-brand-600" ' +
                   'data-id="' + esc(l.retailer_id) + '" aria-label="Remove ' + esc(l.name) + '">✕</button>' +
         '</div>' +
         '<div class="mt-1.5 flex items-center justify-between gap-2">' +
           '<span class="flex items-center gap-1.5">' +
-            '<button class="line-minus flex h-7 w-7 items-center justify-center rounded-md border border-chilli-300 ' +
-                    'text-sm font-bold text-chilli-600 hover:bg-chilli-50" data-id="' + esc(l.retailer_id) + '" ' +
+            '<button class="line-minus flex h-7 w-7 items-center justify-center rounded-md border border-brand-300 ' +
+                    'text-sm font-bold text-brand-600 hover:bg-brand-50" data-id="' + esc(l.retailer_id) + '" ' +
                     'data-to="' + (l.quantity - 1) + '" aria-label="One fewer">−</button>' +
             '<span class="w-5 text-center text-sm font-semibold tabular-nums">' + l.quantity + '</span>' +
-            '<button class="line-plus flex h-7 w-7 items-center justify-center rounded-md bg-chilli-500 ' +
-                    'text-sm font-bold text-white hover:bg-chilli-600" data-id="' + esc(l.retailer_id) + '" ' +
+            '<button class="line-plus flex h-7 w-7 items-center justify-center rounded-md bg-brand-500 ' +
+                    'text-sm font-bold text-white hover:bg-brand-600" data-id="' + esc(l.retailer_id) + '" ' +
                     'data-to="' + (l.quantity + 1) + '" aria-label="One more">+</button>' +
           '</span>' +
           '<span class="text-sm font-semibold tabular-nums">' +
@@ -190,7 +271,7 @@
     foot.innerHTML =
       '<div class="mb-2 flex justify-between text-sm"><span>Subtotal</span>' +
       '<span class="font-semibold tabular-nums">' + money(data.subtotal) + '</span></div>' +
-      '<button id="side-checkout" class="w-full rounded-xl bg-chilli-500 py-2.5 text-sm font-semibold text-white hover:bg-chilli-600">Checkout</button>';
+      '<button id="side-checkout" class="w-full rounded-xl bg-brand-500 py-2.5 text-sm font-semibold text-white hover:bg-brand-600">Checkout</button>';
     $('side-checkout').addEventListener('click', showCart);
   }
 
@@ -219,8 +300,8 @@
       const b = document.createElement('button');
       const on = c.slug === activeCuisine;
       b.className = 'shrink-0 rounded-full px-5 py-2 text-[13px] font-semibold transition ' +
-        (on ? 'bg-cocoa-800 text-white shadow-sm'
-            : 'border border-cream-200 bg-white text-cocoa-700/80 hover:border-cocoa-700/30');
+        (on ? 'bg-ink-800 text-white shadow-sm'
+            : 'border border-mist-200 bg-white text-ink-700/80 hover:border-ink-700/30');
       b.textContent = c.name;
       b.addEventListener('click', () => {
         activeCuisine = c.slug;
@@ -242,7 +323,7 @@
       const b = document.createElement('button');
       const on = c.key === activeChip;
       b.className = 'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition ' +
-        (on ? 'bg-chilli-500 text-white shadow-sm' : 'border border-cream-200 bg-white text-cocoa-700');
+        (on ? 'bg-brand-500 text-white shadow-sm' : 'border border-mist-200 bg-white text-ink-700');
       b.textContent = c.label;
       b.addEventListener('click', () => {
         activeChip = c.key;
@@ -273,20 +354,20 @@
 
     if (!groups.length) {
       host.innerHTML =
-        '<div class="py-24 text-center text-sm text-cocoa-700/45">No dishes match that search.</div>';
+        '<div class="py-24 text-center text-sm text-ink-700/45">No dishes match that search.</div>';
       return;
     }
 
     groups.forEach(g => {
       const head = document.createElement('div');
-      head.className = 'mb-2 mt-5 flex items-baseline gap-2 border-b-2 border-saffron-500 pb-1.5 first:mt-0';
+      head.className = 'mb-2 mt-5 flex items-baseline gap-2 border-b-2 border-brand-500 pb-1.5 first:mt-0';
       head.innerHTML =
-        '<span class="h-4 w-1 rounded bg-chilli-500"></span>' +
+        '<span class="h-4 w-1 rounded bg-accent-500"></span>' +
         '<h2 class="text-[15px] font-semibold"></h2>' +
         (activeCuisine === 'all'
-          ? '<span class="text-[11px] font-medium text-cocoa-700/45">' + esc(g.cuisine) + '</span>'
+          ? '<span class="text-[11px] font-medium text-ink-700/45">' + esc(g.cuisine) + '</span>'
           : '') +
-        '<span class="ml-auto text-xs text-cocoa-700/45">' + g.items.length + ' items</span>';
+        '<span class="ml-auto text-xs text-ink-700/45">' + g.items.length + ' items</span>';
       head.querySelector('h2').textContent = g.title;
       host.appendChild(head);
 
@@ -301,23 +382,25 @@
   function card(item) {
     const qty = CART[item.id] || 0;
     const row = document.createElement('article');
+    row.dataset.id = item.id;         // updateCard finds it by this
     // A dish already in the cart is tinted and outlined, so a long list shows
     // at a glance what has been picked.
     row.className = 'rise flex h-full items-center gap-3 rounded-xl border p-3 shadow-card ' +
-      (qty ? 'border-chilli-300 bg-chilli-50' : 'border-cream-200 bg-white');
+      (qty ? 'border-brand-300 bg-brand-50' : 'border-mist-200 bg-white');
 
     // Thumbnail, or a drawn placeholder while the sheet has no IMAGE column.
     const thumb = document.createElement('div');
-    thumb.className = 'flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-saffron-50 text-3xl';
+    thumb.className = 'flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-brand-50 text-3xl';
     if (item.image_url) {
       const img = document.createElement('img');
-      img.src = item.thumb_url || item.image_url;
       img.alt = '';
       img.loading = 'lazy';
       img.decoding = 'async';
       img.width = 80; img.height = 80;   // reserve the box: no jump as it loads
-      img.className = 'h-full w-full object-cover';
+      img.className = 'h-full w-full object-cover opacity-0 transition-opacity duration-300';
+      img.addEventListener('load', () => img.classList.remove('opacity-0'));
       img.addEventListener('error', () => { thumb.textContent = '🍲'; });
+      img.src = item.thumb_url || item.image_url;     // after the listeners: cached photos fire at once
       thumb.appendChild(img);
     } else {
       thumb.textContent = '🍲';
@@ -335,11 +418,11 @@
     title.appendChild(name);
 
     const meta = document.createElement('div');
-    meta.className = 'mt-1 line-clamp-2 text-[11px] uppercase tracking-wide text-cocoa-700/45';
+    meta.className = 'mt-1 line-clamp-2 text-[11px] uppercase tracking-wide text-ink-700/45';
     meta.textContent = [item.pack_size, item.serves].filter(Boolean).join(' · ') || item.category;
 
     const price = document.createElement('div');
-    price.className = 'mt-1 text-sm font-bold text-chilli-600';
+    price.className = 'mt-1 text-sm font-bold text-brand-600';
     price.textContent = money(item.price);
 
     info.append(title, meta, price);
@@ -359,7 +442,7 @@
     const qty = CART[item.id] || 0;
     const hero = item.image_url
       ? '<img src="' + esc(item.image_url) + '" alt="" class="h-44 w-full rounded-xl object-cover">'
-      : '<div class="flex h-44 w-full items-center justify-center rounded-xl bg-saffron-50 text-6xl">🍲</div>';
+      : '<div class="flex h-44 w-full items-center justify-center rounded-xl bg-brand-50 text-6xl">🍲</div>';
 
     const facts = [
       ['Category', item.category],
@@ -367,8 +450,8 @@
       ['Pack size', item.pack_size],
       ['Serves', item.serves],
     ].filter(f => f[1]).map(f =>
-      '<div class="flex justify-between border-b border-cream-200 py-2 text-sm">' +
-      '<span class="text-cocoa-700/60">' + f[0] + '</span>' +
+      '<div class="flex justify-between border-b border-mist-200 py-2 text-sm">' +
+      '<span class="text-ink-700/60">' + f[0] + '</span>' +
       '<span class="font-medium">' + esc(f[1]) + '</span></div>').join('');
 
     openSheet(item.name,
@@ -380,7 +463,7 @@
         '<span class="block h-full w-full rounded-full bg-herb-600"></span></span>Veg</span>' +
       '</div>' +
       (item.description
-        ? '<p class="mt-3 text-sm leading-relaxed text-cocoa-700/80">' + esc(item.description) + '</p>'
+        ? '<p class="mt-3 text-sm leading-relaxed text-ink-700/80">' + esc(item.description) + '</p>'
         : '') +
       '<div class="mt-3">' + facts + '</div>',
       '<div id="detail-control"></div>');
@@ -392,7 +475,7 @@
       foot.innerHTML = '';
       if (!now) {
         const add = document.createElement('button');
-        add.className = 'w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white';
+        add.className = 'w-full rounded-xl bg-brand-500 py-3 text-sm font-semibold text-white';
         add.textContent = 'Add to cart · ' + money(item.price);
         add.addEventListener('click', async () => { await setQty(item.id, 1); paint(); });
         foot.appendChild(add);
@@ -401,10 +484,10 @@
       const bar = document.createElement('div');
       bar.className = 'flex items-center justify-between gap-3';
       bar.innerHTML =
-        '<div class="flex items-center gap-3 rounded-xl border border-chilli-300 px-2 py-1.5">' +
-          '<button id="d-minus" class="w-7 text-lg font-bold text-chilli-600">−</button>' +
+        '<div class="flex items-center gap-3 rounded-xl border border-brand-300 px-2 py-1.5">' +
+          '<button id="d-minus" class="w-7 text-lg font-bold text-brand-600">−</button>' +
           '<span class="w-6 text-center text-sm font-bold tabular-nums">' + now + '</span>' +
-          '<button id="d-plus" class="w-7 text-lg font-bold text-chilli-600">+</button>' +
+          '<button id="d-plus" class="w-7 text-lg font-bold text-brand-600">+</button>' +
         '</div>' +
         '<span class="text-sm font-bold tabular-nums">' + money(now * item.price) + '</span>';
       foot.appendChild(bar);
@@ -418,7 +501,7 @@
     const qty = CART[item.id] || 0;
     if (!qty) {
       const add = document.createElement('button');
-      add.className = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-chilli-500 text-xl font-bold text-white shadow-sm hover:bg-chilli-600';
+      add.className = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-xl font-bold text-white shadow-sm transition hover:bg-brand-600 active:scale-90';
       add.setAttribute('aria-label', 'Add ' + item.name);
       add.textContent = '+';
       add.addEventListener('click', () => setQty(item.id, 1));
@@ -432,7 +515,7 @@
 
     const minus = document.createElement('button');
     minus.className = 'flex h-9 w-9 items-center justify-center rounded-lg border ' +
-      'border-chilli-300 bg-white text-lg font-bold text-chilli-600 hover:bg-chilli-50';
+      'border-brand-300 bg-white text-lg font-bold text-brand-600 transition hover:bg-brand-50 active:scale-90';
     minus.textContent = '−';
     minus.setAttribute('aria-label', 'Remove one ' + item.name);
     minus.addEventListener('click', () => setQty(item.id, qty - 1));
@@ -442,8 +525,8 @@
     count.textContent = qty;
 
     const plus = document.createElement('button');
-    plus.className = 'flex h-9 w-9 items-center justify-center rounded-lg bg-chilli-500 ' +
-      'text-lg font-bold text-white shadow-sm hover:bg-chilli-600';
+    plus.className = 'flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 ' +
+      'text-lg font-bold text-white shadow-sm transition hover:bg-brand-600 active:scale-90';
     plus.textContent = '+';
     plus.setAttribute('aria-label', 'Add one ' + item.name);
     plus.addEventListener('click', () => setQty(item.id, qty + 1));
@@ -458,8 +541,8 @@
     if (!lines.length) {
       // Reachable by removing the last line from inside the sheet.
       openSheet('Your cart',
-        '<p class="py-10 text-center text-sm text-cocoa-700/60">Your cart is empty.</p>',
-        '<button id="back-to-menu" class="w-full rounded-xl bg-chilli-500 py-3 text-sm font-semibold text-white">Browse the menu</button>');
+        '<p class="py-10 text-center text-sm text-ink-700/60">Your cart is empty.</p>',
+        '<button id="back-to-menu" class="w-full rounded-xl bg-brand-500 py-3 text-sm font-semibold text-white">Browse the menu</button>');
       $('back-to-menu').addEventListener('click', closeSheet);
       return;
     }
@@ -468,25 +551,25 @@
       ? '<img src="' + esc(item.thumb_url || item.image_url) + '" alt="" loading="lazy" ' +
         'class="h-14 w-14 shrink-0 rounded-lg object-cover">'
       : '<div class="flex h-14 w-14 shrink-0 items-center justify-center ' +
-        'rounded-lg bg-saffron-50 text-2xl">🍲</div>';
+        'rounded-lg bg-brand-50 text-2xl">🍲</div>';
 
     const rows = lines.map(l =>
-      '<div class="flex items-center gap-3 border-b border-cream-200 py-3 last:border-0">' +
+      '<div class="flex items-center gap-3 border-b border-mist-200 py-3 last:border-0">' +
         thumb(l.item) +
         '<div class="min-w-0 flex-1">' +
           '<div class="text-sm font-semibold leading-snug [overflow-wrap:anywhere]">' +
             esc(l.item.name) + '</div>' +
-          '<div class="mt-0.5 text-[11px] text-cocoa-700/60">' + money(l.item.price) + ' each</div>' +
-          '<div class="text-sm font-bold text-chilli-600">' + money(l.qty * l.item.price) + '</div>' +
+          '<div class="mt-0.5 text-[11px] text-ink-700/60">' + money(l.item.price) + ' each</div>' +
+          '<div class="text-sm font-bold text-brand-600">' + money(l.qty * l.item.price) + '</div>' +
         '</div>' +
         '<div class="flex shrink-0 items-center gap-1.5">' +
           '<button class="line-step flex h-8 w-8 items-center justify-center rounded-lg border ' +
-                  'border-chilli-300 bg-white font-bold text-chilli-600 hover:bg-chilli-50" ' +
+                  'border-brand-300 bg-white font-bold text-brand-600 hover:bg-brand-50" ' +
                   'data-id="' + esc(l.id) + '" data-to="' + (l.qty - 1) + '" ' +
                   'aria-label="One fewer">−</button>' +
           '<span class="w-5 text-center text-sm font-bold tabular-nums">' + l.qty + '</span>' +
-          '<button class="line-step flex h-8 w-8 items-center justify-center rounded-lg bg-chilli-500 ' +
-                  'font-bold text-white hover:bg-chilli-600" data-id="' + esc(l.id) + '" ' +
+          '<button class="line-step flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 ' +
+                  'font-bold text-white hover:bg-brand-600" data-id="' + esc(l.id) + '" ' +
                   'data-to="' + (l.qty + 1) + '" aria-label="One more">+</button>' +
         '</div>' +
       '</div>').join('');
@@ -494,13 +577,13 @@
     const subtotal = lines.reduce((n, l) => n + l.qty * l.item.price, 0);
 
     openSheet('🛒  Your Cart', rows,
-      '<div class="flex justify-between border-b border-cream-200 pb-2 text-sm">' +
-        '<span class="text-cocoa-700/80">Subtotal</span>' +
+      '<div class="flex justify-between border-b border-mist-200 pb-2 text-sm">' +
+        '<span class="text-ink-700/80">Subtotal</span>' +
         '<span class="font-semibold tabular-nums">' + money(subtotal) + '</span></div>' +
       '<div class="flex justify-between py-2.5 text-base">' +
         '<span class="font-bold">Total</span>' +
         '<span class="font-bold tabular-nums">' + money(subtotal) + '</span></div>' +
-      '<p class="mb-2 text-[11px] text-cocoa-700/60">Delivery and taxes are added at the next step.</p>' +
+      '<p class="mb-2 text-[11px] text-ink-700/60">Delivery and taxes are added at the next step.</p>' +
       '<button id="go-address" class="flex w-full items-center justify-center gap-2 rounded-xl ' +
       'bg-herb-600 py-3.5 text-sm font-semibold text-white hover:bg-herb-700">' +
       'Continue to delivery</button>');
@@ -521,6 +604,7 @@
   });
   const book = window.SheroAddressBook({
     api, openSheet, toast, esc, $, checkDelivery: checkout.checkDelivery,
+    busy: ui.busy, loading: ui.loading, SPINNER: ui.SPINNER,
     kitchen: {{ {"lat": kitchen.latitude, "lng": kitchen.longitude} | tojson if kitchen else "null" }},
     googleKey: {{ maps_browser_key | tojson }},
   });
@@ -534,10 +618,10 @@
   $('index-btn').addEventListener('click', function () {
     const cats = allCategories();
     const rows = cats.map(c =>
-      '<button class="jump w-full border-b border-cream-200 py-2.5 text-left text-sm" ' +
+      '<button class="jump w-full border-b border-mist-200 py-2.5 text-left text-sm" ' +
       'data-cat="' + esc(c.key) + '">' + esc(c.label) + '</button>').join('');
     openSheet('Jump to a category',
-      '<button class="jump w-full border-b border-cream-200 py-2.5 text-left text-sm font-semibold" ' +
+      '<button class="jump w-full border-b border-mist-200 py-2.5 text-left text-sm font-semibold" ' +
       'data-cat="all">All Items</button>' + rows, '');
     Array.from(document.querySelectorAll('.jump')).forEach(b =>
       b.addEventListener('click', () => {
@@ -572,7 +656,8 @@
 
       renderCuisines();
       renderChips();
-      if (cart.ok) applyCart(cart); else renderList();
+      renderList();
+      if (cart.ok) applyCart(cart);
     } catch (err) {
       $('list').innerHTML =
         '<p class="py-24 text-center text-sm text-red-600">Could not load the menu: ' +

@@ -136,3 +136,37 @@ def test_a_real_stripe_order_is_never_paid_from_the_mock_page(monkeypatch):
     client = _pay_client(None, monkeypatch, _Order("cs_live_1"), calls)
     assert client.post("/pay/mock/SHO-260928-ABCDE/paid").status_code == 404
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_machine_clock_does_not_lose_the_payment_link(monkeypatch):
+    """Stripe judges expires_at by its own clock; if it says ours is already
+    past, the link is created without one rather than failing the order."""
+    monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_123")
+    attempts = []
+
+    class Session:
+        id, url = "cs_2", "https://checkout.stripe.com/y"
+
+    async def create(**params):
+        attempts.append(params)
+        if "expires_at" in params:
+            raise checkout.stripe.InvalidRequestError(
+                "expires_at expects a timestamp in the future", "expires_at")
+        return Session()
+    monkeypatch.setattr(checkout.stripe.checkout.Session, "create_async", create)
+
+    assert (await _create())["id"] == "cs_2"
+    assert len(attempts) == 2 and "expires_at" not in attempts[1]
+
+
+@pytest.mark.asyncio
+async def test_any_other_stripe_refusal_still_fails_the_link(monkeypatch):
+    monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_123")
+
+    async def create(**_):
+        raise checkout.stripe.InvalidRequestError("bad currency", "currency")
+    monkeypatch.setattr(checkout.stripe.checkout.Session, "create_async", create)
+
+    with pytest.raises(checkout.PaymentError):
+        await _create()

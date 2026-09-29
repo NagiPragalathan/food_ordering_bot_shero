@@ -2,7 +2,8 @@
 
 The session is created with an explicit `expires_at` so Stripe itself enforces
 the 30-minute link lifetime and emits `checkout.session.expired`; our scheduler
-then releases the held slot. Line items are itemised (dishes, delivery, taxes
+then releases the held slot. (If this machine's clock is wrong Stripe rejects
+that expiry; see `_create` for what happens then.) Line items are itemised (dishes, delivery, taxes
 and fees) so the Stripe page shows the same breakdown as the WhatsApp summary.
 
 Package name is `stripe_gw` rather than `stripe` so it cannot shadow the SDK.
@@ -137,7 +138,9 @@ async def create_checkout_session(
             taxes_and_fees=taxes_and_fees,
             currency=currency,
         ),
-        "expires_at": int(expires_at.timestamp()),
+        # Stripe wants at least 30 minutes; a minute's margin covers the
+        # request's own latency.
+        "expires_at": int(expires_at.timestamp()) + 60,
         "client_reference_id": order_number,
         # Echoed back on every webhook, so the order can be found without a
         # separate lookup table.
@@ -156,7 +159,7 @@ async def create_checkout_session(
         params["customer_email"] = customer_email
 
     try:
-        session = await stripe.checkout.Session.create_async(**params)
+        session = await _create(params, order_number)
     except stripe.StripeError as exc:
         log.error("stripe_session_failed", order_number=order_number, error=str(exc))
         raise PaymentError(f"Stripe checkout creation failed: {exc}") from exc
@@ -164,6 +167,28 @@ async def create_checkout_session(
     log.info("stripe_session_created", order_number=order_number,
              session_id=session.id, expires_at=expires_at.isoformat())
     return {"id": session.id, "url": session.url, "expires_at": expires_at}
+
+
+async def _create(params: dict, order_number: str):
+    """Create the session, surviving a wrong clock on this machine.
+
+    Stripe judges `expires_at` by its own clock. If it says our "30 minutes
+    from now" is already in the past, this machine's clock is wrong; the
+    link still has to reach the customer, so the session is created without
+    an expiry (Stripe's default is 24 hours) and the bot's own expiry job,
+    which runs on this machine's clock, still expires it at 30 minutes. The
+    error is loud because a wrong clock also makes Stripe reject every
+    webhook signature - the clock has to be fixed, not the code.
+    """
+    try:
+        return await stripe.checkout.Session.create_async(**params)
+    except stripe.InvalidRequestError as exc:
+        if getattr(exc, "param", None) != "expires_at" or "expires_at" not in params:
+            raise
+        log.error("stripe_expiry_rejected_machine_clock_wrong",
+                  order_number=order_number, error=str(exc))
+        return await stripe.checkout.Session.create_async(
+            **{k: v for k, v in params.items() if k != "expires_at"})
 
 
 async def expire_session(session_id: str) -> None:

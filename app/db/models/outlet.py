@@ -69,6 +69,10 @@ class Outlet(Base, UUIDPrimaryKey, Timestamps):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
 
+    # The Zoho Vendor this kitchen is, once synced (found again by Outlet Code
+    # = code if this is lost). See services/catalogue_sync.py.
+    zoho_vendor_id: Mapped[str | None] = mapped_column(String(40), index=True)
+
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Outlet {self.code} {self.name}>"
 

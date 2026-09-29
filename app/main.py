@@ -10,10 +10,12 @@ finishes handing over access.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.admin import router as admin_router
 from app.admin.deps import NotAuthenticated
@@ -36,6 +38,8 @@ from app.workers.scheduler import shutdown_scheduler, start_scheduler
 
 configure_logging()
 log = get_logger(__name__)
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 DESCRIPTION = """
 WhatsApp ordering bot for Shero Home Food.
@@ -108,6 +112,10 @@ app.include_router(media_thumbs.router)
 media.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount(media.MEDIA_URL_PREFIX,
           ImmutableStaticFiles(directory=str(media.MEDIA_DIR)), name="media")
+# Brand assets (logo, favicon) for the ordering pages and the dashboard.
+# Plain StaticFiles: the names are fixed, so the browser revalidates by ETag
+# rather than caching a replaced logo forever.
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(ops.router)
 app.include_router(admin_router)
 

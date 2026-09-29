@@ -19,7 +19,7 @@ from app.admin.deps import redirect, render, require_admin
 from app.core.logging import get_logger
 from app.db.models import AdminUser, Category, Cuisine, MenuItem
 from app.db.session import get_session
-from app.services import menu_admin
+from app.services import catalogue_sync, menu_admin, zoho_connect
 from app.services.menu_admin import MenuEditError
 
 log = get_logger(__name__)
@@ -81,7 +81,27 @@ async def menu_index(
         "grouped": grouped,
         "item_count": len(items),
         "query": q or "",
+        "zoho_connected": zoho_connect.is_connected(),
     })
+
+
+@router.post("/push-zoho", name="admin_menu_push_zoho")
+async def push_zoho(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    current_user: AdminUser = Depends(require_admin),
+):
+    """Every dish to Zoho Products and every kitchen to Zoho Vendors."""
+    url = str(request.url_for("admin_menu"))
+    if not zoho_connect.is_connected():
+        return redirect(url, flash=("error", "Connect Zoho in Settings first."))
+    dishes, kitchens, problems = await catalogue_sync.push_catalogue(session)
+    log.info("admin_catalogue_pushed", dishes=dishes, kitchens=kitchens,
+             problems=len(problems), by=current_user.email)
+    summary = f"Synced {dishes} dish(es) and {kitchens} kitchen(s) to Zoho."
+    if problems:
+        return redirect(url, flash=("warning", f"{summary} " + " ".join(problems)))
+    return redirect(url, flash=("success", summary))
 
 
 # --- dishes ---------------------------------------------------------------------
@@ -124,6 +144,8 @@ async def create_item(
     # which SQLAlchemy's async session refuses (MissingGreenlet).
     saved = await _get_item(session, item.id)
     slug = saved.category.cuisine.slug if saved and saved.category else ""
+    if saved is not None:
+        await _mirror_to_zoho(saved)
     return redirect(_back(request, slug),
                     flash=("success", f"Added {item.name} to the menu."))
 
@@ -171,6 +193,7 @@ async def update_item(
 
     log.info("menu_item_updated_by_admin", retailer_id=item.retailer_id,
              by=current_user.email)
+    await _mirror_to_zoho(item)
     return redirect(_back(request, slug),
                     flash=("success", f"Updated {item.name}."))
 
@@ -316,6 +339,13 @@ def _as_uuid(raw: str, field: str) -> uuid.UUID:
         return uuid.UUID(raw)
     except (ValueError, AttributeError, TypeError):
         raise MenuEditError(f"Choose a {field}.") from None
+
+
+async def _mirror_to_zoho(item: MenuItem) -> None:
+    """Keep the dish's Zoho Product current after an edit. Best effort: a
+    Zoho problem is logged by catalogue_sync and never fails the edit."""
+    if zoho_connect.is_connected():
+        await catalogue_sync.ensure_product(item)
 
 
 async def _get_item(session: AsyncSession, item_id: uuid.UUID) -> MenuItem | None:

@@ -19,3 +19,6 @@ htmlcov/
 
 # Dish photos downloaded from the client's sheet at import time.
 data/media/
+
+# Browser checks (Playwright MCP screenshots and logs)
+.playwright-mcp/

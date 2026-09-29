@@ -179,12 +179,20 @@ async def book_slot(session: AsyncSession, order_id: uuid.UUID) -> bool:
 
 
 async def release_holds_for_order(session: AsyncSession, order_id: uuid.UUID, *,
-                                  reason: str = "expired") -> int:
-    """Release any active hold for an order and give the capacity back."""
+                                  reason: str = "expired",
+                                  include_booked: bool = False) -> int:
+    """Release any active hold for an order and give the capacity back.
+
+    `include_booked` also frees a paid booking - only for deleting the order
+    outright (admin Customers page), never for a live paid order.
+    """
+    active = [SlotHoldStatus.HELD]
+    if include_booked:
+        active.append(SlotHoldStatus.BOOKED)
     result = await session.execute(
         select(SlotHold).where(
             SlotHold.order_id == order_id,
-            SlotHold.status == SlotHoldStatus.HELD,
+            SlotHold.status.in_([str(s) for s in active]),
         )
     )
     holds = list(result.scalars())

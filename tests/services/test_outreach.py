@@ -24,7 +24,7 @@ async def quiet_crm(monkeypatch):
     async def noop(customer):
         return None
 
-    monkeypatch.setattr(outreach, "ensure_lead", noop)
+    monkeypatch.setattr(outreach, "ensure_record", noop)
 
 
 # --- the case the client raised -----------------------------------------------
@@ -133,7 +133,7 @@ async def test_an_unreachable_crm_does_not_stop_the_greeting(
     async def exploding(customer):
         raise IntegrationError("zoho", "refresh token revoked")
 
-    monkeypatch.setattr(outreach, "ensure_lead", exploding)
+    monkeypatch.setattr(outreach, "ensure_record", exploding)
 
     fake = FakeGallabox()
     with use_sender(fake):

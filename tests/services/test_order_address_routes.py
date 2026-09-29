@@ -170,3 +170,31 @@ async def test_the_menu_page_still_renders_with_the_shared_checkout(session, cus
 
 async def test_a_dead_location_link_shows_the_expired_page(session, customer):
     assert _client(session).get("/order/forged/location").status_code == 410
+
+
+@pytest.mark.parametrize("linked,module,street,zip_code", [
+    ("zoho_lead_id", "Leads", "Street", "Zip_Code"),
+    ("zoho_contact_id", "Contacts", "Mailing_Street", "Mailing_Zip"),
+])
+async def test_a_saved_address_goes_straight_to_the_zoho_record(
+        session, customer, monkeypatch, linked, module, street, zip_code):
+    """Update location reaches the Lead - or the Contact, once they have paid."""
+    from app.services import crm_sync
+
+    setattr(customer, linked, "z-1")
+    writes = []
+
+    async def update_record(mod, zoho_id, fields):
+        writes.append((mod, zoho_id, fields))
+    monkeypatch.setattr(crm_sync.crm, "update_record", update_record)
+
+    saved = await order_addresses.save_address(
+        FakeRequest({"label": "Office", "address_line1": "1 Wood Ave",
+                     "apartment_unit": "3C", "postal_code": "08830"}),
+        _token(customer), session=session)
+    assert saved["ok"] is True
+
+    [(mod, zoho_id, fields)] = writes
+    assert (mod, zoho_id) == (module, "z-1")
+    assert fields[street] == "1 Wood Ave" and fields[zip_code] == "08830"
+    assert fields["Address_Line_2"] == "3C"

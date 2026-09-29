@@ -7,6 +7,13 @@
 {% endblock %}
 
 {% block actions %}
+<form method="post" action="{{ url_for('admin_menu_push_zoho') }}" class="inline">
+  <button {% if not zoho_connected %}disabled{% endif %}
+          title="{% if zoho_connected %}Every dish becomes a Zoho Product and every kitchen a Zoho Vendor; run again after editing the menu{% else %}Connect Zoho in Settings first{% endif %}"
+          class="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50">
+    Sync to Zoho
+  </button>
+</form>
 <a href="{{ url_for('admin_import') }}"
    class="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50">
   Import from sheet

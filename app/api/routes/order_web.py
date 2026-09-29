@@ -182,6 +182,7 @@ async def update_cart(request: Request, token: str,
     lines = cart_service.set_quantity(conversation, retailer_id=retailer_id,
                                       name=item.name, price=item.price,
                                       quantity=quantity)
+    crm_sync.note_passed(customer, LeadStage.CUISINE_SELECTED)
     await crm_sync.advance_stage(customer, LeadStage.CART_CREATED, forward_only=True)
     await _note_cuisine(session, customer, retailer_id)
     return _cart_response(lines)
@@ -261,6 +262,10 @@ async def check_address(request: Request, token: str,
     await addresses.use_for_order(session, customer, address)
     if point is not None:
         customer.latitude, customer.longitude = point.latitude, point.longitude
+    # As the chat flow does: the admin's Push to Zoho reads these from here.
+    customer.preferred_outlet_id = kitchen.id
+    if check.distance_km is not None:
+        customer.distance_km = check.distance_km
 
     await crm_sync.advance_stage(customer, LeadStage.OUTLET_SELECTED, forward_only=True)
     await crm_sync.push_details(

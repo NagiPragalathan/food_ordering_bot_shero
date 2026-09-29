@@ -4,16 +4,34 @@
 <div id="sheet" class="fixed inset-0 z-40 hidden">
   <div id="scrim" class="absolute inset-0 bg-black/40"></div>
   <section class="absolute inset-x-0 bottom-0 flex max-h-[92vh] flex-col rounded-t-2xl bg-white sm:inset-x-auto sm:left-1/2 sm:bottom-auto sm:top-1/2 sm:w-[32rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:shadow-2xl">
-    <header class="flex items-center justify-between border-b border-cream-200 px-4 py-3">
+    <header class="flex items-center justify-between border-b border-mist-200 px-4 py-3">
       <h2 id="sheet-title" class="text-base font-semibold">Your cart</h2>
-      <button id="sheet-close" class="rounded-lg p-1 text-cocoa-700/45 hover:bg-cream-100" aria-label="Close">✕</button>
+      <button id="sheet-close" class="rounded-lg p-1 text-ink-700/45 hover:bg-mist-100" aria-label="Close">✕</button>
     </header>
     <div id="sheet-body" class="flex-1 overflow-y-auto px-4 py-4"></div>
-    <footer id="sheet-foot" class="border-t border-cream-200 bg-white px-4 py-3"></footer>
+    <footer id="sheet-foot" class="border-t border-mist-200 bg-white px-4 py-3"></footer>
   </section>
 </div>
 
 <p id="toast" class="fixed inset-x-4 bottom-24 z-50 hidden rounded-xl bg-red-600 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+
+<style>
+  /* The sheet slides up and the page dims; a step inside an open sheet fades
+     in. `translate` rather than `transform`, so it composes with the
+     centring transform the sheet has on wider screens. */
+  @keyframes sheroSheetIn  { from { opacity: 0; translate: 0 28px } to { opacity: 1; translate: 0 0 } }
+  @keyframes sheroSheetOut { from { opacity: 1; translate: 0 0 } to { opacity: 0; translate: 0 28px } }
+  @keyframes sheroFadeIn   { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes sheroFadeOut  { from { opacity: 1 } to { opacity: 0 } }
+  #sheet.is-open > section    { animation: sheroSheetIn .24s cubic-bezier(.2,.8,.2,1) both }
+  #sheet.is-open > #scrim     { animation: sheroFadeIn .2s ease-out both }
+  #sheet.is-closing > section { animation: sheroSheetOut .16s ease-in both }
+  #sheet.is-closing > #scrim  { animation: sheroFadeOut .16s ease-in both }
+  #sheet-body.is-swapping     { animation: sheroFadeIn .18s ease-out both }
+  @media (prefers-reduced-motion: reduce) {
+    #sheet > *, #sheet-body { animation: none !important }
+  }
+</style>
 
 <script>
 window.SheroUI = function (token) {
@@ -37,13 +55,68 @@ window.SheroUI = function (token) {
     t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
   }
 
+  // Restarts a CSS animation on `el` by re-adding its class.
+  function replay(el, cls) {
+    el.classList.remove(cls);
+    void el.offsetWidth;          // reflow, so the browser sees a new animation
+    el.classList.add(cls);
+  }
+
+  let closing = null;
   function openSheet(title, bodyHtml, footHtml) {
+    const sheet = $('sheet');
+    const wasOpen = !sheet.classList.contains('hidden') && !closing;
+    clearTimeout(closing); closing = null;
     $('sheet-title').textContent = title;
     $('sheet-body').innerHTML = bodyHtml;
+    $('sheet-body').scrollTop = 0;
     $('sheet-foot').innerHTML = footHtml;
-    $('sheet').classList.remove('hidden');
+    sheet.classList.remove('hidden', 'is-closing');
+    // A fresh sheet slides up; the next step in an open one only fades in.
+    if (wasOpen) replay($('sheet-body'), 'is-swapping');
+    else replay(sheet, 'is-open');
   }
-  function closeSheet() { $('sheet').classList.add('hidden'); }
+  function closeSheet() {
+    const sheet = $('sheet');
+    if (sheet.classList.contains('hidden') || closing) return;
+    sheet.classList.remove('is-open');
+    sheet.classList.add('is-closing');
+    closing = setTimeout(() => {
+      sheet.classList.add('hidden');
+      sheet.classList.remove('is-closing');
+      closing = null;
+    }, 160);
+  }
+
+  // --- waiting states ------------------------------------------------------
+  // Anything that waits on the server shows it: over a slow link a button
+  // that does nothing for a second reads as broken.
+  const SPINNER = '<span class="inline-block h-4 w-4 shrink-0 animate-spin rounded-full ' +
+                  'border-2 border-current border-t-transparent"></span>';
+
+  // Disable `button`, show a spinner and `label`; returns the undo.
+  function busy(button, label) {
+    if (!button) return () => {};
+    const before = button.innerHTML;
+    button.disabled = true;
+    button.classList.add('cursor-wait', 'opacity-90');
+    button.innerHTML = '<span class="inline-flex items-center justify-center gap-2">' +
+                       SPINNER + esc(label) + '</span>';
+    return () => {
+      if (!document.body.contains(button)) return;   // the step moved on
+      button.disabled = false;
+      button.classList.remove('cursor-wait', 'opacity-90');
+      button.innerHTML = before;
+    };
+  }
+
+  // Open the sheet at once with a spinner, before the data arrives.
+  function loading(title, message) {
+    openSheet(title,
+      '<div class="flex flex-col items-center py-14 text-ink-700/60">' +
+      '<div class="h-9 w-9 animate-spin rounded-full border-[3px] border-brand-100 border-t-brand-500"></div>' +
+      '<p class="mt-3 text-sm">' + esc(message) + '</p></div>', '');
+  }
   $('scrim').addEventListener('click', closeSheet);
   $('sheet-close').addEventListener('click', closeSheet);
 
@@ -67,7 +140,7 @@ window.SheroUI = function (token) {
     openSheet('Link expired',
       '<div class="py-4 text-center"><div class="text-4xl">⏰</div>' +
       '<p class="mt-3 text-sm font-semibold">This link has expired</p>' +
-      '<p class="mt-1 text-sm text-cocoa-700/70">Links work for a few hours, so nobody else can use yours. ' +
+      '<p class="mt-1 text-sm text-ink-700/70">Links work for a few hours, so nobody else can use yours. ' +
       'Your cart is saved - a fresh link opens it again.</p></div>',
       newLinkUrl
         ? '<a href="' + esc(newLinkUrl) + '" class="block w-full rounded-xl bg-[#25D366] py-3 text-center ' +
@@ -77,6 +150,6 @@ window.SheroUI = function (token) {
     $('scrim').replaceWith($('scrim').cloneNode()); // tapping outside must not close it
   }
 
-  return { $, esc, money, toast, api, openSheet, closeSheet, BASE };
+  return { $, esc, money, toast, api, openSheet, closeSheet, busy, loading, SPINNER, BASE };
 };
 </script>

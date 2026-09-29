@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     zoho_refresh_token: str = ""
     zoho_data_center: str = "com"
     zoho_orders_module: str = "Orders"
+    # The Orders module's display field, which holds the order number: "Name"
+    # unless the module was created by hand with another (setup script warns).
+    zoho_orders_name_field: str = "Name"
+    # The bot's line-items module (one record per dish on a paid order).
+    zoho_order_items_module: str = "Order_Items"
+    # Which Zoho org the bot is connected to, recorded by Connect Zoho. Record
+    # ids belong to one org; connecting another drops the saved links.
+    zoho_org_id: str = ""
 
     # --- Uber Direct ---------------------------------------------------------
     uber_customer_id: str = ""

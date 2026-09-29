@@ -109,23 +109,28 @@ class ZohoClient(ApiClient):
     async def create_fields(self, module: str, fields: list[dict]) -> list[dict]:
         """Create up to five custom fields (Zoho's per-call limit).
 
-        The create API is v8-only. Returns Zoho's per-field results; a
-        failed field is raised, not skipped.
+        The create API is v8-only. Returns Zoho's per-field results. Zoho
+        answers 207 when some of the batch failed; the failures are raised
+        together, naming each field, after the rest were created.
         """
         result = await self.post("/crm/v8/settings/fields", params={"module": module},
-                                 json={"fields": fields}, expected=(200, 201))
+                                 json={"fields": fields}, expected=(200, 201, 207))
         rows = (result or {}).get("fields") or []
-        for row in rows:
+        failed = []
+        for spec, row in zip(fields, rows):
             if row.get("status") == "error":
-                raise IntegrationError(
-                    "zoho", f"field create failed: {row.get('code')} {row.get('message')} "
-                            f"{row.get('details')}", payload=row)
+                failed.append(f"'{spec.get('field_label')}': {row.get('code')} "
+                              f"{row.get('message')} {row.get('details')}")
+        if failed:
+            raise IntegrationError("zoho", "field create failed - " + "; ".join(failed),
+                                   payload=rows)
         return rows
 
-    async def add_picklist_option(self, module: str, field_id: str, option: str) -> None:
-        """Add one option to a custom picklist; existing options are kept."""
+    async def add_picklist_options(self, module: str, field_id: str,
+                                   options: list[str]) -> None:
+        """Add options to a picklist; existing options are kept."""
         body = {"fields": [{"pick_list_values": [
-            {"display_value": option, "actual_value": option}]}]}
+            {"display_value": o, "actual_value": o} for o in options]}]}
         result = await self.request("PATCH", f"/crm/v8/settings/fields/{field_id}",
                                     params={"module": module}, json=body)
         for row in (result or {}).get("fields") or []:
@@ -133,6 +138,84 @@ class ZohoClient(ApiClient):
                 raise IntegrationError(
                     "zoho", f"picklist update failed: {row.get('code')} {row.get('message')}",
                     payload=row)
+
+    # -- lead conversion ------------------------------------------------------
+    async def convert_lead(self, lead_id: str) -> str:
+        """Zoho's Lead -> Contact conversion; returns the new Contact's id.
+
+        Zoho copies the standard fields itself; the bot writes its own
+        fields to the Contact straight after (this call's "Contacts" key can
+        only name an existing Contact to link to, not set values). No
+        Account is created as long as the Lead has no Company. Unlike create
+        and update, a conversion cannot skip the CRM's workflows.
+        """
+        body = {"data": [{"notify_lead_owner": False, "notify_new_entity_owner": False}]}
+        result = await self.post(f"{self._module_path('Leads')}/{lead_id}/actions/convert",
+                                 json=body)
+        records = (result or {}).get("data") or []
+        record = records[0] if records else {}
+        if not records or record.get("status") == "error":
+            raise IntegrationError(
+                "zoho", f"lead conversion failed: {record.get('code')} {record.get('message')}",
+                payload=record or result)
+        # v2 put the ids at the top level, as bare strings; later versions
+        # nest them under "details" as objects.
+        details = record.get("details") if isinstance(record.get("details"), dict) else record
+        contact = details.get("Contacts")
+        contact_id = contact.get("id") if isinstance(contact, dict) else contact
+        if not contact_id:
+            raise IntegrationError("zoho", "lead conversion returned no Contact id",
+                                   payload=record)
+        return str(contact_id)
+
+    async def delete_record(self, module: str, record_id: str) -> None:
+        result = await self.request("DELETE", f"{self._module_path(module)}/{record_id}")
+        _first_record_id(result)        # raises on a per-record error
+
+    async def existing_ids(self, module: str, ids: list[str]) -> set[str]:
+        """Which of `ids` exist in the module; deleted or converted ones drop out.
+
+        One call per hundred ids, Zoho's limit for the `ids` filter.
+        """
+        found: set[str] = set()
+        for start in range(0, len(ids), 100):
+            batch = ids[start:start + 100]
+            result = await self.get(self._module_path(module),
+                                    params={"ids": ",".join(batch), "fields": "id"},
+                                    expected=(200, 204))
+            found |= {str(row.get("id")) for row in (result or {}).get("data") or []}
+        return found
+
+    async def org_id(self) -> str | None:
+        """The org this token belongs to; record ids are only valid there."""
+        result = await self.get(f"/crm/{API_VERSION}/org")
+        orgs = (result or {}).get("org") or []
+        return str(orgs[0]["id"]) if orgs and orgs[0].get("id") else None
+
+    # -- module metadata (scripts/setup_zoho_crm.py) --------------------------
+    async def get_module(self, api_name: str) -> dict | None:
+        """The module's metadata, or None when there is no such module."""
+        result = await self.get(f"/crm/{API_VERSION}/settings/modules/{api_name}",
+                                expected=(200, 204, 400, 404))
+        modules = (result or {}).get("modules") or []
+        return modules[0] if modules else None
+
+    async def create_module(self, api_name: str, singular: str, plural: str) -> None:
+        """Create a custom module that every profile can see (v8 API)."""
+        profiles = await self.get(f"/crm/{API_VERSION}/settings/profiles")
+        body = {"modules": [{
+            "api_name": api_name, "singular_label": singular, "plural_label": plural,
+            "profiles": [{"id": p["id"]} for p in (profiles or {}).get("profiles") or []],
+            "display_field": {"field_label": "Name", "data_type": "text"},
+        }]}
+        result = await self.post("/crm/v8/settings/modules", json=body,
+                                 expected=(200, 201))
+        for row in (result or {}).get("modules") or []:
+            if row.get("status") == "error":
+                raise IntegrationError(
+                    "zoho", f"module create failed: {row.get('code')} {row.get('message')} "
+                            f"{row.get('details')}", payload=row)
+
 
 
 def _first_record_id(result: Any) -> str | None:

@@ -47,8 +47,8 @@ class Customer(Base, UUIDPrimaryKey, Timestamps):
     campaign_id: Mapped[str | None] = mapped_column(String(80))
     referral_payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
-    # Zoho linkage. Food customers are Leads in Shero's CRM; the contact id is
-    # unused there, where Contacts are Kitchen Partners (docs/zoho-setup.md).
+    # Zoho linkage (docs/zoho-setup.md): a Lead until the first payment, then
+    # the Contact that Zoho's conversion made of it. Only one of the two is set.
     zoho_lead_id: Mapped[str | None] = mapped_column(String(40), index=True)
     zoho_contact_id: Mapped[str | None] = mapped_column(String(40), index=True)
     lead_stage: Mapped[str] = mapped_column(
