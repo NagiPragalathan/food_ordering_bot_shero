@@ -122,6 +122,9 @@ class Settings(BaseSettings):
     uber_scope: str = "eats.deliveries"
     uber_auth_url: str = "https://auth.uber.com/oauth/v2/token"
     uber_api_base_url: str = "https://api.uber.com"
+    # Book the courier this long before the delivery slot starts, so they
+    # can collect from the kitchen and arrive inside the slot.
+    uber_dispatch_hours_before: float = Field(default=2.0, gt=0)
 
     # --- Stripe --------------------------------------------------------------
     stripe_secret_key: str = ""
@@ -170,6 +173,9 @@ class Settings(BaseSettings):
     tax_percent: float = Field(default=0.0, ge=0, le=100)
     default_delivery_radius_km: float = Field(default=10.0, gt=0)
     slot_hold_minutes: int = 30
+    # The earliest delivery slot offered starts this long after ordering:
+    # home-style food is cooked to order, so the kitchen needs the day.
+    slot_min_lead_hours: float = Field(default=24.0, ge=0)
     feedback_delay_minutes: int = 30
 
     # --- Derived -------------------------------------------------------------

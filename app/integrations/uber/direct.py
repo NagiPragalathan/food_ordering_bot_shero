@@ -98,6 +98,69 @@ class UberDirectClient(ApiClient):
         return _parse_quote(payload or {})
 
 
+@dataclass(frozen=True)
+class Delivery:
+    """A booked Uber Direct delivery."""
+
+    delivery_id: str
+    status: str = ""
+    tracking_url: str | None = None
+    fee: Decimal = Decimal("0.00")
+    raw: dict = field(default_factory=dict)
+
+
+async def create_delivery(*, pickup: dict, pickup_name: str, pickup_phone: str,
+                          pickup_latitude: float, pickup_longitude: float,
+                          dropoff: dict, dropoff_name: str, dropoff_phone: str,
+                          dropoff_latitude: float | None, dropoff_longitude: float | None,
+                          items: list[dict], external_id: str,
+                          pickup_ready_at: datetime, pickup_deadline_at: datetime,
+                          dropoff_ready_at: datetime, dropoff_deadline_at: datetime,
+                          dropoff_notes: str | None = None) -> Delivery:
+    """Book a courier (Uber Direct `POST /deliveries`).
+
+    `items` is Uber's manifest: [{"name", "quantity", "size"}]. The four
+    times bound when the courier may collect and when they must deliver.
+    """
+    body: dict = {
+        "pickup_name": pickup_name,
+        "pickup_address": json.dumps(pickup),
+        "pickup_phone_number": pickup_phone,
+        "pickup_latitude": pickup_latitude,
+        "pickup_longitude": pickup_longitude,
+        "dropoff_name": dropoff_name,
+        "dropoff_address": json.dumps(dropoff),
+        "dropoff_phone_number": dropoff_phone,
+        "manifest_items": items,
+        "external_id": external_id,
+        "pickup_ready_dt": _iso(pickup_ready_at),
+        "pickup_deadline_dt": _iso(pickup_deadline_at),
+        "dropoff_ready_dt": _iso(dropoff_ready_at),
+        "dropoff_deadline_dt": _iso(dropoff_deadline_at),
+    }
+    if dropoff_latitude is not None and dropoff_longitude is not None:
+        body["dropoff_latitude"] = dropoff_latitude
+        body["dropoff_longitude"] = dropoff_longitude
+    if dropoff_notes:
+        body["dropoff_notes"] = dropoff_notes[:280]
+    payload = await uber_direct.post(
+        f"/v1/customers/{settings.uber_customer_id}/deliveries", json=body) or {}
+    delivery_id = str(payload.get("id") or "")
+    if not delivery_id:
+        raise IntegrationError("uber", "delivery created without an id", payload=payload)
+    return Delivery(delivery_id=delivery_id, status=str(payload.get("status") or ""),
+                    tracking_url=payload.get("tracking_url"),
+                    fee=minor_to_decimal(payload.get("fee")), raw=payload)
+
+
+async def cancel_delivery(delivery_id: str) -> str:
+    """Cancel a booked delivery; returns Uber's new status."""
+    payload = await uber_direct.post(
+        f"/v1/customers/{settings.uber_customer_id}/deliveries/{delivery_id}/cancel",
+        json={}) or {}
+    return str(payload.get("status") or "")
+
+
 def build_address(*, street: str, city: str, state: str, zip_code: str,
                   country: str = "US") -> dict:
     """Uber's address object. `street_address` is a list of up to two lines."""

@@ -207,14 +207,24 @@ window.SheroAddressBook = function (deps) {
   // the server, which uses Google Geocoding whenever it has a key.
   let googleReady = null;      // one load of the Google script per page
   let skipFill = false;        // a search already filled the fields
+  let lastPin = null;          // what the map was last opened on, to redraw it
 
   function loadGoogle() {
     if (!googleKey) return Promise.reject(new Error('no key'));
     if (googleReady) return googleReady;
     googleReady = new Promise((resolve, reject) => {
       window.__sheroMapsReady = () => resolve(window.google.maps);
-      // Google calls this on a bad or unauthorised key, after loading fine.
-      window.gm_authFailure = () => reject(new Error('Google Maps key rejected'));
+      // Google calls this on a bad or unauthorised key (for example a
+      // website missing from the key's allowed list) - after the script has
+      // loaded and a map may already be drawn, showing Google's grey error.
+      // Remember the refusal and redraw with OpenStreetMap instead.
+      window.gm_authFailure = () => {
+        console.warn('Google Maps key rejected for this website; using OpenStreetMap');
+        googleReady = Promise.reject(new Error('Google Maps key rejected'));
+        googleReady.catch(() => {});
+        reject(new Error('Google Maps key rejected'));
+        if (map && map.google && lastPin) startMap(lastPin);
+      };
       const s = document.createElement('script');
       s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(googleKey) +
               '&callback=__sheroMapsReady&loading=async';
@@ -233,6 +243,7 @@ window.SheroAddressBook = function (deps) {
   }
 
   async function startMap(pin) {
+    lastPin = pin;
     if (map) { map.remove(); map = null; }
     const at = startPoint(pin);
     const moved = settleThen(pin, at);
@@ -246,7 +257,8 @@ window.SheroAddressBook = function (deps) {
         gestureHandling: 'greedy', clickableIcons: false,
       });
       g.addListener('idle', () => { const c = g.getCenter(); moved(c.lat(), c.lng()); });
-      map = { setView: (lat, lng, zoom) => { g.setCenter({ lat, lng }); g.setZoom(zoom); },
+      map = { google: true,
+              setView: (lat, lng, zoom) => { g.setCenter({ lat, lng }); g.setZoom(zoom); },
               remove: () => { $('map') && ($('map').innerHTML = ''); } };
       return;
     } catch (err) {

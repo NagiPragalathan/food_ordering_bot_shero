@@ -15,6 +15,7 @@ oversell the same window. A read-then-write in Python would race.
 
 from __future__ import annotations
 
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
@@ -31,10 +32,19 @@ from app.db.models import DeliverySlot, Outlet, SlotHold, SlotHoldStatus
 log = get_logger(__name__)
 
 WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-# How far ahead to look when today is already fully booked or closed.
+# How many days of slots to offer, counted from the earliest bookable time.
 DEFAULT_DAYS_AHEAD = 3
-# Do not offer a slot starting sooner than this - the kitchen needs lead time.
-MIN_LEAD_MINUTES = 60
+
+
+def earliest_bookable(now: datetime | None = None) -> datetime:
+    """The first moment a delivery slot may start: SLOT_MIN_LEAD_HOURS after
+    now (24 by default - the food is cooked to order)."""
+    return (now or datetime.now(timezone.utc)) + timedelta(hours=settings.slot_min_lead_hours)
+
+
+def _lead_days() -> int:
+    """Whole days the lead time spans, so generation reaches far enough."""
+    return math.ceil(settings.slot_min_lead_hours / 24)
 
 
 def as_utc(value: datetime) -> datetime:
@@ -74,10 +84,12 @@ async def list_available_slots(
     if settings.slot_source == "remote":
         return await _list_slots_remote(outlet, days_ahead=days_ahead, limit=limit)
 
-    await ensure_slots(session, outlet, days_ahead=days_ahead)
+    # The window starts at the earliest bookable time, so a 24-hour lead
+    # still leaves `days_ahead` days of choice rather than eating one.
+    await ensure_slots(session, outlet, days_ahead=days_ahead + _lead_days())
 
-    earliest = datetime.now(timezone.utc) + timedelta(minutes=MIN_LEAD_MINUTES)
-    horizon = datetime.now(timezone.utc) + timedelta(days=days_ahead)
+    earliest = earliest_bookable()
+    horizon = earliest + timedelta(days=days_ahead)
 
     result = await session.execute(
         select(DeliverySlot)
@@ -323,10 +335,14 @@ async def _list_slots_remote(outlet: Outlet, *, days_ahead: int,
     rows = (payload or {}).get("slots", []) if isinstance(payload, dict) else (payload or [])
 
     options: list[SlotOption] = []
-    for row in rows[:limit]:
+    earliest = earliest_bookable()
+    for row in rows:
+        if len(options) >= limit:
+            break
         starts = _parse_iso(row.get("starts_at"))
         ends = _parse_iso(row.get("ends_at"))
-        if not starts or not ends:
+        # The lead time holds whatever the backend offers.
+        if not starts or not ends or as_utc(starts) < earliest:
             continue
         options.append(SlotOption(
             slot_id=str(row.get("id")),

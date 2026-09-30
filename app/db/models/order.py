@@ -98,6 +98,15 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
     # re-push update the lines instead of filing them twice.
     zoho_item_ids: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     uber_quote_id: Mapped[str | None] = mapped_column(String(128))
+    # The courier, booked UBER_DISPATCH_HOURS_BEFORE the slot (services/dispatch.py).
+    # When the order joins the Uber queue's send list: set at payment to
+    # UBER_DISPATCH_HOURS_BEFORE before the slot starts.
+    uber_dispatch_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    uber_delivery_id: Mapped[str | None] = mapped_column(String(128))
+    uber_delivery_status: Mapped[str | None] = mapped_column(String(40))
+    uber_tracking_url: Mapped[str | None] = mapped_column(Text)
+    uber_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    uber_dispatch_error: Mapped[str | None] = mapped_column(String(500))
     uber_quote_raw: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     # --- Feedback (spec step 19) ---------------------------------------------

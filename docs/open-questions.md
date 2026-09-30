@@ -70,8 +70,13 @@ button. Roughly a day of work; say the word.
 
 ### 9. Slot capacity
 **Spec:** does not say how many orders one delivery window can absorb.
-**Assumed:** configurable per outlet, default 5, with a 60-minute window and a
-60-minute minimum lead time before the earliest offered slot.
+**Assumed:** configurable per outlet, default 5, with a 60-minute window.
+
+**Decided (30 Sep 2026):** the earliest slot offered starts **24 hours after
+the customer orders**, because the food is cooked to order
+(`SLOT_MIN_LEAD_HOURS`, fixed in `.env`). Slots are 9 AM - 9 PM, and the Uber
+courier is booked 2 hours before the slot (`UBER_DISPATCH_HOURS_BEFORE`).
+Customers still see three days of slots, counted from that point.
 
 ## Assumptions we have made and can revisit
 
@@ -127,7 +132,8 @@ Called out so there is no surprise later — none of these are in the spec:
 - Pushing the menu *out* to the Meta catalogue (so the native WhatsApp cart
   works). The data is all here; it needs the Meta write API and credentials.
 - Order editing after payment
-- Live driver tracking (Uber is used for the quote; dispatch is not wired up)
+- Live driver tracking for the customer (the courier is booked and the admin
+  sees the Uber tracking link; the customer is not sent it)
 - A customer-facing web storefront
 - Multi-language support (the copy is centralised in
   `app/services/conversation/prompts.py`, so adding one is straightforward)

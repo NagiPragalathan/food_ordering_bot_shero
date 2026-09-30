@@ -69,11 +69,24 @@ async def test_ensure_slots_is_idempotent(session, outlet):
     assert second == 0, "re-running must not duplicate slots"
 
 
-async def test_listed_slots_respect_the_lead_time(session, outlet):
+async def test_no_slot_starts_within_24_hours_of_ordering(session, outlet):
+    """The food is cooked to order: the earliest slot is a day away."""
     slots = await list_available_slots(session, outlet, days_ahead=2)
-    earliest_allowed = datetime.now(timezone.utc) + timedelta(minutes=59)
+    earliest_allowed = datetime.now(timezone.utc) + timedelta(hours=24) - timedelta(seconds=5)
     assert slots, "expected some bookable slots"
     assert all(s.starts_at >= earliest_allowed for s in slots)
+    # ...and the window still reaches days_ahead days past that point.
+    assert max(s.starts_at for s in slots) > datetime.now(timezone.utc) + timedelta(hours=30)
+
+
+async def test_the_lead_time_is_a_setting(session, outlet, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "slot_min_lead_hours", 48.0)
+    slots = await list_available_slots(session, outlet, days_ahead=2)
+    assert slots
+    assert all(s.starts_at >= datetime.now(timezone.utc) + timedelta(hours=47, minutes=59)
+               for s in slots)
 
 
 _counter = itertools.count(1)

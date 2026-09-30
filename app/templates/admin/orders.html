@@ -65,7 +65,18 @@
               {{ row.order.contact_number or (row.customer.whatsapp_number if row.customer else '') }}
             </div>
           </td>
-          <td class="px-4 py-3 text-xs text-stone-600">{{ row.order.slot_label or '—' }}</td>
+          <td class="px-4 py-3 text-xs text-stone-600">
+            {{ row.order.slot_label or '—' }}
+            {# Courier: booked 2 hours before the slot (services/dispatch.py). #}
+            {% if row.order.uber_delivery_id %}
+              <div class="mt-1 text-emerald-700">
+                Uber booked{% if row.order.uber_delivery_status %} · {{ row.order.uber_delivery_status }}{% endif %}
+                {% if row.order.uber_tracking_url %}<a href="{{ row.order.uber_tracking_url }}" target="_blank" rel="noopener" class="underline">track</a>{% endif %}
+              </div>
+            {% elif row.order.uber_dispatch_error %}
+              <div class="mt-1 text-red-700" title="{{ row.order.uber_dispatch_error }}">Uber not booked - retrying</div>
+            {% endif %}
+          </td>
           <td class="px-4 py-3 text-right font-semibold tabular-nums">
             ${{ '%.2f' | format(row.order.total) }}
           </td>

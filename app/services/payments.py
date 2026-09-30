@@ -32,7 +32,7 @@ from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
-from app.services import crm_sync, orders, receipts, slots
+from app.services import crm_sync, dispatch, orders, receipts, slots
 from app.services.customers import advance, get_or_create_conversation
 
 log = get_logger(__name__)
@@ -226,6 +226,8 @@ async def handle_payment_success(session: AsyncSession, order: Order,
 
     ctx = await crm_sync.order_context(session, order)
     outlet, outlet_name = ctx.outlet, ctx.outlet_name or "Shero"
+    # Into the Uber queue: sent UBER_DISPATCH_HOURS_BEFORE the slot starts.
+    order.uber_dispatch_due_at = dispatch.due_time(ctx.delivery_at)
 
     # 2. Confirmation to the customer. The money is taken by now, so a
     # WhatsApp failure must not stop the CRM record and the kitchen alert.

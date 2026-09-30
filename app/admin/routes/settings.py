@@ -268,6 +268,7 @@ async def save_kitchen(
     delivery_radius_km: float = Form(default=10.0),
     service_zips: str = Form(default=""),
     kitchen_whatsapp: str = Form(default=""),
+    kitchen_phone: str = Form(default=""),
     timezone_name: str = Form(default="America/New_York"),
     slot_length_minutes: int = Form(default=60),
     slot_capacity: int = Form(default=4),
@@ -304,6 +305,7 @@ async def save_kitchen(
     kitchen.delivery_radius_km = delivery_radius_km
     kitchen.service_zips = _parse_zips(service_zips)
     kitchen.kitchen_whatsapp = kitchen_whatsapp.strip() or None
+    kitchen.phone = kitchen_phone.strip() or None
     kitchen.timezone = timezone_name.strip() or "America/New_York"
     kitchen.operating_hours = operating_hours
     kitchen.slot_length_minutes = max(15, min(240, slot_length_minutes))

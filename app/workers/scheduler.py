@@ -50,6 +50,12 @@ def start_scheduler() -> AsyncIOScheduler:
         id="feedback_requests", max_instances=1, coalesce=True,
         misfire_grace_time=300,
     )
+    # Couriers are booked 2 hours ahead, so a few minutes' drift is harmless.
+    scheduler.add_job(
+        jobs.dispatch_couriers, IntervalTrigger(minutes=5),
+        id="courier_dispatch", max_instances=1, coalesce=True,
+        misfire_grace_time=300,
+    )
     # Slots only need topping up occasionally; 03:00 UTC is outside service
     # hours for the US east-coast outlets in the spec.
     scheduler.add_job(

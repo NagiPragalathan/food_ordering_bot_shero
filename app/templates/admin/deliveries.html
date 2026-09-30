@@ -1,0 +1,115 @@
+{% extends "admin/base.html" %}
+{% block title %}Uber queue{% endblock %}
+{% block heading %}Uber queue{% endblock %}
+{% block subheading %}
+<p class="text-xs text-stone-500">Every paid order joins this queue. The courier is booked
+  {{ hours_before | round(1) | replace('.0', '') }} hours before the delivery slot starts.</p>
+{% endblock %}
+
+{% block content %}
+
+{% if not uber_ready or not kitchen_phone %}
+<div class="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+  <p class="font-semibold">Uber cannot book couriers yet</p>
+  <ul class="mt-1 list-disc pl-5">
+    {% if not uber_ready %}<li>The Uber Direct keys are missing (UBER_CUSTOMER_ID, UBER_CLIENT_ID, UBER_CLIENT_SECRET).</li>{% endif %}
+    {% if not kitchen_phone %}<li>The kitchen has no phone number for the courier:
+      <a class="underline" href="{{ url_for('admin_settings') }}">Settings → Kitchen</a>.</li>{% endif %}
+  </ul>
+</div>
+{% endif %}
+
+{% set badge = {
+  'Waiting': 'bg-stone-100 text-stone-700',
+  'Booked': 'bg-emerald-50 text-emerald-700',
+  'Retrying': 'bg-red-50 text-red-700',
+  'Missed': 'bg-red-100 text-red-800',
+  'Cancelled': 'bg-stone-100 text-stone-500',
+} %}
+
+{% if rows %}
+<div class="overflow-hidden rounded-xl border border-stone-200 bg-white">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="border-b border-stone-200 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
+        <tr>
+          <th class="px-4 py-2.5 font-medium">Order</th>
+          <th class="px-4 py-2.5 font-medium">Customer</th>
+          <th class="px-4 py-2.5 font-medium">Delivery slot</th>
+          <th class="px-4 py-2.5 font-medium">Sent to Uber</th>
+          <th class="px-4 py-2.5 font-medium">Status</th>
+          <th class="px-4 py-2.5"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-stone-100">
+      {% for row in rows %}
+        {% set o = row.order %}
+        <tr class="align-top">
+          <td class="px-4 py-3 font-mono text-xs">{{ o.order_number }}</td>
+          <td class="px-4 py-3">
+            <div>{{ row.customer.name if row.customer and row.customer.name else '—' }}</div>
+            <div class="text-xs text-stone-500">{{ o.delivery_address or '' }}{% if o.postal_code %}, {{ o.postal_code }}{% endif %}</div>
+          </td>
+          <td class="px-4 py-3 text-xs text-stone-600">{{ o.slot_label or '—' }}</td>
+          <td class="px-4 py-3 text-xs text-stone-600">
+            {% if o.uber_dispatched_at %}
+              {{ o.uber_dispatched_at.astimezone(tz).strftime('%a %d %b, %I:%M %p') }}
+            {% elif row.send_at %}
+              {{ row.send_at.astimezone(tz).strftime('%a %d %b, %I:%M %p') }}
+              {% if row.status == 'Waiting' %}<div class="text-stone-400">scheduled</div>{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="px-4 py-3">
+            <span class="rounded-full px-2 py-0.5 text-xs font-semibold {{ badge[row.status] }}">{{ row.status }}</span>
+            {% if o.uber_delivery_status and row.status == 'Booked' %}
+              <div class="mt-1 text-xs text-stone-500">Uber: {{ o.uber_delivery_status }}</div>
+            {% endif %}
+            {% if o.uber_tracking_url and row.status == 'Booked' %}
+              <a href="{{ o.uber_tracking_url }}" target="_blank" rel="noopener"
+                 class="mt-1 block text-xs text-brand-700 underline">Track courier</a>
+            {% endif %}
+            {% if o.uber_dispatch_error and row.status in ('Retrying', 'Missed') %}
+              <div class="mt-1 max-w-xs text-xs text-red-700">{{ o.uber_dispatch_error }}</div>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-right">
+            {% if row.status in ('Waiting', 'Retrying', 'Cancelled') and row.slot_end and row.slot_end > now %}
+              <form method="post" action="{{ url_for('admin_delivery_send', order_number=o.order_number) }}"
+                    data-busy="Sending…">
+                <button class="whitespace-nowrap rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
+                  Send to Uber now
+                </button>
+              </form>
+            {% elif row.status == 'Booked' %}
+              <form method="post" action="{{ url_for('admin_delivery_cancel', order_number=o.order_number) }}"
+                    onsubmit="return confirm('Cancel the Uber courier for {{ o.order_number }}?')">
+                <button class="whitespace-nowrap rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50">
+                  Cancel Uber
+                </button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="rounded-xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">
+  No paid orders waiting for a courier.
+</div>
+{% endif %}
+
+<div class="mt-5 rounded-xl border border-stone-200 bg-white p-4 text-xs text-stone-600">
+  <p class="font-semibold text-stone-800">How it works</p>
+  <ul class="mt-1 list-disc space-y-0.5 pl-5">
+    <li><b>Waiting</b>: paid, and booked automatically at the time shown.</li>
+    <li><b>Booked</b>: Uber accepted it; the courier collects from the kitchen and delivers inside the slot.</li>
+    <li><b>Retrying</b>: Uber refused or was unreachable; the bot tries again every 5 minutes until the slot ends.</li>
+    <li><b>Missed</b>: the slot ended without a courier - arrange this delivery by hand.</li>
+    <li><b>Send to Uber now</b> books straight away (use it to test, or if the automatic booking is stuck).</li>
+  </ul>
+</div>
+
+{% endblock %}

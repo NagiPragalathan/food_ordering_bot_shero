@@ -219,6 +219,34 @@ Thirty minutes after delivery, the feedback request goes out automatically.
 
 ---
 
+## Uber queue
+
+Every paid order joins the queue the moment it is paid, with the time it
+will be sent to Uber: **2 hours before its delivery slot starts**
+(`UBER_DISPATCH_HOURS_BEFORE`). A job checks every 5 minutes and books the
+courier through Uber Direct: pickup from the kitchen from the send time,
+delivery inside the customer's slot.
+
+| Status | Meaning |
+|---|---|
+| Waiting | Paid; booked automatically at the time shown |
+| Booked | Uber accepted it. **Track courier** opens Uber's tracking page |
+| Retrying | Uber refused or was unreachable; the reason is shown and the bot tries again every 5 minutes until the slot ends |
+| Missed | The slot ended without a courier - arrange it by hand |
+| Cancelled | The booking was cancelled here |
+
+**Send to Uber now** books straight away - to test the connection, or to
+rescue a stuck order. **Cancel Uber** cancels a booking. A yellow box at the
+top says what is missing when couriers cannot be booked: the Uber keys, or
+the kitchen phone number (Settings -> Kitchen -> **Kitchen phone (for the
+courier)**; the Kitchen WhatsApp number is used when it is empty).
+
+The Uber keys in `.env` are the **test** keys: bookings are simulated and
+no courier comes. Replace them with the production keys from Uber Direct ->
+Developer before go-live.
+
+---
+
 ## Customers
 
 Everyone who has messaged the bot, newest first, with their funnel stage,
@@ -298,6 +326,17 @@ redirect URI to register is in [zoho-setup.md](zoho-setup.md).
 Once connected the card shows **connected**, with **Test connection** and
 **Disconnect**. Disconnect deletes the stored refresh token and leaves the
 Client ID and Secret in place, so reconnecting is one press.
+
+### Delivery times
+
+- **Earliest delivery:** fixed at 24 hours after the customer orders
+  (`SLOT_MIN_LEAD_HOURS` in `.env`, not shown on this page). Someone ordering
+  at midnight sees slots from midnight the next day, and only those inside the
+  kitchen's hours.
+- **Which hours:** set in **Kitchen -> Opening hours** on this page, per
+  weekday. The kitchen is set to 9:00 AM - 9:00 PM every day, so slots run
+  9-10 AM through 8-9 PM.
+- **Courier:** see [Uber queue](#uber-queue) below.
 
 ### Kitchen and delivery area
 

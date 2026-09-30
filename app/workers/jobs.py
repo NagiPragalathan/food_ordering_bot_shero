@@ -30,7 +30,7 @@ from app.db.session import session_scope
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.client import gallabox
 from app.services import orders as order_service
-from app.services import payments, slots
+from app.services import dispatch, payments, slots
 
 log = get_logger(__name__)
 
@@ -104,6 +104,23 @@ async def send_feedback_requests() -> int:
     return sent
 
 
+async def dispatch_couriers() -> int:
+    """Book the Uber courier for orders whose slot starts within
+    UBER_DISPATCH_HOURS_BEFORE (services/dispatch.py)."""
+    booked = 0
+    async with session_scope() as session:
+        for order in await dispatch.due_orders(session):
+            try:
+                if await dispatch.dispatch(session, order):
+                    booked += 1
+            except Exception as exc:  # noqa: BLE001 - one bad order must not stop the rest
+                log.error("dispatch_job_failed", order_number=order.order_number,
+                          error=str(exc))
+    if booked:
+        log.info("couriers_booked", count=booked)
+    return booked
+
+
 async def generate_upcoming_slots() -> int:
     """Keep every active outlet stocked with bookable slots."""
     created = 0
@@ -164,6 +181,7 @@ ALL_JOBS = {
     "payment_reminders": send_payment_reminders,
     "payment_expiry": expire_payment_links,
     "feedback_requests": send_feedback_requests,
+    "courier_dispatch": dispatch_couriers,
     "slot_generation": generate_upcoming_slots,
     "settings_refresh": refresh_settings,
 }
