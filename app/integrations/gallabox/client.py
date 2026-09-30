@@ -11,6 +11,7 @@ route, only this file changes - the bot engine talks in terms of
 from __future__ import annotations
 
 from app.core.config import settings
+from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
 from app.integrations.base import ApiClient
 from app.integrations.gallabox import messages as m
@@ -80,7 +81,27 @@ class GallaboxClient(ApiClient):
 
     async def send_template(self, to: str, spec: TemplateSpec, *values: object,
                             button_value: str | None = None) -> dict:
-        return await self._send(to, render(spec, *values, button_value=button_value))
+        """Send an approved template; otherwise the same message as ordinary
+        text (see fallback.py), so the customer always gets it.
+
+        Gallabox accepts a send for an unapproved template and drops it
+        silently, so approval is checked before sending rather than inferred
+        from an error. A template Gallabox refuses outright falls back too.
+        """
+        # Imported here: template_status reads the template list through
+        # this client, so importing it at module level would be circular.
+        from app.integrations.gallabox import fallback, template_status
+
+        payload = render(spec, *values, button_value=button_value)  # validates the values
+        if await template_status.is_approved(spec.name):
+            try:
+                return await self._send(to, payload)
+            except IntegrationError as exc:
+                log.error("template_send_failed_using_text", template=spec.name,
+                          error=str(exc))
+        else:
+            log.info("template_not_approved_using_text", template=spec.name)
+        return await self._send(to, fallback.message(spec, tuple(values), button_value))
 
     # -- agent handover (spec step 5, "Talk to Us") ---------------------------
     async def handover_to_agent(self, to: str, *, note: str | None = None) -> dict:

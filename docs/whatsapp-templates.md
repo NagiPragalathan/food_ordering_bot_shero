@@ -42,6 +42,26 @@ the mapping). The sections below use the spec's names.
 Gallabox lists templates 20 at a time; `template_admin.list_templates` reads
 every page (100 per page), so the approval check sees all of them.
 
+## When a template is not approved
+
+Every template send goes through `GallaboxClient.send_template`, which asks
+Gallabox whether the template is approved **before** sending (Gallabox
+accepts a send for an unapproved template and then drops it silently). If it
+is not approved, or Gallabox refuses it, the same message goes as an ordinary
+WhatsApp message instead (`gallabox/fallback.py`):
+
+| Template has | Sent instead |
+|---|---|
+| Body only | A text with the same words, parameters filled in |
+| A URL button (Pay Now, Download Bill, View Menu) | A link button with the same label and address |
+| Quick replies (Great / Good / Poor, Order Now) | Reply buttons; a tap answers exactly like the template's |
+
+Ordinary messages are only delivered inside WhatsApp's 24-hour window.
+Almost every template is sent right after the customer wrote or paid, so
+this covers them; a message sent much later (a delivery update hours after
+ordering) needs the approved template to arrive. The log shows
+`template_not_approved_using_text` or `template_send_failed_using_text`.
+
 ## Creating them
 
 You do not have to type these into a dashboard. One command creates every
