@@ -98,13 +98,16 @@ def test_managed_templates_add_the_welcome_opener_and_order_summary():
 
 
 def test_template_names_match_the_spec():
+    # payment_success is submitted as payment_confirmed (with a Download Bill
+    # button): the first one errored on the channel and its name stays taken.
     expected = {
-        "payment_link", "payment_reminder", "payment_success", "payment_failed",
+        "shero_payment_link", "shero_payment_reminder", "payment_confirmed",
+        "shero_payment_failed",
         "payment_expired", "refund_processed", "order_out_for_delivery",
-        "order_delivered", "order_cancelled", "feedback_request",
+        "order_delivered", "order_cancelled", "shero_feedback",
     }
     assert {s.name for s in tpl.ALL_TEMPLATES} == expected
-    assert set(tpl.BY_NAME) == expected | {"shero_welcome", "order_summary", "menu_link"}
+    assert set(tpl.BY_NAME) == expected | {"shero_welcome_message", "order_summary", "menu_link"}
 
 
 def test_declared_params_match_the_placeholders_in_the_body():
@@ -149,7 +152,7 @@ def test_template_without_a_button_omits_button_values():
 
 def test_marketing_templates_are_the_two_the_spec_names():
     marketing = {s.name for s in tpl.ALL_TEMPLATES if s.category == "MARKETING"}
-    assert marketing == {"payment_expired", "feedback_request"}
+    assert marketing == {"payment_expired", "shero_feedback"}
     # The welcome opener is promotional too, and is not part of the spec's ten.
     assert tpl.WELCOME.category == "MARKETING"
 

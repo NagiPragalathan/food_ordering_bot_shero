@@ -15,6 +15,8 @@ from decimal import Decimal
 
 import pytest
 
+from app.integrations.gallabox import templates as tpl
+
 from app.db.models import ConversationStep, LeadStage, PaymentStatus
 from app.schemas.inbound import CartLine, InboundEvent, InboundKind
 from app.services.conversation.engine import handle_event
@@ -323,7 +325,7 @@ async def test_full_order_journey(session, outlet, menu, bot):
 
     template_msg = bot.last()
     assert template_msg.kind == "template"
-    assert template_msg.body == "payment_link"
+    assert template_msg.body == tpl.PAYMENT_LINK.name
     assert template_msg.payload["values"][0] == "Asha Menon"
     assert template_msg.payload["values"][2] == "32.19"
     # The Pay Now button carries the order number, not the long Stripe URL.
@@ -654,7 +656,7 @@ async def test_the_payment_reminder_still_works_when_switched_on(
     sent = await payments.send_reminder(session, order, customer)
 
     assert sent is True
-    assert bot.last().body == "payment_reminder"
+    assert bot.last().body == tpl.PAYMENT_REMINDER.name
 
 
 # --- the menu link is a button, not a bare URL ---------------------------------

@@ -6,6 +6,8 @@ failure it guards against is a template rendering "Hi , welcome to Shero".
 """
 
 import pytest
+
+from app.integrations.gallabox import templates as tpl
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +42,7 @@ async def test_an_unknown_number_gets_a_lead_and_a_neutral_greeting(
 
     sent = fake.last()
     assert sent.kind == "template"
-    assert sent.body == "shero_welcome"
+    assert sent.body == tpl.WELCOME.name
     # Not an empty string, and not a name we invented for them.
     assert sent.payload["values"] == ["there"]
 
@@ -139,7 +141,7 @@ async def test_an_unreachable_crm_does_not_stop_the_greeting(
     with use_sender(fake):
         await outreach.send_welcome(session, NEW_NUMBER)
 
-    assert fake.last().body == "shero_welcome"
+    assert fake.last().body == tpl.WELCOME.name
 
 
 # --- the shared greeting rule ---------------------------------------------------

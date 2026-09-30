@@ -19,6 +19,29 @@ loudly in our code rather than as a generic error from Meta.
 
 ---
 
+## Names on the channel
+
+Five templates are submitted under a different name from the spec's. The
+first `payment_success` and `feedback_request` came back in error, and
+`payment_link`, `payment_reminder`, `payment_failed` and `shero_welcome` were
+already taken elsewhere in the Gallabox account. A name stays taken until the
+template is deleted by hand in Gallabox, so the replacements are new:
+
+| Spec name | Name on the channel |
+|---|---|
+| `payment_success` | `payment_confirmed` (adds the Download Bill button) |
+| `payment_link` | `shero_payment_link` |
+| `payment_reminder` | `shero_payment_reminder` |
+| `payment_failed` | `shero_payment_failed` |
+| `feedback_request` | `shero_feedback` |
+| `shero_welcome` | `shero_welcome_message` |
+
+The code keeps the spec's names for its constants (`templates.RENAMED` holds
+the mapping). The sections below use the spec's names.
+
+Gallabox lists templates 20 at a time; `template_admin.list_templates` reads
+every page (100 per page), so the approval check sees all of them.
+
 ## Creating them
 
 You do not have to type these into a dashboard. One command creates every
@@ -203,21 +226,27 @@ address step. A paid order is never released - the customer is told to type
 Hi {{1}}, your order #{{2}} is waiting for payment. Complete it to keep your {{3}} delivery slot.
 ```
 
-## 3. `payment_success`
+## 3. `payment_confirmed` (the spec's `payment_success`)
 
-- **Category:** Utility
-- **Trigger:** Stripe payment confirmed (step 16)
-- **Parameters:** `{{1}}` = order_number, `{{2}}` = amount, `{{3}}` = outlet_name, `{{4}}` = slot_label
-- **Button:** none
+| | |
+|---|---|
+| Category | Utility |
+| Trigger | Stripe payment confirmed (step 16) |
+| Body | Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} for delivery at {{4}}. Thank you for ordering with Shero! Tap below for your bill. |
+| Button | **Download Bill**, dynamic URL `PUBLIC_BASE_URL/receipt/{{1}}` |
 
-**Body:**
+Submitted under a new name because the first `payment_success` came back in
+error, and a name stays taken until the template is deleted in Gallabox.
+The button opens the paid bill as a PDF; its suffix is the order number
+signed with the app secret, so the link cannot be guessed or edited, and it
+does not expire. An unpaid order has no bill.
 
-```
-Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} for delivery at {{4}}. Thank you for ordering with Shero!
-```
-
-> The closing sentence is not decoration: without it the body ends on `{{4}}`,
-> which Meta refuses.
+**Until it is approved the confirmation still arrives:** the bot checks
+approval first and otherwise sends the same words as a plain WhatsApp text,
+ending with a "Download your bill" link. The customer paid from a link sent
+moments earlier, so the chat is inside WhatsApp's 24-hour window and a
+plain text is delivered. Code: `payments.send_payment_confirmation`,
+`services/receipts.py`, route `GET /receipt/<token>`.
 
 ## 4. `payment_failed`
 

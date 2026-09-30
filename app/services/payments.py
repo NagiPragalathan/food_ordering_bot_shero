@@ -31,9 +31,52 @@ from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
-from app.services import crm_sync, orders, slots
+from app.services import crm_sync, orders, receipts, slots
 
 log = get_logger(__name__)
+
+
+def payment_confirmation_text(order: Order, outlet_name: str) -> str:
+    """The payment_success wording, for sending as plain text."""
+    return (f"Payment received! Your order #{order.order_number} of ${order.total:.2f} "
+            f"is confirmed from {outlet_name} for delivery at "
+            f"{order.slot_label or 'your chosen slot'}. Thank you for ordering with Shero!"
+            "\n\nDownload your bill: "
+            f"{receipts.receipt_url(order.order_number)}")
+
+
+async def send_payment_confirmation(customer: Customer, order: Order,
+                                    outlet_name: str) -> bool:
+    """Tell the customer their payment went through (spec step 16).
+
+    Uses the payment_success template when Gallabox has it approved. Gallabox
+    accepts a send for a template that is not approved and then drops it
+    without an error, so approval is checked first, and otherwise the same
+    words go as plain text. The customer paid from a link we sent moments
+    ago, so the conversation is inside WhatsApp's 24-hour window and a plain
+    text is delivered. Returns True when a message was accepted.
+    """
+    sender = current_sender()
+    if await template_status.is_approved(tpl.PAYMENT_SUCCESS.name):
+        try:
+            await sender.send_template(
+                customer.whatsapp_number, tpl.PAYMENT_SUCCESS, order.order_number,
+                f"{order.total:.2f}", outlet_name, order.slot_label or "your chosen slot",
+                button_value=receipts.build_token(order.order_number))
+            return True
+        except IntegrationError as exc:
+            log.error("payment_success_template_failed", order_number=order.order_number,
+                      error=str(exc))
+    else:
+        log.info("payment_success_not_approved_using_text", order_number=order.order_number)
+    try:
+        await sender.send_text(customer.whatsapp_number,
+                               payment_confirmation_text(order, outlet_name))
+        return True
+    except IntegrationError as exc:
+        log.error("payment_success_message_failed", order_number=order.order_number,
+                  error=str(exc))
+        return False
 
 
 def payment_short_url(order_number: str) -> str:
@@ -204,18 +247,7 @@ async def handle_payment_success(session: AsyncSession, order: Order,
 
     # 2. Confirmation to the customer. The money is taken by now, so a
     # WhatsApp failure must not stop the CRM record and the kitchen alert.
-    try:
-        await current_sender().send_template(
-            customer.whatsapp_number,
-            tpl.PAYMENT_SUCCESS,
-            order.order_number,
-            f"{order.total:.2f}",
-            outlet_name,
-            order.slot_label or "your chosen slot",
-        )
-    except IntegrationError as exc:
-        log.error("payment_success_message_failed", order_number=order.order_number,
-                  error=str(exc))
+    await send_payment_confirmation(customer, order, outlet_name)
 
     # 3. Lead -> Contact, the Order record and its Order Items (spec step 16).
     await crm_sync.convert_and_record_order(customer, order, ctx)

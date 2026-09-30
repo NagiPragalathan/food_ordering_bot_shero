@@ -202,3 +202,22 @@ async def test_a_non_dict_response_does_not_crash_the_caller(monkeypatch):
 
     monkeypatch.setattr(admin.gallabox, "post", fake_post)
     assert await admin.create_template(tpl.ORDER_DELIVERED) == {}
+
+
+@pytest.mark.asyncio
+async def test_list_templates_reads_every_page(monkeypatch):
+    """Gallabox pages its list; a template past the first page still counts."""
+    monkeypatch.setattr(admin.settings, "gallabox_account_id", "acct_1", raising=False)
+    monkeypatch.setattr(admin.settings, "gallabox_channel_id", "chan_1", raising=False)
+    everything = [{"id": str(i), "name": f"t{i}", "channelId": "chan_1"} for i in range(230)]
+    asked = []
+
+    async def fake_get(_path, *, params=None, **_kw):
+        asked.append(params)
+        start = (params["page"] - 1) * params["limit"]
+        return everything[start:start + params["limit"]]
+
+    monkeypatch.setattr(admin.gallabox, "get", fake_get)
+    rows = await admin.list_templates()
+    assert len(rows) == 230 and rows[-1]["name"] == "t229"
+    assert [p["page"] for p in asked] == [1, 2, 3]

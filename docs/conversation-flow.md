@@ -56,6 +56,7 @@ Each matches the spec's "If it fails" column.
 | Unpaid after 15 min | `payment_reminder` template |
 | Unpaid after 30 min | Link expires, slot released, dishes put back in the cart, `payment_expired` template. Its **Order Now** button opens the menu with that cart (`/pay/<order>` redirects a dead order to a fresh menu link) |
 | Order changed (Change menu / Update location) | Old order cancelled and its link marked expired, so neither the 15- nor the 30-minute message is sent for it |
+| Payment succeeded | `payment_confirmed` template with a **Download Bill** button; until Meta approves it, the same words as plain text with a bill link (`payments.send_payment_confirmation`) |
 | Payment failed | `payment_failed` template with a retry link |
 | Voice note, photo, sticker, video, file or contact card | "I can only read typed messages and button taps", plus what to do at this step; the step does not change. As the very first message it gets the normal welcome |
 | Anything a step did not match and so sent no reply | The engine notices nothing was sent and replies "Sorry, I did not understand that" (at a name/email/address step: "please type your answer") |

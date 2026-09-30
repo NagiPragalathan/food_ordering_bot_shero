@@ -44,3 +44,6 @@ aiosqlite==0.20.0
 # Downscales dish photos pulled out of the client's sheet; the originals are
 # ~850KB PNGs, far too heavy for a phone menu.
 Pillow==11.0.0
+
+# Draws the PDF bill a customer downloads after paying (services/receipts.py).
+fpdf2==2.8.3

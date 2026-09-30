@@ -40,6 +40,7 @@ EXAMPLES = {
 }
 
 EXAMPLE_ORDER_NUMBER = "SHO-260923-AB12X"
+EXAMPLE_RECEIPT_TOKEN = "IlNITy0yNjA5MjMtQUIxMlgi.hN0bK3Yx8QeWm2cVdL5pRs7uTzA"
 # What a signed ordering-link token looks like, for Meta's reviewer.
 EXAMPLE_LINK_TOKEN = "IjI4NTVjM2JmLTliY2YtNGU2NS04MDlmLWM5ZjUxMDk0YjNjYyI.arW2Wg.xIM6yYeY74aaYz9HVSnW7F6-Kmg"
 
@@ -59,6 +60,11 @@ def _order_page_base_url() -> str:
             "approved template."
         )
     return f"{base.rstrip('/')}/order"
+
+
+def _receipt_base_url() -> str:
+    """Base of the Download Bill button: the PDF bill, receipt token appended."""
+    return _order_page_base_url().removesuffix("/order") + "/receipt"
 
 
 def _button_base_url() -> str:
@@ -111,6 +117,8 @@ def components(spec: TemplateSpec) -> list[dict]:
     if spec.button_kind == "dynamic_url":
         if spec.url_base == "order":
             base, example = _order_page_base_url(), EXAMPLE_LINK_TOKEN
+        elif spec.url_base == "receipt":
+            base, example = _receipt_base_url(), EXAMPLE_RECEIPT_TOKEN
         else:
             base, example = _button_base_url(), EXAMPLE_ORDER_NUMBER
         buttons.append({
@@ -167,11 +175,32 @@ async def list_templates(*, channel_id: str | None = None) -> list[dict]:
     sends from, which is the only one whose templates it can actually use.
     """
     wanted = settings.gallabox_channel_id if channel_id is None else channel_id
-    found = await gallabox.get(_account_path())
-    rows = found if isinstance(found, list) else []
+    rows = await _all_pages()
     if not wanted:
         return rows
     return [row for row in rows if row.get("channelId") == wanted]
+
+
+PAGE_SIZE = 100      # Gallabox's largest page; without `limit` it sends 20
+MAX_PAGES = 50       # a guard against a server that ignores `page`
+
+
+async def _all_pages() -> list[dict]:
+    """Every template on the account. The list is paged: reading only the
+    first page made approved templates look missing, and the bot then
+    skipped sending them."""
+    rows: list[dict] = []
+    seen: set = set()
+    for page in range(1, MAX_PAGES + 1):
+        found = await gallabox.get(_account_path(), params={"page": page, "limit": PAGE_SIZE})
+        batch = found if isinstance(found, list) else []
+        fresh = [r for r in batch if (r.get("id") or r.get("name"), r.get("channelId")) not in seen]
+        seen.update((r.get("id") or r.get("name"), r.get("channelId")) for r in fresh)
+        rows.extend(fresh)
+        if len(batch) < PAGE_SIZE or not fresh:
+            return rows
+    log.warning("template_list_page_limit_reached", pages=MAX_PAGES)
+    return rows
 
 
 # Note: the dev API creates and lists templates but does not edit or delete

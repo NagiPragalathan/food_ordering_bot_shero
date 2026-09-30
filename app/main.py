@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from app.admin import router as admin_router
 from app.admin.deps import NotAuthenticated
 
-from app.api.routes import (health, media_thumbs, ops, order_addresses, order_web,
+from app.api.routes import (health, media_thumbs, ops, order_addresses, order_web, receipts,
                             pay, webhooks_gallabox, webhooks_stripe)
 from app.core.http_cache import ImmutableStaticFiles
 from app.core.config import settings
@@ -104,6 +104,7 @@ app.include_router(webhooks_stripe.router)
 app.include_router(pay.router)
 app.include_router(order_web.router)
 app.include_router(order_addresses.router)
+app.include_router(receipts.router)
 
 # Dish photos downloaded from the client's sheet at import time. Served from
 # here rather than hot-linked, so a page load never depends on Drive.

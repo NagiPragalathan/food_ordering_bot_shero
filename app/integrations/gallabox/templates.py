@@ -1,5 +1,12 @@
 """The 10 WhatsApp templates from section 3 of the spec.
 
+Some are submitted under a different name from the spec's: the first
+payment_success and feedback_request came back in error, and payment_link,
+payment_reminder, payment_failed and shero_welcome were already taken in the
+Gallabox account without being on this channel. A template name stays taken
+until it is deleted by hand in Gallabox, so the replacements have new names
+(see RENAMED). The spec's name is still the constant's name here.
+
 Each entry is the contract we hold Meta to: template name, category, and the
 ordered body parameters. `render()` validates the argument count before the
 call leaves the process, so a mismatch surfaces as a clear error here instead
@@ -18,9 +25,10 @@ from typing import Literal
 
 Category = Literal["UTILITY", "MARKETING"]
 ButtonKind = Literal["none", "dynamic_url", "quick_reply"]
-# Where a dynamic URL button points: the short payment redirect, or the web
-# ordering page (whose suffix is the customer's signed link token).
-UrlBase = Literal["pay", "order"]
+# Where a dynamic URL button points: the short payment redirect, the web
+# ordering page (whose suffix is the customer's signed link token), or the
+# paid bill (whose suffix is the order's signed receipt token).
+UrlBase = Literal["pay", "order", "receipt"]
 
 
 @dataclass(frozen=True)
@@ -41,7 +49,7 @@ class TemplateSpec:
 
 
 PAYMENT_LINK = TemplateSpec(
-    name="payment_link",
+    name="shero_payment_link",
     category="UTILITY",
     trigger="Order summary confirmed (step 14-15)",
     params=("customer_name", "order_number", "amount", "slot_label"),
@@ -54,7 +62,7 @@ PAYMENT_LINK = TemplateSpec(
 )
 
 PAYMENT_REMINDER = TemplateSpec(
-    name="payment_reminder",
+    name="shero_payment_reminder",
     category="UTILITY",
     trigger="15 minutes unpaid (step 15)",
     params=("customer_name", "order_number", "slot_label"),
@@ -66,8 +74,11 @@ PAYMENT_REMINDER = TemplateSpec(
     button_label="Pay Now",
 )
 
+# Submitted as "payment_confirmed": the first "payment_success" came back in
+# error on the channel, and a template name cannot be reused until it is
+# deleted by hand in Gallabox. This one also carries the Download Bill button.
 PAYMENT_SUCCESS = TemplateSpec(
-    name="payment_success",
+    name="payment_confirmed",
     category="UTILITY",
     trigger="Stripe payment confirmed (step 16)",
     params=("order_number", "amount", "outlet_name", "slot_label"),
@@ -75,12 +86,15 @@ PAYMENT_SUCCESS = TemplateSpec(
     # variable, counting a trailing full stop as no ending at all.
     sample_body=(
         "Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} "
-        "for delivery at {{4}}. Thank you for ordering with Shero!"
+        "for delivery at {{4}}. Thank you for ordering with Shero! Tap below for your bill."
     ),
+    button_kind="dynamic_url",
+    button_label="Download Bill",
+    url_base="receipt",
 )
 
 PAYMENT_FAILED = TemplateSpec(
-    name="payment_failed",
+    name="shero_payment_failed",
     category="UTILITY",
     trigger="Stripe payment failed (step 16)",
     params=("customer_name", "order_number"),
@@ -142,7 +156,7 @@ ORDER_CANCELLED = TemplateSpec(
 )
 
 FEEDBACK_REQUEST = TemplateSpec(
-    name="feedback_request",
+    name="shero_feedback",
     category="MARKETING",
     trigger="30 minutes after delivery (step 19)",
     params=("order_number",),
@@ -154,7 +168,7 @@ FEEDBACK_REQUEST = TemplateSpec(
 )
 
 WELCOME = TemplateSpec(
-    name="shero_welcome",
+    name="shero_welcome_message",
     category="MARKETING",
     trigger="Business-initiated opener, outside the 24-hour window",
     params=("customer_name",),
@@ -237,6 +251,16 @@ MANAGED_TEMPLATES: tuple[TemplateSpec, ...] = ALL_TEMPLATES + (
     WELCOME, ORDER_SUMMARY, MENU_LINK)
 
 BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in MANAGED_TEMPLATES}
+
+# The spec's name -> the name submitted to Meta, where they differ.
+RENAMED: dict[str, str] = {
+    "payment_success": "payment_confirmed",
+    "payment_link": "shero_payment_link",
+    "payment_reminder": "shero_payment_reminder",
+    "payment_failed": "shero_payment_failed",
+    "feedback_request": "shero_feedback",
+    "shero_welcome": "shero_welcome_message",
+}
 
 
 def render(spec: TemplateSpec, *values: object, button_value: str | None = None) -> dict:
