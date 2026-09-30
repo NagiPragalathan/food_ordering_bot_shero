@@ -73,6 +73,7 @@ PERSON_FIELDS: tuple[tuple[str, dict], ...] = (
     (f.SELECTED_OUTLET, _text("Selected Outlet", 120)),
     (f.DISTANCE_KM, {"field_label": "Distance KM", "data_type": "double",
                      "length": 8, "decimal_place": 2}),
+    (f.WHATSAPP_PROFILE_NAME, _text("WhatsApp Profile Name", 120)),
 )
 
 # The spec's Order data (section 2). Amounts are plain numbers in the CRM's
@@ -91,6 +92,7 @@ ORDER_FIELDS: tuple[tuple[str, dict], ...] = (
     (f.O_OUTLET_NAME, _text("Outlet Name", 120)),
     (f.O_DELIVERY_SLOT, _text("Delivery Slot", 80)),
     (f.O_DELIVERY_TIME, _datetime("Delivery Time")),
+    (f.O_SALES_ORDER, _lookup("Sales Order", f.SALES_ORDERS, "Bot Orders")),
     (f.O_ITEMS, _textarea("Items")),
     (f.O_DISH_TOTAL, _money("Dish Total")),
     (f.O_DELIVERY_CHARGE, _money("Delivery Charge")),

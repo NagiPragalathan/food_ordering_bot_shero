@@ -24,6 +24,9 @@ class Customer(Base, UUIDPrimaryKey, Timestamps):
         String(32), unique=True, index=True, nullable=False
     )
     name: Mapped[str | None] = mapped_column(String(160))
+    # The name on their WhatsApp profile, as WhatsApp sends it. Kept apart
+    # from `name` (what they typed): profile names are often nicknames.
+    whatsapp_profile_name: Mapped[str | None] = mapped_column(String(120))
     email: Mapped[str | None] = mapped_column(String(255))
 
     # Delivery details (spec step 12).

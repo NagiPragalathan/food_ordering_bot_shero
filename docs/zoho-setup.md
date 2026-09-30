@@ -36,6 +36,7 @@ them instead of copying names into text:
 |---|---|---|
 | Customer | **Leads**, then **Contacts** | Phone / Mobile |
 | Paid order | **Orders** (custom, created by the setup script) | Order number |
+| Paid order, with a product grid | **Sales Orders** (Zoho's own) | Linked from the Order's Sales Order field |
 | Dish on an order | **Order Items** (custom, created by the setup script) | Remembered per order line |
 | Menu dish | **Products** (Zoho's own) | Product Code = the dish's `retailer_id` |
 | Kitchen (outlet) | **Vendors** (Zoho's own) | Outlet Code = the outlet's code, or its name |
@@ -152,6 +153,7 @@ Fields on **Leads and Contacts**:
 | Bot Stage History (`Bot_Stage_History`) | Multi-line | One line per stage: `2026-09-28 10:04 UTC  Cart Created` |
 | Selected Outlet (`Selected_Outlet`) | Single line | Kitchen that serves them |
 | Distance KM (`Distance_KM`) | Decimal | Distance to that kitchen |
+| WhatsApp Profile Name (`WhatsApp_Profile_Name`) | Single line | The name on their WhatsApp profile. Kept apart from First / Last Name, which are always the name the customer typed |
 
 Bot Stage values: New Enquiry, Details Captured, Cuisine Selected, Cart
 Created, Not Serviceable, Outlet Selected, Slot Selected, Payment Link Sent,
@@ -169,6 +171,7 @@ Fields on **Orders**:
 | Order Status (`Order_Status`) | Picklist | The bot's order stages, verbatim (below) |
 | Address, Latitude, Longitude | Single line | Where it was delivered |
 | Cuisine, Outlet Name, Delivery Slot | Single line | e.g. `Fri 25 Sep, 7:00 PM - 8:00 PM` |
+| Sales Order (`Sales_Order`) | Lookup to Sales Orders | The same order with its product grid |
 | Outlet (`Outlet`) | Lookup to Vendors | The kitchen that cooked it; shows as an "Orders" list on the Vendor |
 | Delivery Time (`Delivery_Time`) | Date/Time | Start of the delivery slot, for date filters |
 | Items | Multi-line | One dish per line: `2 x Sambar @ 9.50 = 19.00` (the Order Items records are the structured version) |
@@ -241,6 +244,16 @@ have is left blank rather than failing the record.
 
 On conversion the Contact receives all of the above plus Bot Stage Converted,
 and the address the paid order went to.
+
+**Sales Orders.** Every paid order is also filed as a Zoho Sales Order,
+Zoho's own order record with a product grid like a Deal's or a Quote's:
+one row per dish (Product, quantity, the price charged), with delivery,
+Uber fees and tax as the **Adjustment**, so its Grand Total is exactly what
+the customer paid. Subject is the order number; it is linked to the Contact
+and from the Order's Sales Order field. Its Status follows the kitchen:
+Created when paid, Approved when sent to the kitchen or out for delivery,
+Delivered, and Cancelled on a cancellation or refund. A dish with no Product
+is left off the grid (its amount lands in the Adjustment).
 
 **Orders, Order Items, Products and Vendors**:
 

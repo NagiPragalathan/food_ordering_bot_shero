@@ -15,6 +15,7 @@ menu-to-Products / kitchens-to-Vendors side is services/catalogue_sync.py.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from app.core.config import settings
 from app.core.exceptions import IntegrationError
@@ -98,7 +99,8 @@ async def relink_order(zoho_order_id: str, contact_id: str) -> None:
 
 def new_lead_fields(*, whatsapp_number: str, name: str | None, email: str | None,
                     lead_source: str | None, ad_id: str | None,
-                    campaign_id: str | None, stage: LeadStage, history: str) -> dict:
+                    campaign_id: str | None, stage: LeadStage, history: str,
+                    whatsapp_profile_name: str | None = None) -> dict:
     """A first-time number's Lead (spec step 1)."""
     first, last = f.split_name(name)
     return {
@@ -112,6 +114,7 @@ def new_lead_fields(*, whatsapp_number: str, name: str | None, email: str | None
         f.LEAD_STATUS: str(stage),
         f.BOT_STAGE: str(stage),
         f.BOT_STAGE_HISTORY: history,
+        f.WHATSAPP_PROFILE_NAME: whatsapp_profile_name,
     }
 
 
@@ -143,9 +146,13 @@ def detail_fields(module: str, **details) -> dict:
     Unknown keys are ignored, so a caller cannot write an unmapped field.
     """
     address = f.ADDRESS_FIELDS[module]
-    first, last = f.split_name(details["name"]) if details.get("name") else ("", None)
+    has_name = bool(details.get("name"))
+    first, last = f.split_name(details["name"]) if has_name else ("", None)
     return {
-        f.FIRST_NAME: first or None,
+        # With a name, First Name is always sent - blank for a one-word name -
+        # so an old first name ("Nagipragalathan") does not stay next to the
+        # new last name ("Nagi"). Without one, it is left alone.
+        f.FIRST_NAME: first if has_name else None,
         f.LAST_NAME: last,
         f.EMAIL: details.get("email"),
         address["street"]: details.get("address"),
@@ -158,6 +165,7 @@ def detail_fields(module: str, **details) -> dict:
         f.SELECTED_OUTLET: details.get("outlet_name"),
         f.DISTANCE_KM: details.get("distance_km"),
         f.CUISINE: f.cuisine_label(details.get("cuisine")),
+        f.WHATSAPP_PROFILE_NAME: details.get("whatsapp_profile_name"),
     }
 
 
@@ -249,6 +257,78 @@ async def update_order(zoho_order_id: str, fields: dict) -> None:
     payload = f.compact(fields)
     if payload:
         await zoho_client.update_record(settings.zoho_orders_module, zoho_order_id, payload)
+
+
+# --- Sales Orders: the order with a native product grid ------------------------
+SALES_ORDER_STATUS = {
+    OrderStage.PAID_SLOT_BOOKED: f.SO_STATUS_CREATED,
+    OrderStage.SENT_TO_KITCHEN: f.SO_STATUS_APPROVED,
+    OrderStage.OUT_FOR_DELIVERY: f.SO_STATUS_APPROVED,
+    OrderStage.DELIVERED: f.SO_STATUS_DELIVERED,
+    OrderStage.CANCELLED: f.SO_STATUS_CANCELLED,
+    OrderStage.REFUNDED: f.SO_STATUS_CANCELLED,
+}
+
+
+def sales_order_status(stage) -> str | None:
+    """Zoho's Sales Order Status for an order stage; None before payment."""
+    try:
+        return SALES_ORDER_STATUS.get(OrderStage(stage))
+    except ValueError:
+        return None
+
+
+def sales_order_fields(order, *, product_ids: dict[str, str], zoho_contact_id: str | None,
+                       delivery_at: datetime | None = None) -> dict | None:
+    """A Sales Order from our Order: one grid row per dish, at the price
+    charged. Delivery, Uber fees and tax go in Adjustment, so the Grand Total
+    equals what the customer paid. None when no dish has a Product (Zoho
+    refuses a Sales Order with an empty grid)."""
+    rows, grid_total = [], Decimal("0")
+    for line in order.items or []:
+        parsed = f.parse_line(line)
+        if parsed is None or parsed[0] not in product_ids:
+            continue
+        code, name, quantity, unit_price = parsed
+        rows.append({f.SO_ITEM_PRODUCT: {"id": product_ids[code]},
+                     f.SO_ITEM_QUANTITY: quantity,
+                     f.SO_ITEM_LIST_PRICE: f.jsonable(unit_price),
+                     f.SO_ITEM_DESCRIPTION: name})
+        grid_total += unit_price * quantity
+    if not rows:
+        return None
+    # Everything paid beyond the grid: delivery, Uber fees, tax (and any dish
+    # that had no Product, so the Grand Total still matches the charge).
+    adjustment = Decimal(str(order.total or 0)) - grid_total
+    address = ", ".join(p for p in (order.delivery_address, order.apartment_unit) if p) or None
+    notes = [f"Delivery slot: {order.slot_label}" if order.slot_label else "",
+             f"Instructions: {order.delivery_instructions}"
+             if order.delivery_instructions else "",
+             "Adjustment = delivery charge, taxes and fees."]
+    notes_text = "\n".join(n for n in notes if n)
+    return {
+        f.SO_SUBJECT: order.order_number,
+        f.SO_CONTACT: {"id": zoho_contact_id} if zoho_contact_id else None,
+        f.SO_STATUS: sales_order_status(order.stage) or f.SO_STATUS_CREATED,
+        f.SO_DUE_DATE: delivery_at.date().isoformat() if delivery_at else None,
+        f.SO_ITEMS: rows,
+        f.SO_ADJUSTMENT: f.jsonable(adjustment),
+        f.SO_SHIPPING_STREET: address,
+        f.SO_SHIPPING_CODE: order.postal_code,
+        f.SO_DESCRIPTION: notes_text or None,
+    }
+
+
+async def create_sales_order(fields: dict) -> str | None:
+    so_id = await zoho_client.create_record(f.SALES_ORDERS, f.compact(fields))
+    log.info("zoho_sales_order_created", order_number=fields.get(f.SO_SUBJECT), zoho_id=so_id)
+    return so_id
+
+
+async def update_sales_order(zoho_so_id: str, fields: dict) -> None:
+    payload = f.compact(fields)
+    if payload:
+        await zoho_client.update_record(f.SALES_ORDERS, zoho_so_id, payload)
 
 
 # --- Order Items: one record per dish on a paid order --------------------------

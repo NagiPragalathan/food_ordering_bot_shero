@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BotFlowError, IntegrationError
 from app.core.logging import get_logger
-from app.db.models import ConversationStep, InboundMessage
+from app.db.models import ConversationStep, InboundMessage, PaymentStatus
 from app.schemas.inbound import InboundEvent, InboundKind
 from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
@@ -29,6 +29,7 @@ from app.services.conversation.handlers import (
     onboarding,
     order_changes,
 )
+from app.services import crm_sync, customers, orders
 from app.services.customers import get_or_create_conversation, get_or_create_customer
 
 log = get_logger(__name__)
@@ -82,17 +83,19 @@ async def handle_event(session: AsyncSession, event: InboundEvent) -> bool:
     if not await _claim_message(session, event):
         return False
 
-    customer, created = await get_or_create_customer(
+    customer, _created = await get_or_create_customer(
         session,
         event.whatsapp_number,
         ad_id=event.ad_id or None,
         campaign_id=event.campaign_id or None,
         referral_payload=event.referral,
     )
-    # A name supplied by WhatsApp itself saves asking, but never overwrites
-    # a name the customer typed.
-    if created and event.contact_name and not customer.name:
-        customer.name = event.contact_name
+    # The WhatsApp profile name is deliberately not used as the customer's
+    # name: many people leave it as a nickname, an emoji or a business name
+    # ("Nagipragalathan :)"). Taking it also made the bot skip the name
+    # question. The name is always the one the customer types at step 3.
+    # The profile name is kept in a field of its own, and in Zoho.
+    await _note_profile_name(customer, event.contact_name, is_new=_created)
 
     conversation = await get_or_create_conversation(session, customer)
     ctx = FlowContext(session=session, customer=customer,
@@ -240,6 +243,11 @@ async def _resume(ctx: FlowContext, step: ConversationStep) -> None:
     While waiting on payment the customer may still want a human, or may be
     ready to start a new order; either way the bot should respond.
     """
+    if step is ConversationStep.AWAIT_PAYMENT and await _latest_order_paid(ctx):
+        # Paid, but the chat was never moved on (a payment from before that
+        # was fixed): treat it as a finished order, not an open link.
+        customers.advance(ctx.conversation, ConversationStep.COMPLETED)
+        step = ConversationStep.COMPLETED
     if step is ConversationStep.AWAIT_PAYMENT:
         # Nudge rather than restart: their payment link is still live.
         await ctx.reply_text(
@@ -249,6 +257,25 @@ async def _resume(ctx: FlowContext, step: ConversationStep) -> None:
         return
 
     await onboarding.start(ctx)
+
+
+async def _note_profile_name(customer, profile_name: str, *, is_new: bool) -> None:
+    """Store the WhatsApp profile name; tell Zoho when it changed.
+
+    A new customer's Lead is created with it, so only a change on an existing
+    customer costs a Zoho call.
+    """
+    cleaned = " ".join((profile_name or "").split())[:120]
+    if not cleaned or cleaned == customer.whatsapp_profile_name:
+        return
+    customer.whatsapp_profile_name = cleaned
+    if not is_new and (customer.zoho_lead_id or customer.zoho_contact_id):
+        await crm_sync.push_details(customer, whatsapp_profile_name=cleaned)
+
+
+async def _latest_order_paid(ctx: FlowContext) -> bool:
+    order = await orders.get_latest_for_customer(ctx.session, ctx.customer.id)
+    return order is not None and order.payment_status == str(PaymentStatus.PAID)
 
 
 def _current_step(ctx: FlowContext) -> ConversationStep:

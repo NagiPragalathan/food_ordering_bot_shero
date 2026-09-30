@@ -83,6 +83,13 @@ def zoho(monkeypatch):
     async def find_vendor(_code, _name):
         return None
 
+    async def create_sales_order(fields):
+        calls.append(("create_so", fields))
+        return "so-1"
+
+    async def update_sales_order(zoho_id, fields):
+        calls.append(("update_so", zoho_id, fields))
+
     async def create_vendor(fields):
         calls.append(("create_vendor", fields))
         return "vendor-1"
@@ -101,7 +108,9 @@ def zoho(monkeypatch):
                      "find_product_by_code": find_product_by_code,
                      "create_product": create_product, "update_product": update_product,
                      "find_vendor": find_vendor, "create_vendor": create_vendor,
-                     "update_vendor": update_vendor}.items():
+                     "update_vendor": update_vendor,
+                     "create_sales_order": create_sales_order,
+                     "update_sales_order": update_sales_order}.items():
         monkeypatch.setattr(crm_sync.crm, name, fn)
     return calls
 
@@ -526,8 +535,9 @@ async def test_a_push_updates_filed_order_items_instead_of_filing_them_again(
     assert _writes(zoho, "create_vendor") == []
     (_, vendor_id, _), = _writes(zoho, "update_vendor")
     assert vendor_id == "vendor-old"
-    (_, zoho_id, link), = _writes(zoho, "update_order")
+    (_, zoho_id, link), (_, _, so_link) = _writes(zoho, "update_order")
     assert zoho_id == "zorder-9" and link[f.O_OUTLET] == {"id": "vendor-old"}
+    assert so_link == {f.O_SALES_ORDER: {"id": "so-1"}}
     (_, item_id, item), = _writes(zoho, "update_item")
     assert item_id == "zitem-7"
     assert item[f.I_PRODUCT] == {"id": "prod-1"} and item[f.I_CONTACT] == {"id": "c-1"}
@@ -656,3 +666,64 @@ async def test_a_conversion_error_is_raised_not_swallowed(monkeypatch):
     monkeypatch.setattr(crm.zoho_client, "post", post)
     with pytest.raises(IntegrationError):
         await crm.zoho_client.convert_lead("lead-1")
+
+
+def test_a_one_word_name_clears_the_old_first_name():
+    fields = crm.detail_fields(f.CONTACTS, name="Nagi")
+    assert fields[f.FIRST_NAME] == "" and fields[f.LAST_NAME] == "Nagi"
+    assert f.FIRST_NAME not in f.compact(crm.detail_fields(f.CONTACTS, email="a@b.co"))
+
+
+# --- Sales Orders --------------------------------------------------------------
+async def test_a_paid_order_is_also_a_sales_order_with_a_product_grid(
+        session, customer, outlet, menu, zoho):
+    customer.zoho_contact_id = "c-1"
+    order = _paid_order(customer)
+    order.outlet_id = outlet.id
+    order.items = [
+        {"retailer_id": "kerala-sambar-appam", "name": "Appam", "quantity": 3,
+         "unit_price": "3.25"},
+        {"retailer_id": "chettinad-sambar-drumstick-sambar", "name": "Drumstick Sambar",
+         "quantity": 1, "unit_price": "12.50"},
+    ]
+    order.total = Decimal("28.24")          # 9.75 + 12.50 dishes, 5.99 delivery etc.
+    session.add(order)
+    await session.flush()
+
+    await crm_sync.convert_and_record_order(
+        customer, order, await crm_sync.order_context(session, order))
+
+    (_, so), = _writes(zoho, "create_so")
+    assert so[f.SO_SUBJECT] == "SHO-TEST-9" and so[f.SO_CONTACT] == {"id": "c-1"}
+    assert so[f.SO_STATUS] == "Created"
+    grid = so[f.SO_ITEMS]
+    assert [(r[f.SO_ITEM_PRODUCT], r[f.SO_ITEM_QUANTITY], r[f.SO_ITEM_LIST_PRICE])
+            for r in grid] == [({"id": "prod-1"}, 3, 3.25), ({"id": "prod-2"}, 1, 12.5)]
+    # Grand Total = grid + Adjustment = what was paid.
+    assert so[f.SO_ADJUSTMENT] == pytest.approx(5.99)
+    assert order.zoho_sales_order_id == "so-1"
+    assert ("update_order", "zorder-1", {f.O_SALES_ORDER: {"id": "so-1"}}) in zoho
+
+
+async def test_kitchen_updates_move_the_sales_order_status(customer, zoho):
+    order = _paid_order(customer)
+    order.zoho_order_id, order.zoho_sales_order_id = "zorder-1", "so-1"
+    await crm_sync.push_order_stage(order, OrderStage.DELIVERED)
+    assert _writes(zoho, "update_so") == [("update_so", "so-1", {f.SO_STATUS: "Delivered"})]
+
+
+def test_without_any_product_there_is_no_sales_order():
+    order = Order(order_number="SHO-X", items=[{"retailer_id": "gone", "name": "Old dish",
+                                                "quantity": 1, "unit_price": "5"}],
+                  total=Decimal("10"), stage=OrderStage.PAID_SLOT_BOOKED)
+    assert crm.sales_order_fields(order, product_ids={}, zoho_contact_id="c-1") is None
+
+
+# --- WhatsApp profile name -------------------------------------------------------
+async def test_the_profile_name_goes_on_the_lead_in_its_own_field(customer, zoho):
+    customer.name = "Nagi"
+    customer.whatsapp_profile_name = "Nagipragalathan :)"
+    await crm_sync.ensure_record(customer)
+    (_, fields), = _writes(zoho, "create_lead")
+    assert fields[f.WHATSAPP_PROFILE_NAME] == "Nagipragalathan :)"
+    assert fields[f.LAST_NAME] == "Nagi"

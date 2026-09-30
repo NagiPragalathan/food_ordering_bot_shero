@@ -100,6 +100,7 @@ async def ensure_record(customer: Customer) -> Record | None:
             campaign_id=customer.campaign_id,
             stage=LeadStage(customer.lead_stage),
             history=crm.stage_history(customer.stage_timestamps or {}),
+            whatsapp_profile_name=customer.whatsapp_profile_name,
         ))
         customer.zoho_lead_id = lead_id
         return (f.LEADS, lead_id) if lead_id else None
@@ -227,6 +228,13 @@ async def push_order_stage(order: Order, stage: OrderStage, *,
     except ZOHO_ERRORS as exc:
         log.error("zoho_order_stage_failed", order_number=order.order_number,
                   error=str(exc))
+    status = crm.sales_order_status(stage)
+    if order.zoho_sales_order_id and status:
+        try:
+            await crm.update_sales_order(order.zoho_sales_order_id, {f.SO_STATUS: status})
+        except ZOHO_ERRORS as exc:
+            log.error("zoho_sales_order_status_failed", order_number=order.order_number,
+                      error=str(exc))
 
 
 async def push_customer(customer: Customer, *, details: dict,
@@ -337,7 +345,45 @@ async def _file_order(customer: Customer, order: Order, ctx: OrderContext) -> st
     zoho_order_id = order.zoho_order_id
     if not zoho_order_id:
         return f"Order {order.order_number} could not be filed - see the server log."
-    return await _file_order_items(customer, order, ctx, zoho_order_id)
+    return await _file_items_and_sales_order(customer, order, ctx, zoho_order_id)
+
+
+async def _file_items_and_sales_order(customer: Customer, order: Order, ctx: OrderContext,
+                                      zoho_order_id: str) -> str | None:
+    """Order Items first (they sync the Products), then the Sales Order."""
+    problems = [p for p in (await _file_order_items(customer, order, ctx, zoho_order_id),
+                            await _file_sales_order(customer, order, ctx, zoho_order_id)) if p]
+    return " ".join(problems) or None
+
+
+async def _file_sales_order(customer: Customer, order: Order, ctx: OrderContext,
+                            zoho_order_id: str) -> str | None:
+    """The order as a Zoho Sales Order, with its product grid, linked to the
+    Contact and to the Order (the Order's Sales Order lookup). A second call
+    brings the Contact link and status up to date instead of filing again."""
+    product_ids = {code: dish.zoho_product_id for code, dish in ctx.dishes.items()
+                   if dish.zoho_product_id}
+    fields = crm.sales_order_fields(order, product_ids=product_ids,
+                                    zoho_contact_id=customer.zoho_contact_id,
+                                    delivery_at=ctx.delivery_at)
+    if fields is None:
+        log.info("zoho_sales_order_skipped", order_number=order.order_number,
+                 reason="no dish has a Zoho Product")
+        return None
+    try:
+        if order.zoho_sales_order_id:
+            await crm.update_sales_order(order.zoho_sales_order_id, {
+                f.SO_CONTACT: fields[f.SO_CONTACT], f.SO_STATUS: fields[f.SO_STATUS]})
+        else:
+            order.zoho_sales_order_id = await crm.create_sales_order(fields)
+        if order.zoho_sales_order_id:
+            await crm.update_order(zoho_order_id,
+                                   {f.O_SALES_ORDER: {"id": order.zoho_sales_order_id}})
+    except ZOHO_ERRORS as exc:
+        log.error("zoho_sales_order_failed", order_number=order.order_number, error=str(exc))
+        return (f"Order {order.order_number} could not be filed as a Sales Order "
+                "- see the server log.")
+    return None
 
 
 async def _refresh_order(customer: Customer, order: Order, ctx: OrderContext) -> str | None:
@@ -355,7 +401,7 @@ async def _refresh_order(customer: Customer, order: Order, ctx: OrderContext) ->
         log.error("zoho_order_update_failed", order_number=order.order_number,
                   error=str(exc))
         return f"Order {order.order_number} could not be updated - see the server log."
-    return await _file_order_items(customer, order, ctx, zoho_order_id)
+    return await _file_items_and_sales_order(customer, order, ctx, zoho_order_id)
 
 
 async def _file_order_items(customer: Customer, order: Order, ctx: OrderContext,
@@ -403,6 +449,7 @@ def _order_details(customer: Customer, order: Order, outlet_name: str | None) ->
     """What the Contact should hold after this order: the address it went to."""
     return {
         "name": customer.name, "email": customer.email,
+        "whatsapp_profile_name": customer.whatsapp_profile_name,
         "address": order.delivery_address, "apartment_unit": order.apartment_unit,
         "postal_code": order.postal_code,
         "latitude": order.delivery_latitude, "longitude": order.delivery_longitude,

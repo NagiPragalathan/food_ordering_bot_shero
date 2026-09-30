@@ -349,6 +349,37 @@ async def test_full_order_journey(session, outlet, menu, bot):
     held = list(holds.scalars())
     assert len(held) == 1 and held[0].status == SlotHoldStatus.HELD
 
+    # Step 16: paid. The chat leaves the payment step, so the next message
+    # is not told the payment link is still open.
+    from app.services import payments
+
+    assert await payments.handle_payment_success(session, order, customer)
+    customer, conversation = await _state(session)
+    assert conversation.step == ConversationStep.COMPLETED
+    await handle_event(session, text("hello"))
+    assert "payment link is still open" not in bot.last().body
+
+
+async def test_a_paid_order_stuck_on_the_payment_step_is_not_nudged(
+        session, outlet, menu, bot):
+    """A payment made before the step was closed on payment: the next
+    message sees the order is paid and starts afresh instead."""
+    from app.db.models import Order, OrderStage
+    from app.services.customers import advance
+
+    await handle_event(session, text("hi"))
+    customer, conversation = await _state(session)
+    advance(conversation, ConversationStep.AWAIT_PAYMENT)
+    session.add(Order(order_number="SHO-PAID-1", customer_id=customer.id, items=[],
+                      payment_status=PaymentStatus.PAID, stage=OrderStage.PAID_SLOT_BOOKED))
+    await session.flush()
+
+    await handle_event(session, text("Hlooooo"))
+
+    assert "payment link is still open" not in bot.last().body
+    _, conversation = await _state(session)
+    assert conversation.step != ConversationStep.AWAIT_PAYMENT
+
 
 async def test_duplicate_webhook_delivery_is_ignored(session, outlet, menu, bot):
     event = text("hi")
@@ -787,3 +818,21 @@ async def test_typing_the_words_change_name_is_treated_as_an_email(
     _, conversation = await _state(session)
     assert conversation.step == ConversationStep.AWAIT_EMAIL
     assert "valid email" in bot.last().body
+
+
+async def test_the_whatsapp_profile_name_is_never_used(session, outlet, menu, bot):
+    """Profile names are nicknames ("Nagipragalathan :)"): the customer is
+    asked their name, and what they type is what is kept."""
+    from app.services.conversation import prompts as p
+
+    await handle_event(session, _event(kind=InboundKind.TEXT, text="hi",
+                                       contact_name="Nagipragalathan :)"))
+    customer, conversation = await _state(session)
+    assert customer.name is None
+    assert customer.whatsapp_profile_name == "Nagipragalathan :)"   # kept, apart
+    assert conversation.step == ConversationStep.AWAIT_NAME
+    assert bot.last().body == p.WELCOME_ASK_NAME
+
+    await handle_event(session, text("Nagi"))
+    customer, _ = await _state(session)
+    assert customer.name == "Nagi"

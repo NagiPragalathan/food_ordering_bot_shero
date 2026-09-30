@@ -250,6 +250,7 @@ async def push_to_zoho(session: AsyncSession, customer: Customer) -> list[str]:
     details = {
         "name": customer.name,
         "email": customer.email,
+        "whatsapp_profile_name": customer.whatsapp_profile_name,
         "outlet_name": outlet.name if outlet else None,
         "distance_km": customer.distance_km,
         "cuisine": customer.cuisine_preference,

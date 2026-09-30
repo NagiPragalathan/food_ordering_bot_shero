@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.exceptions import IntegrationError, PaymentError
 from app.core.logging import get_logger
 from app.db.models import (
+    ConversationStep,
     Customer,
     LeadStage,
     Order,
@@ -32,6 +33,7 @@ from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
 from app.services import crm_sync, orders, receipts, slots
+from app.services.customers import advance, get_or_create_conversation
 
 log = get_logger(__name__)
 
@@ -215,6 +217,11 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     # 1. Convert the held slot into a booking (spec step 16).
     await slots.book_slot(session, order.id)
     orders.set_stage(order, OrderStage.PAID_SLOT_BOOKED)
+    # The chat was parked waiting for this payment. Close it, or the next
+    # message the customer sends is told their payment link is still open.
+    conversation = await get_or_create_conversation(session, customer)
+    if conversation.step == str(ConversationStep.AWAIT_PAYMENT):
+        advance(conversation, ConversationStep.COMPLETED)
     await session.flush()
 
     ctx = await crm_sync.order_context(session, order)

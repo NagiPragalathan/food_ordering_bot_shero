@@ -50,6 +50,7 @@ BOT_STAGE = "Bot_Stage"                       # picklist: the 11 funnel stages
 BOT_STAGE_HISTORY = "Bot_Stage_History"       # multi-line: one "time  stage" per line
 SELECTED_OUTLET = "Selected_Outlet"
 DISTANCE_KM = "Distance_KM"
+WHATSAPP_PROFILE_NAME = "WhatsApp_Profile_Name"  # the name on their WhatsApp profile; never used as their name
 
 # Lead Source options the bot adds; Zoho's defaults have neither. They equal
 # the bot's own `Customer.lead_source` values.
@@ -74,6 +75,7 @@ O_OUTLET = "Outlet"                   # lookup -> Vendors: the kitchen that cook
 O_OUTLET_NAME = "Outlet_Name"         # kept as text too, for orders filed before the lookup existed
 O_DELIVERY_SLOT = "Delivery_Slot"
 O_DELIVERY_TIME = "Delivery_Time"     # start of the delivery slot, for date filters and reports
+O_SALES_ORDER = "Sales_Order"         # lookup -> Sales_Orders: the same order with its product grid
 O_ITEMS = "Items"                     # multi-line: one "qty x dish @ price = total" per line
 O_DISH_TOTAL = "Dish_Total"
 O_DELIVERY_CHARGE = "Delivery_Charge"
@@ -99,6 +101,29 @@ I_DISH_CODE = "Dish_Code"             # the bot's dish id (MenuItem.retailer_id)
 I_QUANTITY = "Quantity"
 I_UNIT_PRICE = "Unit_Price"
 I_LINE_TOTAL = "Line_Total"
+
+# --- Sales Orders: Zoho's own module, one per paid order -------------------------
+# The order again, as Zoho's native order with a product grid (like a Deal's
+# or a Quote's): one row per dish with quantity and price, delivery and fees
+# as the Adjustment, so its Grand Total is what the customer paid.
+SALES_ORDERS = "Sales_Orders"
+SO_SUBJECT = "Subject"                # required: the order number
+SO_CONTACT = "Contact_Name"           # lookup -> Contacts
+SO_STATUS = "Status"                  # Created / Approved / Delivered / Cancelled
+SO_DUE_DATE = "Due_Date"              # delivery day
+SO_ITEMS = "Ordered_Items"            # the product grid (subform)
+SO_ITEM_PRODUCT = "Product_Name"      # lookup -> Products
+SO_ITEM_QUANTITY = "Quantity"
+SO_ITEM_LIST_PRICE = "List_Price"     # the price charged, not the Product's current one
+SO_ITEM_DESCRIPTION = "Description"
+SO_ADJUSTMENT = "Adjustment"
+SO_DESCRIPTION = "Description"
+SO_SHIPPING_STREET = "Shipping_Street"
+SO_SHIPPING_CODE = "Shipping_Code"
+SO_STATUS_CREATED = "Created"
+SO_STATUS_APPROVED = "Approved"
+SO_STATUS_DELIVERED = "Delivered"
+SO_STATUS_CANCELLED = "Cancelled"
 
 # --- Products: Zoho's own module, one per menu dish ---------------------------
 PRODUCTS = "Products"

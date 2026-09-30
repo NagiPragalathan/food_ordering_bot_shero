@@ -134,7 +134,9 @@ def zoho(monkeypatch):
                      ("update_vendor", update_quietly),
                      ("find_product_by_code", find_nothing),
                      ("create_product", create_product),
-                     ("update_product", update_quietly)]:
+                     ("update_product", update_quietly),
+                     ("create_sales_order", create_product),
+                     ("update_sales_order", update_quietly)]:
         monkeypatch.setattr(crm_sync.crm, name, fn)
     return state
 
