@@ -20,6 +20,7 @@ Start here.
 | [conversation-flow.md](conversation-flow.md) | Every spec step mapped to its handler, plus failure paths |
 | [integrations.md](integrations.md) | The six external systems and their gotchas |
 | [deployment.md](deployment.md) | Local setup, AWS shape, DNS, webhooks, monitoring |
+| [aws-hosting-guide.pdf](aws-hosting-guide.pdf) | Step-by-step AWS hosting for the server team (RDS + one EC2 server) |
 | [testing.md](testing.md) | What is covered, and what still needs a real Postgres |
 
 ## Quick orientation

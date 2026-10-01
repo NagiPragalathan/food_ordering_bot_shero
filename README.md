@@ -124,6 +124,7 @@ tests/              287 tests
 - [conversation-flow.md](docs/conversation-flow.md) — every spec step mapped to its handler
 - [admin-dashboard.md](docs/admin-dashboard.md) — running it day to day
 - [deployment.md](docs/deployment.md) — AWS, DNS, webhooks, monitoring
+- [aws-hosting-guide.pdf](docs/aws-hosting-guide.pdf) — step-by-step AWS hosting for the server team
 
 ## Operational notes
 

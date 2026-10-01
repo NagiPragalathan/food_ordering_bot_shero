@@ -130,6 +130,16 @@ automatically; in ECS use a one-off task or an init container.
 > driver difference can produce a spurious change — the JSONB columns and the
 > `now()` defaults in `0001_initial` are correct as written.
 
+## One EC2 server (the simplest AWS setup)
+
+Step by step for a server team: [aws-hosting-guide.pdf](aws-hosting-guide.pdf).
+In short: RDS Postgres for the database, one EC2 server running
+`deploy/docker-compose.prod.yml` (the bot, plus Caddy for HTTPS with an
+automatic certificate for `DOMAIN`), and `data/media/` (dish photos) kept on
+the server's disk. One server means one scheduler, which is what the bot
+needs. RDS needs an encrypted connection, so `DATABASE_URL` ends in
+`?ssl=require`.
+
 ## Suggested AWS shape
 
 | Piece | Service |

@@ -1,0 +1,6 @@
+# HTTPS for the bot. Caddy obtains and renews the certificate for $DOMAIN
+# automatically; the domain's DNS must point at this server first.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy api:8000
+}
