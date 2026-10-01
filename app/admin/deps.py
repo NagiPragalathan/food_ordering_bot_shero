@@ -15,6 +15,7 @@ from app.admin.auth import SESSION_COOKIE, get_user, read_session
 from app.core.config import settings
 from app.db.models import AdminUser
 from app.db.session import get_session
+from app.services import allowlist
 
 # Shared with the public ordering pages - see app/templating.py.
 TEMPLATE_DIR = templating.TEMPLATE_DIR
@@ -49,6 +50,8 @@ def render(request: Request, template: str, context: dict[str, Any] | None = Non
         "request": request,
         "flash": _read_flash(request),
         "settings": settings,
+        # For the "test mode" badge in every page's header.
+        "bot_restricted": allowlist.is_restricted(),
         **(context or {}),
     }
     response = templates.TemplateResponse(

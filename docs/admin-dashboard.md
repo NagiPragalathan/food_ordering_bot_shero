@@ -6,7 +6,7 @@ Written for: the Shero team who will run the bot day to day.
 running locally.
 
 Screens in the sidebar: **Dashboard, Menu, Orders, Kitchens, Uber queue,
-Customers, Settings**.
+Customers, Bot replies, Settings**.
 
 The **Import** page is hidden from the sidebar but still works — go straight
 to `/admin/import`. Only the nav entry was removed, so putting it back is a
@@ -391,6 +391,37 @@ The order then moves to **Sent to Kitchen**. The alert is never later than the
 Uber booking, so for a 9 AM slot the kitchen hears at 7 AM, when Uber is
 booked. The Orders page shows each order's kitchen and its alert time.
 **Send to kitchen** on the Orders page sends the alert straight away.
+
+---
+
+## Bot replies
+
+Who the bot answers on WhatsApp:
+
+| Option | Effect |
+|---|---|
+| **Reply to everyone** | Every customer who messages gets the bot. Use when live. |
+| **Reply only to whitelisted numbers** | Only the numbers listed on the page get the bot. Use for testing on the live business number. |
+
+Anyone the bot does not answer is left alone: no reply, no customer record, no
+Zoho lead, and their message reaches your team in Gallabox as normal.
+
+- **Status banner** at the top: green *Live* or amber *Test mode*, with who
+  last changed it. While in test mode every admin page shows a **Test mode**
+  badge in its header, linking here.
+- **Whitelist:** one row per number, each with an optional name. **Add
+  number** adds a row, the x removes one. Numbers need the country code
+  (`917401268091`, 10 to 15 digits); spaces, `+` and dashes are fine, and
+  anything shorter or longer is refused with the bad number named.
+- **Check a number** says whether the bot would reply to a number right now,
+  and as which whitelist entry.
+- Saving applies straight away. Switching to Everyone asks for confirmation;
+  the whitelist option will not save with no numbers (that would silence the
+  bot for everyone); the numbers are kept when you switch to Everyone; leaving
+  with unsaved changes asks first.
+
+Stored as `BOT_REPLY_MODE` (`all` / `allowlist`) and `BOT_ALLOWED_NUMBERS`
+(`number|name,...`); these override `.env`.
 
 ---
 

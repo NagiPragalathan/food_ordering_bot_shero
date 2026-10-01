@@ -4,7 +4,8 @@
 #   caddy  HTTPS in front of it. Gets and renews the TLS certificate for
 #          $DOMAIN by itself (ports 80 and 443 must be open to the internet).
 #
-# The database is AWS RDS (DATABASE_URL in .env), not a container here.
+# The database is the SQLite file data/shero.db on this server's disk
+# (DATABASE_URL=sqlite+aiosqlite:////app/data/shero.db in .env).
 #
 # Run from the project root:
 #   docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d --build
@@ -21,9 +22,10 @@ services:
              uvicorn app.main:app --host 0.0.0.0 --port 8000
              --proxy-headers --forwarded-allow-ips='*'"
     volumes:
-      # Dish photos live on the server's disk; keep them across restarts and
-      # new versions. Owned by uid 10001 (the container's user).
-      - ../data/media:/app/data/media
+      # The database file (shero.db) and the dish photos (media/) live on the
+      # server's disk, so restarts and new versions keep them. Owned by uid
+      # 10001, the container's user.
+      - ../data:/app/data
     expose:
       - "8000"
     logging:

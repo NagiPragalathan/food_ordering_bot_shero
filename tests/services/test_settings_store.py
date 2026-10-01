@@ -212,8 +212,14 @@ async def test_the_periodic_refresh_drops_an_override_removed_elsewhere(
 
 # --- the editable surface ----------------------------------------------------
 def test_every_grouped_field_is_editable():
+    """Editable: the Settings form's fields, plus those saved from their own
+    pages (Bot replies)."""
+    from app.services.settings_store import OTHER_EDITABLE
+
     grouped = {key for fields in SETTING_GROUPS.values() for key, _, _ in fields}
-    assert grouped == set(EDITABLE_KEYS)
+    others = {key for key, _, _ in OTHER_EDITABLE}
+    assert grouped | others == set(EDITABLE_KEYS)
+    assert others == {"BOT_REPLY_MODE", "BOT_ALLOWED_NUMBERS"}
 
 
 def test_every_editable_key_is_a_real_setting():

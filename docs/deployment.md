@@ -133,12 +133,20 @@ automatically; in ECS use a one-off task or an init container.
 ## One EC2 server (the simplest AWS setup)
 
 Step by step for a server team: [aws-hosting-guide.pdf](aws-hosting-guide.pdf).
-In short: RDS Postgres for the database, one EC2 server running
-`deploy/docker-compose.prod.yml` (the bot, plus Caddy for HTTPS with an
-automatic certificate for `DOMAIN`), and `data/media/` (dish photos) kept on
-the server's disk. One server means one scheduler, which is what the bot
-needs. RDS needs an encrypted connection, so `DATABASE_URL` ends in
-`?ssl=require`.
+In short: one EC2 server running `deploy/docker-compose.prod.yml` (the bot,
+plus Caddy for HTTPS with an automatic certificate for `DOMAIN`). The
+database is the SQLite file `data/shero.db` and the dish photos are
+`data/media/`, both on the server's disk and backed up by EBS snapshots:
+
+```
+DATABASE_URL=sqlite+aiosqlite:////app/data/shero.db
+```
+
+One server means one scheduler, which is what the bot needs, and SQLite is
+fine for one process at a small shop's order volume (see the limits in
+[testing.md](testing.md#running-on-sqlite)). Moving to Postgres later is a
+`DATABASE_URL` change plus `alembic upgrade head` on the new database; the
+data has to be copied across.
 
 ## Suggested AWS shape
 

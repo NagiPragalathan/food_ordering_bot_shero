@@ -50,7 +50,7 @@ async def send_welcome(session: AsyncSession, whatsapp_number: str) -> tuple[Cus
     # Test mode must never reach a stranger - checked before a lead exists.
     if not allowlist.permits(whatsapp_number):
         raise NotAllowlisted(
-            f"{whatsapp_number} is not in BOT_ALLOWED_NUMBERS; not sending.")
+            f"{whatsapp_number} is not whitelisted (Bot replies page); not sending.")
 
     customer, created = await customer_service.get_or_create_customer(
         session, whatsapp_number)

@@ -143,9 +143,12 @@ class Settings(BaseSettings):
     send_payment_reminder: bool = False
     send_delivery_updates: bool = False
 
-    # --- Testing on a live number --------------------------------------
-    # Comma-separated WhatsApp numbers the bot will answer. Empty means
-    # everyone (production). See services/allowlist.py.
+    # --- Who the bot answers ---------------------------------------------
+    # "all" or "allowlist" (only bot_allowed_numbers). Unset: the list decides,
+    # empty meaning everyone. Set on the admin Bot replies page.
+    # See services/allowlist.py.
+    bot_reply_mode: str = ""
+    # Comma-separated whitelisted WhatsApp numbers.
     bot_allowed_numbers: str = ""
 
     # --- Geo -----------------------------------------------------------------

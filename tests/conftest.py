@@ -32,6 +32,7 @@ def _answer_everyone(monkeypatch):
     test mode sets it itself, which overrides this.
     """
     monkeypatch.setattr(settings, "bot_allowed_numbers", "")
+    monkeypatch.setattr(settings, "bot_reply_mode", "")
 
 
 @pytest.fixture(autouse=True)

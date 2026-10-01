@@ -79,9 +79,15 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
     ],
 }
 
+# Saved from their own admin pages (Bot replies), not the Settings form.
+OTHER_EDITABLE: list[tuple[str, str, bool]] = [
+    ("BOT_REPLY_MODE", "Who the bot replies to (all / allowlist)", False),
+    ("BOT_ALLOWED_NUMBERS", "Whitelisted WhatsApp numbers", False),
+]
+
 EDITABLE_KEYS: dict[str, tuple[str, bool]] = {
     key: (label, secret)
-    for fields in SETTING_GROUPS.values()
+    for fields in [*SETTING_GROUPS.values(), OTHER_EDITABLE]
     for key, label, secret in fields
 }
 

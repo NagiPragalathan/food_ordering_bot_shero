@@ -70,7 +70,7 @@ async def gallabox_webhook(
         # without writing strangers' full numbers into the logs.
         log.info("sender_not_allowlisted", message_id=event.message_id,
                  number_tail=event.whatsapp_number[-4:])
-        return {"status": "ignored", "reason": "sender not in BOT_ALLOWED_NUMBERS"}
+        return {"status": "ignored", "reason": "sender not whitelisted"}
 
     log.info("gallabox_webhook_received", kind=str(event.kind),
              message_id=event.message_id)

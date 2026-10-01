@@ -148,3 +148,85 @@ async def test_outreach_refuses_a_stranger_in_test_mode(session, only_me):
         await outreach.send_welcome(session, STRANGER)
 
     assert fake.sent == []
+
+
+# --- the admin's Bot replies setting ------------------------------------------------
+def test_reply_to_everyone_ignores_the_whitelist(monkeypatch):
+    monkeypatch.setattr(settings, "bot_reply_mode", "all")
+    monkeypatch.setattr(settings, "bot_allowed_numbers", ME)
+    assert allowlist.is_restricted() is False
+    assert allowlist.permits(STRANGER) is True
+
+
+def test_whitelist_mode_answers_only_the_listed_numbers(monkeypatch):
+    monkeypatch.setattr(settings, "bot_reply_mode", "allowlist")
+    monkeypatch.setattr(settings, "bot_allowed_numbers", ME)
+    assert allowlist.is_restricted() is True
+    assert allowlist.permits(ME) is True
+    assert allowlist.permits(STRANGER) is False
+
+
+def test_whitelist_mode_with_no_numbers_answers_no_one(monkeypatch):
+    """Chosen explicitly, an empty whitelist means what it says (the admin page
+    refuses to save one)."""
+    monkeypatch.setattr(settings, "bot_reply_mode", "allowlist")
+    assert allowlist.permits(ME) is False
+
+
+def test_numbers_are_read_from_lines_or_commas():
+    assert allowlist.parse_numbers("+91 74012 68091\n14155550123, 917401268091") == \
+        ["917401268091", "14155550123"]
+
+
+async def test_saving_from_the_admin_page_applies_at_once(session, monkeypatch):
+    from app.services.settings_store import save_many
+
+    await save_many(session, {"BOT_REPLY_MODE": "allowlist", "BOT_ALLOWED_NUMBERS": ME})
+    assert allowlist.permits(ME) is True and allowlist.permits(STRANGER) is False
+
+    await save_many(session, {"BOT_REPLY_MODE": "all"})
+    assert allowlist.permits(STRANGER) is True
+
+
+async def test_the_whitelist_is_stored_even_when_it_matches_the_environment(session, monkeypatch):
+    """Saved from the page, the list must not depend on .env any more."""
+    from sqlalchemy import select
+
+    from app.db.models import AppSetting
+    from app.services.settings_store import save_many
+
+    monkeypatch.setattr(settings, "bot_allowed_numbers", ME)       # as if from .env
+    values = {"BOT_REPLY_MODE": "allowlist", "BOT_ALLOWED_NUMBERS": ME}
+    await save_many(session, values, allow_blank=set(values))
+    keys = set((await session.execute(select(AppSetting.key))).scalars())
+    assert {"BOT_REPLY_MODE", "BOT_ALLOWED_NUMBERS"} <= keys
+
+
+# --- named entries ------------------------------------------------------------------
+def test_entries_keep_their_names_and_round_trip():
+    raw = "917401268091|Nagi, 14155550123"
+    entries = allowlist.parse_entries(raw)
+    assert entries == [allowlist.Entry("917401268091", "Nagi"), allowlist.Entry("14155550123")]
+    assert allowlist.parse_entries(allowlist.format_entries(entries)) == entries
+
+
+def test_a_name_never_breaks_the_list():
+    assert allowlist.clean_name("Nagi | office, desk") == "Nagi office desk"
+
+
+def test_digits_in_a_name_are_not_read_as_a_number(monkeypatch):
+    monkeypatch.setattr(settings, "bot_reply_mode", "allowlist")
+    monkeypatch.setattr(settings, "bot_allowed_numbers", f"{ME}|Desk 5550123")
+    assert allowlist.allowed_numbers() == {ME}
+
+
+def test_match_names_the_entry(monkeypatch):
+    monkeypatch.setattr(settings, "bot_allowed_numbers", f"{ME}|Nagi")
+    assert allowlist.match("+91 74012 68091").name == "Nagi"
+    assert allowlist.match(STRANGER) is None
+
+
+@pytest.mark.parametrize("number,ok", [("917401268091", True), ("+1 415 555 0123", True),
+                                       ("8091", False), ("1234567890123456", False)])
+def test_only_full_numbers_are_valid(number, ok):
+    assert allowlist.is_valid(number) is ok
