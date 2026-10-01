@@ -132,9 +132,9 @@ automatically; in ECS use a one-off task or an init container.
 
 ## Vercel
 
-Step by step: [vercel-hosting.md](vercel-hosting.md). Hosted Postgres,
-photos in Vercel Blob, and Vercel Cron calling `/cron/tick` and `/cron/daily`
-in place of the in-process scheduler.
+Step by step: [vercel-hosting.md](vercel-hosting.md). Hosted Postgres and
+photos in Vercel Blob. No cron jobs are configured yet, so the timed jobs
+are off there until something calls `/cron/tick` every minute.
 
 ## One EC2 server (the simplest AWS setup)
 

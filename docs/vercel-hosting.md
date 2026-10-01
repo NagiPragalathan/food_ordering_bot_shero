@@ -6,14 +6,13 @@ The bot runs on Vercel as one Python function (`app/main.py`), with:
 |---|---|
 | Database | Hosted Postgres (Neon, from the Vercel Marketplace) |
 | Dish photos | Vercel Blob |
-| Timed jobs (reminders, link expiry, kitchen alerts, Uber booking) | Vercel Cron calling `/cron/tick` every minute and `/cron/daily` once a day |
+| Timed jobs (reminders, link expiry, kitchen alerts, Uber booking) | **Off for now.** `/cron/tick` runs them when called; see [Timed jobs](#timed-jobs) |
 
 The config is in the repo: [`vercel.json`](../vercel.json), `.python-version`
 and `.vercelignore`.
 
-> **Plan:** the every-minute cron needs the **Vercel Pro** plan. On the free
-> Hobby plan Vercel only allows a daily cron and refuses to deploy the
-> every-minute one; see [On the Hobby plan](#on-the-hobby-plan).
+> `vercel.json` has **no cron jobs**, so it deploys on the free Hobby plan
+> (Hobby refuses any cron that runs more than once a day).
 
 ## 1. Create the project
 
@@ -43,7 +42,7 @@ In the project: **Storage** tab.
 | `APP_ENV` | `production` |
 | `PUBLIC_BASE_URL` | `https://YOUR-PROJECT.vercel.app` (or your own domain) |
 | `PAY_REDIRECT_BASE_URL` | `https://YOUR-PROJECT.vercel.app/pay` |
-| `CRON_SECRET` | a long random string, for example from `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `CRON_SECRET` | only when switching on [Timed jobs](#timed-jobs): a long random string, e.g. from `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 
 Keep `SETTINGS_ENCRYPTION_KEY` and `ADMIN_SESSION_SECRET` **exactly** as in
 this computer's `.env`: the saved Zoho connection and settings copied in
@@ -73,9 +72,6 @@ https://YOUR-PROJECT.vercel.app/health     ->  {"status":"ok","environment":"pro
 https://YOUR-PROJECT.vercel.app/admin/     ->  the admin login
 ```
 
-**Settings → Cron Jobs** lists `/cron/tick` (every minute) and `/cron/daily`.
-Cron jobs run on the production deployment only.
-
 Then the webhooks, WhatsApp templates and Google Maps key are pointed at
 the new address, as for any move of `PUBLIC_BASE_URL`.
 
@@ -88,17 +84,26 @@ Push to `main`; Vercel deploys it. When a change adds a database migration
 DATABASE_URL="DATABASE_URL_UNPOOLED value" alembic upgrade head
 ```
 
-## On the Hobby plan
+## Timed jobs
 
-Remove the every-minute entry from `vercel.json`, keeping the daily one:
+With no cron set up, these do **not** happen on Vercel: the 15-minute unpaid
+reminder, the 30-minute payment-link expiry (which frees the held slot), the
+delivery-day kitchen alert, the automatic Uber booking 2 hours before the
+slot, and the feedback request. Ordering, payment, the confirmation and the
+admin all work. Delivery slots are created as customers look for them.
 
-```json
-"crons": [ { "path": "/cron/daily", "schedule": "0 3 * * *" } ]
-```
+To switch the jobs on later, without upgrading Vercel, add a free job at
+**cron-job.org**:
 
-and call `/cron/tick` every minute from a free outside scheduler such as
-**cron-job.org**: URL `https://YOUR-PROJECT.vercel.app/cron/tick`, every
-minute, with the request header `Authorization: Bearer <CRON_SECRET>`.
+| Field | Value |
+|---|---|
+| URL | `https://YOUR-PROJECT.vercel.app/cron/tick` |
+| Schedule | every minute |
+| Request header | `Authorization: Bearer <CRON_SECRET>` |
+
+and set `CRON_SECRET` in Vercel. On the Pro plan, Vercel Cron can do the same:
+add `"crons": [{ "path": "/cron/tick", "schedule": "* * * * *" }]` to
+`vercel.json`.
 
 ## How it differs from a normal server
 
