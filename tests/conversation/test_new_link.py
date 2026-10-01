@@ -24,7 +24,7 @@ from tests.conversation.test_happy_path import (  # noqa: F401 - `bot` is a fixt
 
 
 def menu_link_sent(bot) -> bool:
-    return bot.sent and bot.sent[0].kind == "template" and bot.sent[0].body == "menu_link"
+    return bot.sent and bot.sent[0].kind == "template" and bot.sent[0].body == "menu_link_v2"
 
 
 async def test_the_get_new_link_quick_reply_sends_a_fresh_link(

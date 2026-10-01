@@ -49,7 +49,7 @@ class TemplateSpec:
 
 
 PAYMENT_LINK = TemplateSpec(
-    name="shero_payment_link",
+    name="shero_payment_link_v2",
     category="UTILITY",
     trigger="Order summary confirmed (step 14-15)",
     params=("customer_name", "order_number", "amount", "slot_label"),
@@ -62,7 +62,7 @@ PAYMENT_LINK = TemplateSpec(
 )
 
 PAYMENT_REMINDER = TemplateSpec(
-    name="shero_payment_reminder",
+    name="shero_payment_reminder_v2",
     category="UTILITY",
     trigger="15 minutes unpaid (step 15)",
     params=("customer_name", "order_number", "slot_label"),
@@ -78,7 +78,7 @@ PAYMENT_REMINDER = TemplateSpec(
 # error on the channel, and a template name cannot be reused until it is
 # deleted by hand in Gallabox. This one also carries the Download Bill button.
 PAYMENT_SUCCESS = TemplateSpec(
-    name="payment_confirmed",
+    name="payment_confirmed_v2",
     category="UTILITY",
     trigger="Stripe payment confirmed (step 16)",
     params=("order_number", "amount", "outlet_name", "slot_label"),
@@ -94,7 +94,7 @@ PAYMENT_SUCCESS = TemplateSpec(
 )
 
 PAYMENT_FAILED = TemplateSpec(
-    name="shero_payment_failed",
+    name="shero_payment_failed_v2",
     category="UTILITY",
     trigger="Stripe payment failed (step 16)",
     params=("customer_name", "order_number"),
@@ -106,7 +106,7 @@ PAYMENT_FAILED = TemplateSpec(
 )
 
 PAYMENT_EXPIRED = TemplateSpec(
-    name="payment_expired",
+    name="payment_expired_v2",
     category="MARKETING",
     trigger="Link expired unpaid (step 15)",
     params=("customer_name",),
@@ -186,7 +186,7 @@ WELCOME = TemplateSpec(
 )
 
 ORDER_SUMMARY = TemplateSpec(
-    name="order_summary",
+    name="order_summary_v2",
     category="UTILITY",
     trigger="Web order confirmed - summary, then Pay Now / Change menu / Update location",
     params=("customer_name", "order_number", "items", "delivery_address",
@@ -211,7 +211,7 @@ ORDER_SUMMARY = TemplateSpec(
 )
 
 MENU_LINK = TemplateSpec(
-    name="menu_link",
+    name="menu_link_v2",
     category="UTILITY",
     trigger="Order Now / new link - the web menu, with Get new link on the same message",
     params=(),
@@ -254,10 +254,16 @@ BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in MANAGED_TEMPLATES}
 
 # The spec's name -> the name submitted to Meta, where they differ.
 RENAMED: dict[str, str] = {
-    "payment_success": "payment_confirmed",
-    "payment_link": "shero_payment_link",
-    "payment_reminder": "shero_payment_reminder",
-    "payment_failed": "shero_payment_failed",
+    # The _v2 templates carry the hosted address (https://smo.shero.us) in their
+    # link buttons; the first versions pointed at a test tunnel. A button's
+    # address is fixed at approval, and Gallabox cannot edit a template.
+    "payment_success": "payment_confirmed_v2",
+    "payment_link": "shero_payment_link_v2",
+    "payment_reminder": "shero_payment_reminder_v2",
+    "payment_failed": "shero_payment_failed_v2",
+    "payment_expired": "payment_expired_v2",
+    "order_summary": "order_summary_v2",
+    "menu_link": "menu_link_v2",
     "feedback_request": "shero_feedback",
     "shero_welcome": "shero_welcome_message",
 }

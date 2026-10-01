@@ -87,7 +87,7 @@ async def test_expiry_puts_the_dishes_back_in_the_cart(session, customer, quiet)
 
     _, lines = await cart_service.for_customer(session, customer)
     assert [(l["retailer_id"], l["quantity"]) for l in lines] == [("SAMBAR-1", 2)]
-    assert quiet == ["payment_expired"]
+    assert quiet == ["payment_expired_v2"]
 
 
 async def test_expiry_keeps_a_cart_the_customer_has_started_since(session, customer, quiet):

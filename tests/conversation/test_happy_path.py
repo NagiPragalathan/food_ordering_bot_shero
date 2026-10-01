@@ -712,7 +712,7 @@ async def test_the_menu_link_is_one_message_with_both_buttons(
 
     assert len(bot.sent) == 1
     sent = bot.last()
-    assert sent.kind == "template" and sent.body == "menu_link"
+    assert sent.kind == "template" and sent.body == "menu_link_v2"
     # The button parameter is the signed token alone - the approved template
     # already holds https://<host>/order/.
     assert "http" not in sent.payload["button_value"]

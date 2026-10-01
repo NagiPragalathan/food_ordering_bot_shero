@@ -21,20 +21,35 @@ loudly in our code rather than as a generic error from Meta.
 
 ## Names on the channel
 
-Five templates are submitted under a different name from the spec's. The
+Several templates are submitted under a different name from the spec's. The
 first `payment_success` and `feedback_request` came back in error, and
 `payment_link`, `payment_reminder`, `payment_failed` and `shero_welcome` were
 already taken elsewhere in the Gallabox account. A name stays taken until the
-template is deleted by hand in Gallabox, so the replacements are new:
+template is deleted by hand in Gallabox, so the replacements are new.
+
+The seven templates with a link button are **`_v2`** versions (submitted
+1 Oct 2026): same wording, buttons and categories, but the buttons point at
+the hosted address **`https://smo.shero.us`** (`/order/…`, `/pay/…`,
+`/receipt/…`). A button's address is fixed when Meta approves it, and
+Gallabox cannot edit a template, so a new address means new names. The bot
+uses a `_v2` template only once it is approved **and** `PUBLIC_BASE_URL` is
+`https://smo.shero.us`; until then it sends the plain-message fallback.
 
 | Spec name | Name on the channel |
 |---|---|
-| `payment_success` | `payment_confirmed` (adds the Download Bill button) |
-| `payment_link` | `shero_payment_link` |
-| `payment_reminder` | `shero_payment_reminder` |
-| `payment_failed` | `shero_payment_failed` |
+| `payment_success` | `payment_confirmed_v2` (with the Download Bill button) |
+| `payment_link` | `shero_payment_link_v2` |
+| `payment_reminder` | `shero_payment_reminder_v2` |
+| `payment_failed` | `shero_payment_failed_v2` |
+| `payment_expired` | `payment_expired_v2` |
+| `order_summary` | `order_summary_v2` |
+| `menu_link` | `menu_link_v2` |
 | `feedback_request` | `shero_feedback` |
 | `shero_welcome` | `shero_welcome_message` |
+
+To move to another address again: set `PUBLIC_BASE_URL` and
+`PAY_REDIRECT_BASE_URL` to it, give those seven a new suffix in
+`templates.py`, and run `python -m scripts.submit_templates --submit`.
 
 The code keeps the spec's names for its constants (`templates.RENAMED` holds
 the mapping). The sections below use the spec's names.
