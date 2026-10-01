@@ -3,7 +3,7 @@
 A WhatsApp ordering flow built to the Xtracut spec: a customer clicks a Meta
 ad, lands in WhatsApp, browses the menu, books a delivery slot, pays through
 Stripe, and every step is tracked in Zoho CRM. Online delivery only.
-
+ 
 Menu and integrations are managed from an **admin dashboard** at `/admin/`.
 
 ```
