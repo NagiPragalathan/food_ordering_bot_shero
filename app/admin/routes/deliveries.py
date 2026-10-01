@@ -17,9 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin.deps import redirect, render, require_admin
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import AdminUser, Order, Outlet
+from app.db.models import AdminUser, Order
 from app.db.session import get_session
 from app.services import dispatch
+from app.services import kitchen as kitchen_service
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/deliveries", tags=["admin"])
@@ -31,9 +32,8 @@ async def queue_page(
     session: AsyncSession = Depends(get_session),
     current_user: AdminUser = Depends(require_admin),
 ):
-    kitchen = (await session.execute(select(Outlet).order_by(Outlet.is_primary.desc()))
-               ).scalars().first()
-    tz = _tz(kitchen.timezone if kitchen else None)
+    kitchens = await kitchen_service.active_kitchens(session)
+    tz = _tz(kitchens[0].timezone if kitchens else None)
     rows = await dispatch.queue(session)
     return render(request, "admin/deliveries.html", {
         "current_user": current_user,
@@ -43,7 +43,9 @@ async def queue_page(
         "hours_before": settings.uber_dispatch_hours_before,
         "uber_ready": bool(settings.uber_customer_id and settings.uber_client_id
                            and settings.uber_client_secret),
-        "kitchen_phone": bool(kitchen and (kitchen.phone or kitchen.kitchen_whatsapp)),
+        # Kitchens Uber cannot collect from: the courier needs a number.
+        "no_phone": [k.name for k in kitchens if not (k.phone or k.kitchen_whatsapp)],
+        "has_kitchen": bool(kitchens),
     })
 
 

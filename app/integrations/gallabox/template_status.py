@@ -12,6 +12,11 @@ failure"), although its API already says "approved" then. The 15 minutes
 are measured on Gallabox's own clock (the Date header of its API), because
 this machine's clock cannot be trusted to agree with Gallabox's timestamps.
 
+A template whose link button points at another website is not usable
+either: the button's address is fixed when Meta approves it, so after the
+bot moves to a new address (PUBLIC_BASE_URL) the old template would send
+customers to a dead link. The fallback carries the current link instead.
+
 The answer is cached for a few minutes: this sits on the path of every
 menu link. If Gallabox cannot be asked, the answer is "not usable" - the
 fallback always works, the template might not.
@@ -22,6 +27,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -57,6 +63,11 @@ async def is_approved(name: str) -> bool:
 def usable(row: dict, now: datetime | None) -> bool:
     if str(row.get("status") or "").lower() != "approved":
         return False
+    stale = _foreign_button_url(row)
+    if stale:
+        log.warning("template_link_outdated", template=row.get("name"), button_url=stale,
+                    public_base_url=settings.public_base_url)
+        return False
     approved_at = _parse_iso(row.get("statusUpdatedAt"))
     if now is None or approved_at is None:
         # Cannot tell how recent it is. Only a fresh approval is at risk, and
@@ -74,6 +85,22 @@ async def gallabox_now() -> datetime | None:
     except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
         log.warning("gallabox_clock_unavailable", error=str(exc))
         return None
+
+
+def _foreign_button_url(row: dict) -> str | None:
+    """A URL button pointing at a different website than this bot's, if any."""
+    ours = {_origin(settings.public_base_url), _origin(settings.pay_redirect_base_url)}
+    for component in row.get("components") or []:
+        for button in (component.get("buttons") or []) if isinstance(component, dict) else []:
+            url = str(button.get("url") or "")
+            if str(button.get("type") or "").upper() == "URL" and url and _origin(url) not in ours:
+                return url
+    return None
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url.strip())
+    return f"{parts.scheme}://{parts.netloc}".lower()
 
 
 def _parse_iso(value) -> datetime | None:

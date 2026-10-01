@@ -15,7 +15,7 @@ from datetime import date
 
 import pytest
 
-from app.admin.routes.settings import _parse_hours
+from app.services.kitchen_admin import parse_hours as _parse_hours
 from app.services.slots import WEEKDAY_KEYS, _windows_for_day
 
 

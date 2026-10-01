@@ -11,7 +11,6 @@ enforced by `missing_details()` - checked again at summary time, not just here.
 
 from __future__ import annotations
 
-import uuid
 
 from app.core.exceptions import NoSlotsAvailableError
 from app.core.logging import get_logger
@@ -186,16 +185,8 @@ async def _current_outlet(ctx: FlowContext) -> Outlet | None:
     """The kitchen whose slots are offered."""
     from app.services import kitchen as kitchen_service
 
-    outlet_id = ctx.get("outlet_id") or ctx.customer.preferred_outlet_id
-    if outlet_id:
-        try:
-            found = await ctx.session.get(Outlet, uuid.UUID(str(outlet_id)))
-            if found is not None:
-                return found
-        except ValueError:
-            pass
-
-    kitchen = await kitchen_service.get_kitchen(ctx.session)
+    kitchen = await kitchen_service.kitchen_for(ctx.session, ctx.customer,
+                                                ctx.get("outlet_id"))
     if kitchen is None:
         log.error("no_kitchen_configured", customer_id=str(ctx.customer.id))
     return kitchen

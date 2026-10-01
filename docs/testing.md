@@ -65,14 +65,8 @@ accounting that stops a window being oversold.
 
 ## Walking the bot by hand
 
-Two ways, both driving the real engine with outbound messages collected
-rather than delivered - nothing reaches the live Gallabox account.
-
-**In the browser:** Admin -> **Chat tester**. Buttons and list rows render as
-clickable chips, there is a location-pin panel for step 9, and the current
-conversation step is shown in the header. Reset starts again from step 1.
-
-**In the terminal:**
+In the terminal, driving the real engine with outbound messages collected
+rather than delivered - nothing reaches the live Gallabox account:
 
 ```bash
 python -m scripts.simulate_chat

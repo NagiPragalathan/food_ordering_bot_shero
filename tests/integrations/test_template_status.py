@@ -142,3 +142,23 @@ async def test_an_unapproved_order_summary_sends_payment_link_instead(
         await payments.send_order_summary(order, customer)
 
     assert fake.last().body == tpl.PAYMENT_LINK.name
+
+
+async def test_a_template_whose_button_points_at_an_old_address_is_not_used(status, monkeypatch):
+    """After the bot moves to a new address, the approved template's button
+    still opens the old one; the plain-text fallback carries the right link."""
+    module, rows, _ = status
+    monkeypatch.setattr(module.settings, "public_base_url", "https://new.example.com")
+    monkeypatch.setattr(module.settings, "pay_redirect_base_url", "https://new.example.com/pay")
+
+    def template(name, url):
+        return {"name": name, "status": "approved", "statusUpdatedAt": LONG_AGO,
+                "components": [{"type": "BUTTONS", "buttons": [
+                    {"type": "URL", "text": "Open", "url": url},
+                    {"type": "QUICK_REPLY", "text": "Get new link"}]}]}
+
+    rows += [template("menu_link", "https://old.loca.lt/order/{{1}}"),
+             template("order_summary", "https://new.example.com/order/{{1}}")]
+
+    assert await module.is_approved("menu_link") is False
+    assert await module.is_approved("order_summary") is True

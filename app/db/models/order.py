@@ -102,6 +102,10 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
     # When the order joins the Uber queue's send list: set at payment to
     # UBER_DISPATCH_HOURS_BEFORE before the slot starts.
     uber_dispatch_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The kitchen is told about the order on the delivery day, not at payment
+    # (services/kitchen_alerts.py): when that is due, and when it was sent.
+    kitchen_notify_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kitchen_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     uber_delivery_id: Mapped[str | None] = mapped_column(String(128))
     uber_delivery_status: Mapped[str | None] = mapped_column(String(40))
     uber_tracking_url: Mapped[str | None] = mapped_column(Text)

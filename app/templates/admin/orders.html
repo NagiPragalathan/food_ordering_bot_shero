@@ -67,6 +67,13 @@
           </td>
           <td class="px-4 py-3 text-xs text-stone-600">
             {{ row.order.slot_label or '—' }}
+            {% if row.outlet %}<div class="text-stone-500">{{ row.outlet.name }}</div>{% endif %}
+            {# Kitchen alert: sent on the delivery day (services/kitchen_alerts.py). #}
+            {% if row.order.kitchen_notified_at %}
+              <div class="mt-1 text-stone-500">Kitchen told {{ row.order.kitchen_notified_at.strftime('%d %b %H:%M') }} UTC</div>
+            {% elif row.order.kitchen_notify_at and row.order.stage == 'Paid & Slot Booked' %}
+              <div class="mt-1 text-stone-500">Kitchen alert {{ row.order.kitchen_notify_at.strftime('%d %b %H:%M') }} UTC</div>
+            {% endif %}
             {# Courier: booked 2 hours before the slot (services/dispatch.py). #}
             {% if row.order.uber_delivery_id %}
               <div class="mt-1 text-emerald-700">

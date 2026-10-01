@@ -213,7 +213,7 @@ Kitchen & delivery area). We need these details from you:
 - **Kitchen WhatsApp number** for the new-paid-order alert
 - **Operating hours** per weekday — delivery slots are generated only inside
   these windows, so a kitchen with none set cannot take an order. Set them in
-  the same form (Settings → Kitchen → Opening hours), along with the slot
+  the kitchen form (Admin → Kitchens → Opening hours), along with the slot
   length and how many orders you can handle per slot.
 
 ## 7. Menu 🟢 done
@@ -255,7 +255,7 @@ will switch to yours with a config change (`OUTLET_SOURCE=remote`,
 | Delivery slots | generated from your operating hours, with capacity and holds | send us the URL and response shape |
 | Payment page | Stripe Checkout | tell us and we will reuse it |
 
-(The nearby-restaurants API is no longer needed now there is one kitchen.)
+(The nearby-restaurants API is not needed: kitchens are added on the admin Kitchens page and matched by straight-line distance.)
 
 ## 9. AWS, domain and email 🔴
 

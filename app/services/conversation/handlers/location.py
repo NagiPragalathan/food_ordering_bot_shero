@@ -1,7 +1,8 @@
 """Location and serviceability (steps 9-10).
 
-There is one kitchen, so the spec's step 11 ("pick a nearby outlet") is gone.
-What remains is the question that actually matters: do we deliver here?
+The spec's step 11 ("pick a nearby outlet") is done for the customer: the
+customer's location is measured against every kitchen, and the nearest one
+that delivers there is chosen (services/kitchen.check_service).
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ async def confirm_service(ctx: FlowContext) -> None:
         ctx.goto(ConversationStep.COMPLETED)
         return
 
-    kitchen = await kitchen_service.get_kitchen(ctx.session)
+    kitchen = check.kitchen
     if kitchen is None:
         await ctx.reply_text(p.NO_KITCHEN)
         ctx.goto(ConversationStep.COMPLETED)
@@ -80,8 +81,7 @@ async def confirm_service(ctx: FlowContext) -> None:
     ctx.put(outlet_id=str(kitchen.id), outlet_name=kitchen.name,
             distance_km=check.distance_km)
 
-    # The spec's "Outlet Selected" stage still marks the point where the
-    # kitchen is locked in, even though there is only one to choose from.
+    # The spec's "Outlet Selected" stage: the nearest kitchen is locked in.
     await ctx.set_stage(LeadStage.OUTLET_SELECTED)
     await push_details(ctx.customer, outlet_name=kitchen.name,
                        distance_km=check.distance_km)

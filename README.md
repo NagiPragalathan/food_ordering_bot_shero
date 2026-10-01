@@ -40,7 +40,8 @@ uvicorn app.main:app --reload
 Then open **http://localhost:8000/admin/** and sign in with the
 `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD` from `.env`.
 From there: **Import** the menu from your Google Sheet, then fill in
-**Settings** (kitchen address, delivery area, integration credentials).
+**Kitchens** (each kitchen's address, delivery radius, hours) and
+**Settings** (integration credentials).
 
 Or with Postgres included:
 
@@ -68,8 +69,9 @@ and `alembic upgrade head` works as-is. Production still runs Postgres.
 | Steps 1–19 conversation flow | Complete, including the Check Availability shortcut |
 | Menu (3 cuisines, 287 dishes) | Imported from the client's sheet |
 | Web ordering page | Complete — search, category filters, saved cart, address, slot, pay |
-| Admin dashboard | Complete — menu, import, orders, customers (delete / push to Zoho), chat tester, settings |
-| Delivery area + serviceability | Complete — radius, ZIP list, or both |
+| Admin dashboard | Complete — menu, import, orders, kitchens, Uber queue, customers (delete / push to Zoho), settings |
+| Delivery area + serviceability | Complete — any number of kitchens; the nearest kitchen whose area (radius, ZIP list, or both) covers the customer gets the order |
+| Kitchen alert | Complete — sent to that kitchen's WhatsApp on the delivery day |
 | Delivery slots + holds | Complete, generated from the kitchen's operating hours |
 | Uber Direct delivery quote | Complete |
 | Stripe checkout, expiry, refunds | Complete, with the short Pay Now redirect |

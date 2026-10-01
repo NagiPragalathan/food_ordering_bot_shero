@@ -20,7 +20,7 @@ from app.db.models import (
 from app.db.session import get_session
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.client import gallabox
-from app.services import crm_sync
+from app.services import crm_sync, kitchen_alerts
 from app.services import orders as order_service
 
 log = get_logger(__name__)
@@ -122,6 +122,15 @@ async def advance_order(
         ))
 
     _, target, template = transition
+    if target is OrderStage.SENT_TO_KITCHEN:
+        # Sending by hand ahead of the delivery-day alert: message the kitchen now.
+        messaged = await kitchen_alerts.send_alert(session, order)
+        log.info("admin_order_advanced", order_number=order.order_number,
+                 stage=str(target), kitchen_messaged=messaged, by=current_user.email)
+        return redirect(url, flash=(
+            ("success", f"{order.order_number} sent to the kitchen on WhatsApp.") if messaged
+            else ("warning", f"{order.order_number} is now {target}, but the kitchen was not "
+                             "messaged - check its WhatsApp number on the Kitchens page.")))
     if not order_service.set_stage(order, target):
         return redirect(url, flash=("success", "Already at that stage."))
     await session.flush()

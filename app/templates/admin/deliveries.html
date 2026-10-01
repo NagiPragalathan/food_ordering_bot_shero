@@ -8,13 +8,15 @@
 
 {% block content %}
 
-{% if not uber_ready or not kitchen_phone %}
+{% if not uber_ready or no_phone or not has_kitchen %}
 <div class="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
   <p class="font-semibold">Uber cannot book couriers yet</p>
   <ul class="mt-1 list-disc pl-5">
     {% if not uber_ready %}<li>The Uber Direct keys are missing (UBER_CUSTOMER_ID, UBER_CLIENT_ID, UBER_CLIENT_SECRET).</li>{% endif %}
-    {% if not kitchen_phone %}<li>The kitchen has no phone number for the courier:
-      <a class="underline" href="{{ url_for('admin_settings') }}">Settings → Kitchen</a>.</li>{% endif %}
+    {% if not has_kitchen %}<li>No kitchen is set up:
+      <a class="underline" href="{{ url_for('admin_kitchens') }}">Kitchens</a>.</li>{% endif %}
+    {% if no_phone %}<li>No phone number for the courier at {{ no_phone | join(', ') }}:
+      <a class="underline" href="{{ url_for('admin_kitchens') }}">Kitchens</a>.</li>{% endif %}
   </ul>
 </div>
 {% endif %}

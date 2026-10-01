@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 
 from app.core.logging import get_logger
@@ -144,21 +143,10 @@ async def _abandon_draft(ctx: FlowContext, order: Order | None, *,
 
 # --- helpers -----------------------------------------------------------------
 async def _outlet(ctx: FlowContext) -> Outlet | None:
-    """The kitchen this order is cooked at.
-
-    With a single kitchen this is normally just "the" kitchen; the stored id
-    is preferred so an order already in flight is not moved if a second
-    kitchen is added mid-conversation.
-    """
-    outlet_id = ctx.get("outlet_id") or ctx.customer.preferred_outlet_id
-    if outlet_id:
-        try:
-            found = await ctx.session.get(Outlet, uuid.UUID(str(outlet_id)))
-            if found is not None:
-                return found
-        except ValueError:
-            pass
-    return await kitchen_service.get_kitchen(ctx.session)
+    """The kitchen this order is cooked at: the nearest one picked for the
+    customer's address at the location step."""
+    return await kitchen_service.kitchen_for(ctx.session, ctx.customer,
+                                             ctx.get("outlet_id"))
 
 
 async def _draft_order(ctx: FlowContext) -> Order | None:

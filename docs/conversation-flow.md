@@ -20,13 +20,13 @@ Every step from section 1 of the spec, with where it lives in the code.
 | 8 | Cart review | `CART_REVIEW` | `menu.handle_cart_review` |
 | 9 | Location | `AWAIT_LOCATION` | `location.handle_location` |
 | 10 | Serviceability | — | `location.confirm_service` |
-| ~~11~~ | ~~Nearby outlets~~ | — | **Removed — single kitchen** |
+| 11 | Nearest kitchen | — | Automatic: `kitchen.check_service` picks the nearest kitchen covering the location |
 | 12 | Delivery details | `AWAIT_ADDRESS` → `AWAIT_APARTMENT` → `AWAIT_INSTRUCTIONS` → `AWAIT_CONTACT_NUMBER` | `delivery.*` |
 | 13 | Delivery slot | `AWAIT_SLOT_CHOICE` | `delivery.handle_slot_choice` |
 | 14 | Order summary | `AWAIT_SUMMARY_CONFIRM` | `checkout.handle_summary_choice` |
 | 15 | Payment link | `AWAIT_PAYMENT` | `payments.create_payment_link` |
 | 16 | Payment result | — | `webhooks_stripe` → `payments.handle_payment_*` |
-| 17 | Kitchen alert | — | `payments.notify_kitchen` |
+| 17 | Kitchen alert | — | Queued at payment; sent on the delivery day by `kitchen_alerts.send_alert` (job `kitchen_alerts`) |
 | 18 | Delivery updates | — | `POST /ops/orders/{n}/…` |
 | 19 | Feedback | `AWAIT_FEEDBACK` | `feedback.handle_feedback` |
 

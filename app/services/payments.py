@@ -25,14 +25,13 @@ from app.db.models import (
     LeadStage,
     Order,
     OrderStage,
-    Outlet,
     PaymentStatus,
 )
 from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
-from app.services import crm_sync, dispatch, orders, receipts, slots
+from app.services import crm_sync, dispatch, kitchen_alerts, orders, receipts, slots
 from app.services.customers import advance, get_or_create_conversation
 
 log = get_logger(__name__)
@@ -228,6 +227,8 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     outlet, outlet_name = ctx.outlet, ctx.outlet_name or "Shero"
     # Into the Uber queue: sent UBER_DISPATCH_HOURS_BEFORE the slot starts.
     order.uber_dispatch_due_at = dispatch.due_time(ctx.delivery_at)
+    # The kitchen picked for the address hears on the delivery day.
+    order.kitchen_notify_at = kitchen_alerts.notify_time(ctx.delivery_at, outlet)
 
     # 2. Confirmation to the customer. The money is taken by now, so a
     # WhatsApp failure must not stop the CRM record and the kitchen alert.
@@ -236,8 +237,8 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     # 3. Lead -> Contact, the Order record and its Order Items (spec step 16).
     await crm_sync.convert_and_record_order(customer, order, ctx)
 
-    # 4. Kitchen alert (spec step 17).
-    await notify_kitchen(session, order, outlet, customer)
+    # 4. The kitchen alert (spec step 17) is queued, not sent now: the job in
+    # workers/jobs.send_kitchen_alerts sends it on the delivery day.
 
     log.info("payment_success", order_number=order.order_number,
              total=str(order.total))
@@ -330,54 +331,3 @@ async def refund_order(session: AsyncSession, order: Order, customer: Customer,
     log.info("order_refunded", order_number=order.order_number,
              amount=str(order.refund_amount))
     return True
-
-
-# --- kitchen -----------------------------------------------------------------
-async def notify_kitchen(session: AsyncSession, order: Order,
-                         outlet: Outlet | None, customer: Customer) -> None:
-    """Tell the outlet about a new paid order (spec step 17).
-
-    OPEN QUESTION: the spec lists no approved template for this, and a message
-    to a kitchen that has not messaged us first falls outside the 24-hour
-    window, so a plain text send will only land if the outlet has an open
-    session. Until the client decides (dedicated template, email, or the ops
-    dashboard alone), the order is always marked Sent to Kitchen and visible
-    on the ops API - the WhatsApp ping is best-effort on top.
-    """
-    orders.set_stage(order, OrderStage.SENT_TO_KITCHEN)
-    await session.flush()
-    await crm_sync.push_order_stage(order, OrderStage.SENT_TO_KITCHEN)
-
-    if not (outlet and outlet.kitchen_whatsapp):
-        log.info("kitchen_alert_skipped", order_number=order.order_number,
-                 reason="no kitchen WhatsApp number configured")
-        return
-
-    body = _kitchen_message(order, customer)
-    try:
-        await current_sender().send_text(outlet.kitchen_whatsapp, body)
-        log.info("kitchen_alerted", order_number=order.order_number,
-                 outlet=outlet.code)
-    except Exception as exc:  # noqa: BLE001 - never fail a paid order on this
-        log.error("kitchen_alert_failed", order_number=order.order_number,
-                  error=str(exc))
-
-
-def _kitchen_message(order: Order, customer: Customer) -> str:
-    lines = [
-        f"New paid order {order.order_number}",
-        f"Slot: {order.slot_label or 'not set'}",
-        "",
-        "Items:",
-    ]
-    for item in order.items or []:
-        lines.append(f"  {item.get('quantity')} x {item.get('name')}")
-    lines += [
-        "",
-        f"Total: {order.total:.2f} {order.currency}",
-        f"Deliver to: {order.delivery_address or ''} {order.apartment_unit or ''}".strip(),
-        f"Contact: {order.contact_number or customer.whatsapp_number}",
-    ]
-    if order.delivery_instructions:
-        lines.append(f"Notes: {order.delivery_instructions}")
-    return "\n".join(lines)

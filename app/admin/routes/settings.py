@@ -11,23 +11,19 @@ wrong key is found here rather than mid-order.
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.deps import redirect, render, require_admin
 from app.core.config import is_unset, settings
 from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
-from app.db.models import AdminUser, Outlet
+from app.db.models import AdminUser
 from app.db.session import get_session
 from app.integrations.zoho import oauth as zoho_oauth
 from app.services import connection_tests, zoho_connect
-# Same key order slot generation reads, so the two cannot drift apart.
-from app.services.slots import WEEKDAY_KEYS
 from app.services.settings_store import (
     EDITABLE_KEYS,
     SETTING_GROUPS,
@@ -64,14 +60,9 @@ async def settings_page(
             })
         groups.append({"title": title, "fields": rendered})
 
-    kitchen = (await session.execute(
-        select(Outlet).order_by(Outlet.is_primary.desc(), Outlet.created_at)
-    )).scalars().first()
-
     return render(request, "admin/settings.html", {
         "current_user": current_user,
         "groups": groups,
-        "kitchen": kitchen,
         "secrets_enabled": not is_unset(settings.settings_encryption_key),
         "missing_credentials": settings.missing_credentials(),
         # Zoho is connected by OAuth rather than by pasting a refresh token.
@@ -252,135 +243,3 @@ async def test_connection(
         "success" if result.ok else "error",
         f"{result.service}: {result.message}",
     ))
-
-
-@router.post("/kitchen", name="admin_kitchen_save")
-async def save_kitchen(
-    request: Request,
-    name: str = Form(...),
-    address_line1: str = Form(...),
-    city: str = Form(...),
-    state: str = Form(...),
-    postal_code: str = Form(...),
-    latitude: float = Form(...),
-    longitude: float = Form(...),
-    service_area_mode: str = Form(default="radius"),
-    delivery_radius_km: float = Form(default=10.0),
-    service_zips: str = Form(default=""),
-    kitchen_whatsapp: str = Form(default=""),
-    kitchen_phone: str = Form(default=""),
-    timezone_name: str = Form(default="America/New_York"),
-    slot_length_minutes: int = Form(default=60),
-    slot_capacity: int = Form(default=4),
-    session: AsyncSession = Depends(get_session),
-    current_user: AdminUser = Depends(require_admin),
-):
-    """Create or update the single kitchen and its delivery area."""
-    url = str(request.url_for("admin_settings"))
-    # Seven day pairs is too many to declare as Form parameters, so the
-    # opening hours are read straight off the submitted form.
-    operating_hours = _parse_hours(await request.form())
-
-    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
-        return redirect(url, flash=("error", "Latitude or longitude is out of range."))
-
-    kitchen = (await session.execute(
-        select(Outlet).order_by(Outlet.is_primary.desc(), Outlet.created_at)
-    )).scalars().first()
-
-    if kitchen is None:
-        kitchen = Outlet(code="MAIN", name=name, address_line1=address_line1,
-                         city=city, state=state, postal_code=postal_code,
-                         latitude=latitude, longitude=longitude)
-        session.add(kitchen)
-
-    kitchen.name = name
-    kitchen.address_line1 = address_line1
-    kitchen.city = city
-    kitchen.state = state
-    kitchen.postal_code = postal_code
-    kitchen.latitude = latitude
-    kitchen.longitude = longitude
-    kitchen.service_area_mode = service_area_mode
-    kitchen.delivery_radius_km = delivery_radius_km
-    kitchen.service_zips = _parse_zips(service_zips)
-    kitchen.kitchen_whatsapp = kitchen_whatsapp.strip() or None
-    kitchen.phone = kitchen_phone.strip() or None
-    kitchen.timezone = timezone_name.strip() or "America/New_York"
-    kitchen.operating_hours = operating_hours
-    kitchen.slot_length_minutes = max(15, min(240, slot_length_minutes))
-    kitchen.slot_capacity = max(1, slot_capacity)
-    kitchen.is_primary = True
-    kitchen.is_active = True
-
-    await session.flush()
-    log.info("kitchen_saved", name=name, mode=service_area_mode,
-             zips=len(kitchen.service_zips), open_days=len(operating_hours),
-             by=current_user.email)
-
-    if not operating_hours:
-        # Slots are generated only inside opening hours, so a kitchen with
-        # none set looks fine here and then fails at the slot step.
-        return redirect(url, flash=(
-            "error",
-            f"Saved kitchen '{name}', but no opening hours are set - "
-            "customers will be told there are no delivery slots. "
-            "Set at least one day below.",
-        ))
-    return redirect(url, flash=("success", f"Saved kitchen '{name}'."))
-
-
-def _parse_hours(form) -> dict[str, list[list[str]]]:
-    """Build the `operating_hours` blob from the seven open/close pairs.
-
-    Shape matches what `slots._windows_for_day` reads:
-    `{"mon": [["11:00", "21:00"]], ...}`. A day with either field blank is
-    treated as closed and simply left out, which is how the kitchen says
-    "we do not deliver on Sundays".
-
-    A close time at or before the open time is kept as-is: slot generation
-    reads that as trading past midnight, which is a real case for a kitchen
-    open 18:00-01:00.
-    """
-    hours: dict[str, list[list[str]]] = {}
-    for key in WEEKDAY_KEYS:
-        opens = _clean_time(form.get(f"hours_{key}_open"))
-        closes = _clean_time(form.get(f"hours_{key}_close"))
-        if opens is None or closes is None:
-            if opens != closes:  # one side filled in, the other not
-                log.warning("kitchen_hours_ignored", day=key,
-                            opens=form.get(f"hours_{key}_open"),
-                            closes=form.get(f"hours_{key}_close"))
-            continue
-        hours[key] = [[opens, closes]]
-    return hours
-
-
-def _clean_time(raw) -> str | None:
-    """Normalise one time field to `HH:MM`, or None if it is not a time.
-
-    Browsers post `<input type="time">` as HH:MM, but some send HH:MM:SS, and
-    the endpoint is reachable by anything. Storing the submitted string
-    verbatim would put whatever arrived into the JSON blob that slot
-    generation later re-parses, so canonicalise here instead.
-    """
-    text = str(raw or "").strip()
-    if not text:
-        return None
-    for fmt in ("%H:%M", "%H:%M:%S"):
-        try:
-            return datetime.strptime(text, fmt).time().strftime("%H:%M")
-        except ValueError:
-            continue
-    return None
-
-
-def _parse_zips(raw: str) -> list[str]:
-    """Split a comma/newline separated ZIP list into normalised codes."""
-    parts = raw.replace("\n", ",").replace(";", ",").split(",")
-    seen: dict[str, None] = {}
-    for part in parts:
-        code = "".join(part.upper().split()).replace("-", "")
-        if code:
-            seen.setdefault(code, None)
-    return list(seen)

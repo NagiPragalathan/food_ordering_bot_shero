@@ -30,7 +30,7 @@ from app.db.session import session_scope
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.client import gallabox
 from app.services import orders as order_service
-from app.services import dispatch, payments, slots
+from app.services import dispatch, kitchen_alerts, payments, slots
 
 log = get_logger(__name__)
 
@@ -121,6 +121,23 @@ async def dispatch_couriers() -> int:
     return booked
 
 
+async def send_kitchen_alerts() -> int:
+    """Tell each kitchen about its orders on the delivery day
+    (services/kitchen_alerts.py)."""
+    sent = 0
+    async with session_scope() as session:
+        for order in await kitchen_alerts.due_alerts(session):
+            try:
+                if await kitchen_alerts.send_alert(session, order):
+                    sent += 1
+            except Exception as exc:  # noqa: BLE001 - one bad order must not stop the rest
+                log.error("kitchen_alert_job_failed", order_number=order.order_number,
+                          error=str(exc))
+    if sent:
+        log.info("kitchen_alerts_sent", count=sent)
+    return sent
+
+
 async def generate_upcoming_slots() -> int:
     """Keep every active outlet stocked with bookable slots."""
     created = 0
@@ -182,6 +199,7 @@ ALL_JOBS = {
     "payment_expiry": expire_payment_links,
     "feedback_requests": send_feedback_requests,
     "courier_dispatch": dispatch_couriers,
+    "kitchen_alerts": send_kitchen_alerts,
     "slot_generation": generate_upcoming_slots,
     "settings_refresh": refresh_settings,
 }

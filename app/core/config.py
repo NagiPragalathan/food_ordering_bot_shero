@@ -176,6 +176,9 @@ class Settings(BaseSettings):
     # The earliest delivery slot offered starts this long after ordering:
     # home-style food is cooked to order, so the kitchen needs the day.
     slot_min_lead_hours: float = Field(default=24.0, ge=0)
+    # The kitchen's new-order alert goes out at this hour (kitchen local
+    # time) on the delivery day - never later than the Uber booking.
+    kitchen_alert_hour: float = Field(default=7.0, ge=0, lt=24)
     feedback_delay_minutes: int = 30
 
     # --- Derived -------------------------------------------------------------
@@ -210,8 +213,8 @@ class Settings(BaseSettings):
             "GALLABOX_API_SECRET": self.gallabox_api_secret,
             "GALLABOX_CHANNEL_ID": self.gallabox_channel_id,
             "GALLABOX_WEBHOOK_TOKEN": self.gallabox_webhook_token,
-            "META_CATALOG_ID": self.meta_catalog_id,
-            "META_SYSTEM_USER_TOKEN": self.meta_system_user_token,
+            # META_CATALOG_ID / META_SYSTEM_USER_TOKEN are optional: the menu
+            # is served from this database, not the Meta catalogue.
             "ZOHO_CLIENT_ID": self.zoho_client_id,
             "ZOHO_CLIENT_SECRET": self.zoho_client_secret,
             "ZOHO_REFRESH_TOKEN": self.zoho_refresh_token,

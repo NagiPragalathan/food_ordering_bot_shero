@@ -12,11 +12,11 @@ The client's menu sheet has three tabs: Chettinad, Kerala and Andhra. All
 three are imported. Cuisines are read from the imported menu, so adding a
 fourth is a sheet edit, not a code change.
 
-### 2. Outlets — **single kitchen** (23 Sep 2026)
-The client confirmed they are not running multiple outlets. Spec step 11
-("pick a nearby outlet") is removed; steps 6a and 10 remain as a delivery-area
-check against one kitchen, configured on the admin Settings page with a
-radius, a ZIP list, or both.
+### 2. Outlets — **many kitchens, nearest wins** (1 Oct 2026)
+Kitchens are added on the admin Kitchens page. A customer is served only when
+their location is inside an active kitchen's area (default 10 miles), and the
+nearest such kitchen gets the order. Spec step 11 is automatic: the customer
+does not pick. (Was a single kitchen, decided 23 Sep 2026.)
 
 ### 3. Pricing — **MRP is charged** (23 Sep 2026)
 The sheet carries PPP and MRP at a consistent 1.53x ratio. MRP is the customer
@@ -41,9 +41,10 @@ slot", but section 3 lists no template for it.
 **Problem:** a WhatsApp message to a kitchen that has not messaged us in the
 last 24 hours needs an approved template; a plain text send will only arrive
 if the outlet has an open session.
-**Assumed:** the order is always marked `Sent to Kitchen` and exposed on
-`GET /ops/orders`, and a best-effort WhatsApp text is attempted if a kitchen
-number is configured.
+**Assumed:** the alert is sent on the delivery day at `KITCHEN_ALERT_HOUR`
+(1 Oct 2026). The order is then marked `Sent to Kitchen` and exposed on
+`GET /ops/orders`, and a best-effort WhatsApp text goes to that kitchen's
+number.
 **Options:** (a) add an 11th template, (b) email instead, (c) rely on the ops
 screen. We recommend (a) — one template, approved once.
 

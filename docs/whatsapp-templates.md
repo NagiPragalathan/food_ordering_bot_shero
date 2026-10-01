@@ -56,6 +56,12 @@ WhatsApp message instead (`gallabox/fallback.py`):
 | A URL button (Pay Now, Download Bill, View Menu) | A link button with the same label and address |
 | Quick replies (Great / Good / Poor, Order Now) | Reply buttons; a tap answers exactly like the template's |
 
+An approved template whose link button points at a different website than
+`PUBLIC_BASE_URL` counts as not approved too (log: `template_link_outdated`).
+The button's address is fixed when Meta approves the template, so after the
+bot moves to a new address those templates must be resubmitted; until then
+the ordinary message carries the current link.
+
 Ordinary messages are only delivered inside WhatsApp's 24-hour window.
 Almost every template is sent right after the customer wrote or paid, so
 this covers them; a message sent much later (a delivery update hours after

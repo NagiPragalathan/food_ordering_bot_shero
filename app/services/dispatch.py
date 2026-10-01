@@ -186,7 +186,7 @@ def _missing(order: Order, slot, outlet, customer) -> str | None:
     if customer is None:
         return "the customer no longer exists"
     if not (outlet.phone or outlet.kitchen_whatsapp):
-        return "the kitchen has no phone number for the courier (Settings -> Kitchen)"
+        return "the kitchen has no phone number for the courier (Kitchens page)"
     if not order.delivery_address:
         return "the order has no delivery address"
     return None

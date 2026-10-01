@@ -5,8 +5,8 @@ Written for: the Shero team who will run the bot day to day.
 `https://api.<yourdomain>/admin/` — or `http://localhost:8000/admin/` when
 running locally.
 
-Five screens in the sidebar: **Dashboard, Menu, Orders, Chat tester,
-Settings**.
+Screens in the sidebar: **Dashboard, Menu, Orders, Kitchens, Uber queue,
+Customers, Settings**.
 
 The **Import** page is hidden from the sidebar but still works — go straight
 to `/admin/import`. Only the nav entry was removed, so putting it back is a
@@ -104,7 +104,7 @@ things that were wrong to begin with.
 - **Sync to Zoho** (top right) sends every dish to Zoho's Products module
   and every kitchen to its Vendors module, creating or updating each. Adding
   or editing a dish here updates its Product on its own; run the sync after
-  a sheet import, or after editing kitchens in Settings. It is greyed out
+  a sheet import, or after editing kitchens. It is greyed out
   until Zoho is connected. Details in [zoho-setup.md](zoho-setup.md).
 
 > Prices here are what customers pay (your MRP column). The PPP column is
@@ -238,7 +238,7 @@ delivery inside the customer's slot.
 **Send to Uber now** books straight away - to test the connection, or to
 rescue a stuck order. **Cancel Uber** cancels a booking. A yellow box at the
 top says what is missing when couriers cannot be booked: the Uber keys, or
-the kitchen phone number (Settings -> Kitchen -> **Kitchen phone (for the
+the kitchen phone number ([Kitchens](#kitchens) -> **Kitchen phone (for the
 courier)**; the Kitchen WhatsApp number is used when it is empty).
 
 The Uber keys in `.env` are the **test** keys: bookings are simulated and
@@ -333,75 +333,64 @@ Client ID and Secret in place, so reconnecting is one press.
   (`SLOT_MIN_LEAD_HOURS` in `.env`, not shown on this page). Someone ordering
   at midnight sees slots from midnight the next day, and only those inside the
   kitchen's hours.
-- **Which hours:** set in **Kitchen -> Opening hours** on this page, per
+- **Which hours:** set per kitchen on the [Kitchens](#kitchens) page, per
   weekday. The kitchen is set to 9:00 AM - 9:00 PM every day, so slots run
   9-10 AM through 8-9 PM.
 - **Courier:** see [Uber queue](#uber-queue) below.
 
-### Kitchen and delivery area
+---
 
-Below the integrations: the kitchen address (sent to Uber as the pickup), its
-coordinates, and who you deliver to.
+## Kitchens
 
-Three ways to define the delivery area:
+**Kitchens** in the sidebar lists every kitchen, with **Add kitchen** to set up
+another. Add as many as you run.
 
-| Mode | Rule |
-|---|---|
-| **Within a radius** | Straight-line distance from the kitchen |
-| **Only these ZIP codes** | The customer's ZIP is on your list |
-| **Radius AND ZIP list** | Both must pass |
+**How a customer is matched.** When a customer shares their location (WhatsApp
+pin, a ZIP, or an address on the ordering page), the bot measures the
+distance from that point to **every active kitchen**. The address is served
+only if it is inside at least one kitchen's delivery area, and the **nearest**
+kitchen that covers it gets the order. Outside every area, the customer is told
+we do not deliver there yet, and no order can be placed. The chosen kitchen is
+locked in at that step: its slots are offered, its address is the Uber pickup,
+and it gets the kitchen alert.
 
-A ZIP list is usually the honest choice for a small operation: it says exactly
-where a driver will go, instead of drawing a circle that might cross a river
-or a state line.
+The page shows a map of the kitchens with their delivery circles, and
+**Check an address**: type any address to see its distance from each kitchen
+and which one would get the order.
 
-> **The coordinates matter.** Right-click the kitchen in Google Maps and copy
-> them. They drive both the delivery-area check and the Uber pickup, so an
-> approximate value gives approximate answers.
-
-### Opening hours
-
-Same form, below the delivery area: an open and close time for each weekday,
-plus the slot length and how many orders the kitchen can take per slot.
-
-**Delivery slots exist only inside these windows.** Leave both fields of a day
-blank to close it. A kitchen with no hours at all saves fine and then tells
-every customer "there are no delivery slots available" at the slot step, so
-the form warns when that is the case.
+### Kitchen form
 
 | Field | Meaning |
 |---|---|
-| Open / close | The delivery window for that weekday, in the kitchen's timezone |
-| Slot length | How long each bookable window is (default 60 minutes) |
-| Orders per slot | How many deliveries the kitchen can handle at once |
+| Name, street, city, state, ZIP | The pickup address sent to Uber |
+| Latitude / longitude | Optional. Leave blank and the address is found on the map when you save. Customer distances are measured from this point; clear both after changing the address so it is found again. |
+| Delivery area rule | **Within a radius** (straight-line distance), **Only these ZIP codes**, or **Radius AND ZIP list** |
+| Delivery radius (miles) | Default 10 miles |
+| Kitchen WhatsApp | Gets the new-order alert on the delivery day |
+| Kitchen phone (for the courier) | Uber gives this to the courier; empty means the WhatsApp number is used |
+| Timezone | Slots and the alert time are in this zone |
+| Opening hours | Delivery slots exist only inside these windows, per weekday. Leave a day blank to close it. |
+| Slot length / Orders per slot | Each bookable window, and how many deliveries fit in one |
+| Taking orders | Untick to stop matching customers to this kitchen; its past orders stay |
 
-A close time earlier than the open time means the day runs past midnight —
-`18:00` to `01:00` is a valid late-night kitchen, not an error.
+A kitchen with no opening hours saves, with a warning: it has no slots, so its
+customers are told there are no delivery times. A close time earlier than the
+open time means the day runs past midnight (`18:00` to `01:00`).
 
-Slots are generated on demand and topped up by a scheduled job, so changing
-the hours affects new bookings without disturbing orders already placed.
+**Make default** picks the kitchen used where no address has been checked yet
+(for example the ordering page header before an address is chosen). Saving a
+kitchen also updates its Zoho Vendor when Zoho is connected.
 
----
+### When the kitchen hears about an order
 
-## Chat tester
-
-Talk to the bot from the browser, against the real menu and the real database.
-Outbound messages are collected and shown rather than delivered, so **nothing
-reaches the live Gallabox account** - it is safe to use on a deployment that
-is serving real customers.
-
-- Buttons and list rows appear as chips; clicking one taps it exactly as a
-  customer would.
-- The panel on the right drops a location pin, which step 9 asks for.
-- The header shows the current conversation step.
-- **Reset** forgets the test customer so the next message starts at step 1.
-
-Uber and Stripe are not called; the payment step shows the template the
-customer would receive.
-
-Two things make the flow stop early, and the page warns about both: no kitchen
-configured (stops at the delivery-area check) and no opening hours (no slots
-to pick).
+Orders are placed at least a day ahead, so the kitchen is **not** messaged at
+payment. Each paid order waits, and on the **delivery day** at
+`KITCHEN_ALERT_HOUR` (7 AM kitchen time by default, set in `.env`) the
+kitchen's WhatsApp gets the order: number, slot, dishes, address and contact.
+The order then moves to **Sent to Kitchen**. The alert is never later than the
+Uber booking, so for a 9 AM slot the kitchen hears at 7 AM, when Uber is
+booked. The Orders page shows each order's kitchen and its alert time.
+**Send to kitchen** on the Orders page sends the alert straight away.
 
 ---
 

@@ -21,7 +21,7 @@ from app.core.exceptions import (BotFlowError, ConfigurationError,
                                  IntegrationError, PaymentError)
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import ConversationStep, Customer, LeadStage, OrderStage
+from app.db.models import ConversationStep, Customer, DeliverySlot, LeadStage, OrderStage
 from app.db.session import get_session
 from app.services import addresses, crm_sync, media_thumbs
 from app.services import cart as cart_service
@@ -76,7 +76,7 @@ async def _page(request: Request, token: str, session: AsyncSession,
     if customer is None:
         return _expired(request)
 
-    kitchen = await kitchen_service.get_kitchen(session)
+    kitchen = await kitchen_service.kitchen_for(session, customer)
     return templates.TemplateResponse(request, template, {
         "token": token,
         "customer": customer,
@@ -248,7 +248,8 @@ async def check_address(request: Request, token: str,
         return {"ok": False, "serviceable": False,
                 "error": check.reason or "We do not deliver to that area yet."}
 
-    kitchen = await kitchen_service.get_kitchen(session)
+    # The nearest kitchen that delivers to this address cooks the order.
+    kitchen = check.kitchen
     if kitchen is None:
         return {"ok": False, "error": "No kitchen is configured yet."}
 
@@ -281,6 +282,18 @@ async def check_address(request: Request, token: str,
     }
 
 
+async def _kitchen_slot(session: AsyncSession, kitchen, slot_id) -> DeliverySlot | None:
+    """The chosen slot, if it is one of this kitchen's. A slot listed for a
+    different address (and so maybe a different kitchen) is refused."""
+    try:
+        slot = await slots.get_slot(session, str(slot_id or ""))
+    except ValueError:
+        return None
+    if slot is None or slot.outlet_id != kitchen.id:
+        return None
+    return slot
+
+
 @router.post("/{token}/quote")
 async def quote(request: Request, token: str,
                 session: AsyncSession = Depends(get_session)) -> dict:
@@ -298,11 +311,12 @@ async def quote(request: Request, token: str,
     if not cart:
         return {"ok": False, "error": "Your cart is empty."}
 
-    kitchen = await kitchen_service.get_kitchen(session)
+    # The kitchen picked for the address at the check-address step.
+    kitchen = await kitchen_service.kitchen_for(session, customer)
     if kitchen is None:
         return {"ok": False, "error": "No kitchen is configured yet."}
 
-    slot = await slots.get_slot(session, str(body.get("slot_id") or ""))
+    slot = await _kitchen_slot(session, kitchen, body.get("slot_id"))
     if slot is None:
         return {"ok": False, "error": "Choose a delivery slot."}
 
@@ -363,11 +377,12 @@ async def confirm(request: Request, token: str,
     except addresses.AddressError as exc:
         return {"ok": False, "error": str(exc)}
 
-    kitchen = await kitchen_service.get_kitchen(session)
+    # The kitchen picked for the address at the check-address step.
+    kitchen = await kitchen_service.kitchen_for(session, customer)
     if kitchen is None:
         return {"ok": False, "error": "No kitchen is configured yet."}
 
-    slot = await slots.get_slot(session, str(body.get("slot_id") or ""))
+    slot = await _kitchen_slot(session, kitchen, body.get("slot_id"))
     if slot is None:
         return {"ok": False, "error": "Choose a delivery slot."}
 

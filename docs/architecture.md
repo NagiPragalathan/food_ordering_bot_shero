@@ -105,9 +105,13 @@ surfaces cannot drift into separate carts.
 customer-controlled state. `price_cart()` looks every line up and uses the
 stored price. A test covers this specifically.
 
-**There is one kitchen.** The multi-outlet "pick your nearest branch" flow is
-gone; what remains is a delivery-area check (radius, ZIP list, or both)
-configured in the dashboard.
+**The nearest covering kitchen cooks the order.** Kitchens are managed on the
+admin Kitchens page. `services/kitchen.check_service` measures the customer's
+point against every active kitchen's area (radius, ZIP list, or both) and
+returns the nearest one that covers it; that kitchen is stored on the
+customer and the order, and drives slots, the Uber pickup and the kitchen
+alert. The kitchen is alerted on the delivery day (`services/kitchen_alerts.py`),
+not at payment.
 
 **Admin settings override the environment.** `.env` is the floor; values saved
 through the Settings page are stored encrypted (Fernet) and applied onto the
