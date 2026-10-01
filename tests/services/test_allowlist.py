@@ -230,3 +230,13 @@ def test_match_names_the_entry(monkeypatch):
                                        ("8091", False), ("1234567890123456", False)])
 def test_only_full_numbers_are_valid(number, ok):
     assert allowlist.is_valid(number) is ok
+
+
+def test_the_environment_cannot_set_who_the_bot_replies_to(monkeypatch):
+    """Only the admin Bot replies page decides; a stray .env line is ignored."""
+    from app.core.config import Settings
+
+    monkeypatch.setenv("BOT_REPLY_MODE", "allowlist")
+    monkeypatch.setenv("BOT_ALLOWED_NUMBERS", ME)
+    fresh = Settings()
+    assert fresh.bot_reply_mode == "" and fresh.bot_allowed_numbers == ""

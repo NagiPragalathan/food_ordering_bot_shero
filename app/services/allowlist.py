@@ -1,18 +1,17 @@
 """Which WhatsApp numbers the bot is allowed to answer.
 
-Set on the admin **Bot replies** page, or in the environment:
+Set only on the admin **Bot replies** page, which stores two values in the
+database (never read from .env):
 
-    BOT_REPLY_MODE=all          answer everyone (production)
-    BOT_REPLY_MODE=allowlist    answer only BOT_ALLOWED_NUMBERS
-
-    BOT_ALLOWED_NUMBERS=917401268091|Nagi,14155550123
+    BOT_REPLY_MODE        all | allowlist
+    BOT_ALLOWED_NUMBERS   917401268091|Nagi,14155550123
 
 Each entry is a number with an optional name after "|" (the name is only for
 the admin page). A number the bot does not answer is left alone and keeps
 reaching the team in Gallabox exactly as if the bot were not there.
 
-With BOT_REPLY_MODE unset the list decides: empty means everyone, so a
-missing setting never silently switches the bot off in production.
+Nothing saved means the bot replies to everyone, so a fresh install never
+silently switches the bot off.
 """
 
 from __future__ import annotations

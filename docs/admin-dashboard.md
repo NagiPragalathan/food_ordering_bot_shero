@@ -420,8 +420,9 @@ Zoho lead, and their message reaches your team in Gallabox as normal.
   bot for everyone); the numbers are kept when you switch to Everyone; leaving
   with unsaved changes asks first.
 
-Stored as `BOT_REPLY_MODE` (`all` / `allowlist`) and `BOT_ALLOWED_NUMBERS`
-(`number|name,...`); these override `.env`.
+Set **only** on this page: stored in the database as `BOT_REPLY_MODE`
+(`all` / `allowlist`) and `BOT_ALLOWED_NUMBERS` (`number|name,...`). They are
+not read from `.env`. With nothing saved, the bot replies to everyone.
 
 ---
 

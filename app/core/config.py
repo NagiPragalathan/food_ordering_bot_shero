@@ -144,12 +144,14 @@ class Settings(BaseSettings):
     send_delivery_updates: bool = False
 
     # --- Who the bot answers ---------------------------------------------
-    # "all" or "allowlist" (only bot_allowed_numbers). Unset: the list decides,
-    # empty meaning everyone. Set on the admin Bot replies page.
-    # See services/allowlist.py.
-    bot_reply_mode: str = ""
-    # Comma-separated whitelisted WhatsApp numbers.
-    bot_allowed_numbers: str = ""
+    # Set ONLY on the admin Bot replies page (stored in the database), never
+    # from .env: the alias below is a name no environment uses, so a stray
+    # BOT_ALLOWED_NUMBERS line cannot restrict the bot. Nothing saved means
+    # the bot replies to everyone. See services/allowlist.py.
+    bot_reply_mode: str = Field(default="", validation_alias="ADMIN_PAGE_ONLY_BOT_REPLY_MODE")
+    # Whitelisted WhatsApp numbers, "number|name,...".
+    bot_allowed_numbers: str = Field(default="",
+                                     validation_alias="ADMIN_PAGE_ONLY_BOT_ALLOWED_NUMBERS")
 
     # --- Geo -----------------------------------------------------------------
     google_maps_api_key: str = ""
