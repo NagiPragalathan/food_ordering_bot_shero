@@ -16,6 +16,7 @@ from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import settings
+from app.db.url import driver_url
 
 # Importing the models package registers every table on Base.metadata.
 from app.db.models import Base
@@ -25,12 +26,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# The same driver-form URL the app uses (hosted Postgres URLs are rewritten).
+DATABASE_URL = driver_url(settings.database_url)
+# "%" is configparser syntax; an encoded password (%40) must be escaped.
+config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 target_metadata = Base.metadata
 
 
-BACKEND = make_url(settings.database_url).get_backend_name()
+BACKEND = make_url(DATABASE_URL).get_backend_name()
 
 
 def _configure(connection: Connection | None = None, **kwargs) -> None:
@@ -51,7 +55,7 @@ def _configure(connection: Connection | None = None, **kwargs) -> None:
 def run_migrations_offline() -> None:
     """Emit SQL to stdout without connecting (`alembic upgrade head --sql`)."""
     _configure(
-        url=settings.database_url,
+        url=DATABASE_URL,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         # No live connection, so the dialect must be stated explicitly.

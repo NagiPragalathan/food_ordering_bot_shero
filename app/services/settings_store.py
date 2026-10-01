@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import time
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
@@ -188,6 +189,27 @@ async def apply_overrides(session: AsyncSession) -> int:
 
 
 _applied: set[str] = set()      # override keys currently applied in this process
+_refreshed_at: float = 0.0      # time.monotonic() of the last apply_overrides
+REFRESH_SECONDS = 60
+
+
+async def refresh_if_stale(max_age: float = REFRESH_SECONDS) -> None:
+    """Re-apply saved settings if this process last did so over `max_age` ago.
+
+    For serverless hosts (see app.main). Never raises: a database hiccup
+    leaves the settings already in memory in place and is logged.
+    """
+    global _refreshed_at
+    if time.monotonic() - _refreshed_at < max_age:
+        return
+    _refreshed_at = time.monotonic()
+    from app.db.session import session_scope     # late: session imports settings
+
+    try:
+        async with session_scope() as session:
+            await apply_overrides(session)
+    except Exception as exc:  # noqa: BLE001 - keep serving with what we have
+        log.error("settings_refresh_failed", error=str(exc))
 
 
 def _restore_default(key: str) -> None:

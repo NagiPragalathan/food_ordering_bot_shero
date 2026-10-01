@@ -112,7 +112,7 @@ async def resolve_photo(*, upload_name: str | None, upload_bytes: bytes | None,
     if not source:
         return None
     # Already ours: re-fetching a /media path would fail and blank the photo.
-    if source.startswith(media.MEDIA_URL_PREFIX):
+    if media.is_ours(source):
         return source
 
     stored = await media.fetch(media.normalise_source(source))

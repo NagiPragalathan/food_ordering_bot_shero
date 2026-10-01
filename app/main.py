@@ -20,8 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from app.admin import router as admin_router
 from app.admin.deps import NotAuthenticated
 
-from app.api.routes import (health, media_thumbs, ops, order_addresses, order_web, receipts,
-                            pay, webhooks_gallabox, webhooks_stripe)
+from app.api.routes import (cron, health, media_thumbs, ops, order_addresses, order_web,
+                            receipts, pay, webhooks_gallabox, webhooks_stripe)
 from app.core.http_cache import ImmutableStaticFiles
 from app.core.config import settings
 from app.core.exceptions import IntegrationError, SheroError
@@ -33,7 +33,7 @@ from app.integrations.uber.direct import uber_direct
 from app.services import media
 from app.integrations.zoho.client import zoho_client
 from app.admin.auth import bootstrap_first_user
-from app.services.settings_store import apply_overrides
+from app.services.settings_store import apply_overrides, refresh_if_stale
 from app.workers.scheduler import shutdown_scheduler, start_scheduler
 
 configure_logging()
@@ -67,7 +67,10 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001 - the API must still serve /health
         log.error("admin_startup_failed", error=str(exc))
 
-    if settings.enable_scheduler:
+    if settings.is_serverless:
+        # Nothing runs between requests on Vercel; Vercel Cron calls /cron/*.
+        log.info("scheduler_disabled_serverless")
+    elif settings.enable_scheduler:
         start_scheduler()
     else:
         log.info("scheduler_disabled_on_this_instance")
@@ -98,7 +101,19 @@ app = FastAPI(
 # left alone by the size floor and content type.
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+
+@app.middleware("http")
+async def _fresh_settings(request, call_next):
+    """On Vercel many short-lived instances serve requests, so one that saved
+    a setting (Bot replies, a Zoho reconnect) is not the one serving the next
+    request. Re-read saved settings at most once a minute per instance; the
+    scheduler's settings_refresh job does this on a long-lived server."""
+    if settings.is_serverless:
+        await refresh_if_stale()
+    return await call_next(request)
+
 app.include_router(health.router)
+app.include_router(cron.router)
 app.include_router(webhooks_gallabox.router)
 app.include_router(webhooks_stripe.router)
 app.include_router(pay.router)

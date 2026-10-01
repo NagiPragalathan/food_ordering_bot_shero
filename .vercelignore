@@ -1,0 +1,12 @@
+# Not needed to run the bot on Vercel (see docs/vercel-hosting.md).
+.venv/
+tests/
+data/
+*.db
+*.backup-*.db
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+.playwright-mcp/

@@ -130,6 +130,12 @@ automatically; in ECS use a one-off task or an init container.
 > driver difference can produce a spurious change — the JSONB columns and the
 > `now()` defaults in `0001_initial` are correct as written.
 
+## Vercel
+
+Step by step: [vercel-hosting.md](vercel-hosting.md). Hosted Postgres,
+photos in Vercel Blob, and Vercel Cron calling `/cron/tick` and `/cron/daily`
+in place of the in-process scheduler.
+
 ## One EC2 server (the simplest AWS setup)
 
 Step by step for a server team: [aws-hosting-guide.pdf](aws-hosting-guide.pdf).

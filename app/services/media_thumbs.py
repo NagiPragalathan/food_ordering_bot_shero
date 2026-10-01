@@ -8,7 +8,8 @@ is around a tenth of the size.
 
 Thumbnails are made on first request and kept on disk next to the photos.
 A thumbnail that cannot be made is not an error for the customer: the
-original photo is served instead.
+original photo is served instead. Photos in Vercel Blob have their thumbnail
+uploaded beside them when stored (media.save), at media/thumbs/<stem>.jpg.
 """
 
 from __future__ import annotations
@@ -23,17 +24,23 @@ log = get_logger(__name__)
 
 THUMB_DIR = media.MEDIA_DIR / "thumbs"
 THUMB_URL_PREFIX = f"{media.MEDIA_URL_PREFIX}/thumb"
-THUMB_PX = 240
-THUMB_QUALITY = 72
+THUMB_PX = media.THUMB_PX
+THUMB_QUALITY = media.THUMB_QUALITY
 
 # Photo files are named by a 16-hex digest (see media.py). Anything else is
 # refused, which also keeps a request from naming a path outside MEDIA_DIR.
 _NAME = re.compile(r"^[0-9a-f]{16}\.(?:jpg|jpeg|png|webp|gif)$")
+# A photo in Vercel Blob: https://<store>.public.blob.vercel-storage.com/media/<name>
+_BLOB = re.compile(r"^(https://[a-z0-9-]+\.public\.blob\.vercel-storage\.com/media/)"
+                   r"([0-9a-f]{16})\.(?:jpg|jpeg|png|webp|gif)$")
 
 
 def thumb_url(image_url: str | None) -> str:
     """The card-sized URL for a dish photo; other URLs pass through."""
     url = image_url or ""
+    blob = _BLOB.match(url)
+    if blob:
+        return f"{blob.group(1)}thumbs/{blob.group(2)}.jpg"
     prefix = f"{media.MEDIA_URL_PREFIX}/"
     name = url[len(prefix):] if url.startswith(prefix) else ""
     return f"{THUMB_URL_PREFIX}/{name}" if _NAME.match(name) else url

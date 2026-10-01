@@ -6,8 +6,12 @@ venv/
 .env.*
 !.env.example
 
+# Databases hold customer details and must never reach the (public) repo.
+*.db
+*.db-journal
 # The clean starter database (menu + kitchens only, no customers or keys),
 # built by scripts/make_seed_db.py. The live database stays out of Git.
+!deploy/seed/shero.db
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

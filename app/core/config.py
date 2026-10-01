@@ -67,7 +67,24 @@ class Settings(BaseSettings):
     pay_redirect_base_url: str = "http://localhost:8000"
 
     # --- Database ------------------------------------------------------------
+    # Any Postgres URL works (postgres://, postgresql://, ?sslmode=require as
+    # Neon/Vercel give it); app/db/url.py turns it into the asyncpg form.
     database_url: str = "postgresql+asyncpg://shero:shero@localhost:5432/shero_bot"
+
+    # --- Hosting on Vercel (docs/vercel-hosting.md) ---------------------------
+    # Set to "1" by Vercel itself. Serverless: no in-process scheduler (Vercel
+    # Cron calls /cron/*), no connection pool kept between requests, files
+    # written only under /tmp.
+    vercel: str = ""
+    # Vercel sends it as "Authorization: Bearer <CRON_SECRET>" on every cron
+    # call; /cron/* refuses any other caller, and refuses everyone when unset.
+    cron_secret: str = ""
+    # Set by Vercel when a Blob store is connected. With it, dish photos are
+    # stored in Vercel Blob instead of on disk (services/media.py).
+    blob_read_write_token: str = ""
+    # Where dish photos are written when Blob is not used. Default data/media;
+    # /tmp/shero-media on Vercel.
+    media_dir: str = ""
 
     # --- Gallabox ------------------------------------------------------------
     gallabox_api_key: str = ""
@@ -205,6 +222,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def is_serverless(self) -> bool:
+        """Running as a Vercel Function rather than a long-lived server."""
+        return self.vercel.strip() == "1"
 
     def missing_credentials(self) -> list[str]:
         """Names of credentials that are still blank or obviously unfilled.

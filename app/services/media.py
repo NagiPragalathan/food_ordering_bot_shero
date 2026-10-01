@@ -8,6 +8,11 @@ staying up, staying public, and not rate-limiting us.
 So an import downloads each image once into `data/media/` and stores the local
 path on the dish. After that the storefront serves its own files.
 
+On Vercel, where a function cannot keep files, each photo (and its small
+card thumbnail) is uploaded to Vercel Blob instead and the dish stores the
+Blob URL (integrations/vercel_blob.py). Which one is used depends only on
+whether BLOB_READ_WRITE_TOKEN is set.
+
 Nothing here raises: an image that cannot be fetched leaves the dish without
 one, and the page draws its placeholder. A missing photo must never fail a
 menu import.
@@ -22,12 +27,27 @@ from pathlib import Path
 
 import httpx
 
+from app.core.config import settings
+from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
+from app.integrations import vercel_blob
 
 log = get_logger(__name__)
 
-MEDIA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "media"
+
+def _media_dir() -> Path:
+    if settings.media_dir.strip():
+        return Path(settings.media_dir.strip())
+    if settings.is_serverless:
+        return Path("/tmp/shero-media")    # the only writable place on Vercel
+    return Path(__file__).resolve().parent.parent.parent / "data" / "media"
+
+
+MEDIA_DIR = _media_dir()
 MEDIA_URL_PREFIX = "/media"
+# Card thumbnails (see media_thumbs.py): 3x the 80 px card, for sharp phones.
+THUMB_PX = 240
+THUMB_QUALITY = 72
 
 # Enough for a menu photo; anything larger is a mistake rather than a dish.
 MAX_BYTES = 4 * 1024 * 1024
@@ -80,6 +100,12 @@ def normalise_source(cell: str) -> str:
     return value
 
 
+def is_ours(url: str) -> bool:
+    """A photo this bot already stores: a /media path or our Vercel Blob."""
+    return url.startswith(MEDIA_URL_PREFIX) or (
+        ".public.blob.vercel-storage.com/media/" in url and url.startswith("https://"))
+
+
 def local_path_for(url: str, content_type: str) -> Path:
     """A stable filename, so re-importing overwrites rather than accumulates."""
     digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
@@ -97,13 +123,14 @@ async def fetch(url: str, *, client: httpx.AsyncClient | None = None) -> str | N
         return None
 
     # A URL already pointing at our own store needs no work.
-    if source.startswith(MEDIA_URL_PREFIX):
+    if is_ours(source):
         return source
 
-    for extension in EXTENSIONS.values():
-        cached = MEDIA_DIR / (hashlib.sha1(source.encode()).hexdigest()[:16] + extension)
-        if cached.exists():
-            return f"{MEDIA_URL_PREFIX}/{cached.name}"
+    if not vercel_blob.is_configured():
+        for extension in EXTENSIONS.values():
+            cached = MEDIA_DIR / (hashlib.sha1(source.encode()).hexdigest()[:16] + extension)
+            if cached.exists():
+                return f"{MEDIA_URL_PREFIX}/{cached.name}"
 
     owns_client = client is None
     client = client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS,
@@ -129,16 +156,11 @@ async def fetch(url: str, *, client: httpx.AsyncClient | None = None) -> str | N
         log.warning("image_too_large", url=source[:120], bytes=len(response.content))
         return None
 
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-    destination = local_path_for(source, content_type)
-    try:
-        destination.write_bytes(response.content)
-    except OSError as exc:
-        log.error("image_write_failed", path=str(destination), error=str(exc))
-        return None
-
-    log.info("image_stored", name=destination.name, bytes=len(response.content))
-    return f"{MEDIA_URL_PREFIX}/{destination.name}"
+    name = local_path_for(source, content_type).name
+    stored = save(name, response.content, content_type)
+    if stored:
+        log.info("image_stored", name=name, bytes=len(response.content))
+    return stored
 
 
 # A menu thumbnail never needs more than this; the sheet's originals are
@@ -157,7 +179,6 @@ def store_bytes(data: bytes, *, key: str) -> str | None:
         return None
 
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
-    destination = MEDIA_DIR / f"{digest}.jpg"
 
     try:
         shrunk = _shrink(data)
@@ -165,14 +186,46 @@ def store_bytes(data: bytes, *, key: str) -> str | None:
         log.warning("image_unreadable", key=key[:80], error=str(exc))
         return None
 
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    return save(f"{digest}.jpg", shrunk, "image/jpeg")
+
+
+def save(name: str, data: bytes, content_type: str) -> str | None:
+    """Keep one photo under `name`; return the URL to serve it at, or None.
+
+    Vercel Blob when configured (the photo and its card thumbnail, so the
+    menu stays light), otherwise a file in MEDIA_DIR.
+    """
+    if vercel_blob.is_configured():
+        try:
+            url = vercel_blob.put(f"media/{name}", data, content_type)
+        except IntegrationError as exc:
+            log.error("image_upload_failed", name=name, error=exc.message)
+            return None
+        _upload_thumbnail(name, data)
+        return url
+
+    destination = MEDIA_DIR / name
     try:
-        destination.write_bytes(shrunk)
+        MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
     except OSError as exc:
         log.error("image_write_failed", path=str(destination), error=str(exc))
         return None
+    return f"{MEDIA_URL_PREFIX}/{name}"
 
-    return f"{MEDIA_URL_PREFIX}/{destination.name}"
+
+def _upload_thumbnail(name: str, data: bytes) -> None:
+    """The card-sized copy, at media/thumbs/<stem>.jpg next to the photo.
+
+    A failure only costs bandwidth: the card falls back to the full photo.
+    """
+    try:
+        small = _shrink(data, max_px=THUMB_PX, quality=THUMB_QUALITY)
+        vercel_blob.put(f"media/thumbs/{Path(name).stem}.jpg", small, "image/jpeg")
+    except IntegrationError as exc:
+        log.warning("thumbnail_upload_failed", name=name, error=exc.message)
+    except Exception as exc:            # Pillow
+        log.warning("thumbnail_failed", name=name, error=str(exc))
 
 
 def _shrink(data: bytes, *, max_px: int = THUMBNAIL_MAX_PX,
