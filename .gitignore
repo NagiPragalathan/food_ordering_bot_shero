@@ -7,6 +7,9 @@ venv/
 !.env.example
 *.sqlite3
 *.db
+# The clean starter database (menu + kitchens only, no customers or keys),
+# built by scripts/make_seed_db.py. The live database stays out of Git.
+!deploy/seed/shero.db
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

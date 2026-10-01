@@ -142,6 +142,13 @@ database is the SQLite file `data/shero.db` and the dish photos are
 DATABASE_URL=sqlite+aiosqlite:////app/data/shero.db
 ```
 
+A new server starts from the clean starter database committed at
+`deploy/seed/` (menu, dish photos and kitchens; no customers, orders, keys or
+admin logins - the repo is public). It is copied into `data/` once, with
+`cp -n` so it can never overwrite the live database. Rebuild it from your
+local database with `python -m scripts.make_seed_db`. After first start:
+connect Zoho (Settings), set Bot replies, and add the kitchen phone numbers.
+
 One server means one scheduler, which is what the bot needs, and SQLite is
 fine for one process at a small shop's order volume (see the limits in
 [testing.md](testing.md#running-on-sqlite)). Moving to Postgres later is a
