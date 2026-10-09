@@ -293,7 +293,24 @@ effect immediately** — no redeploy.
 | Group | What it holds |
 |---|---|
 | Zoho CRM | Domain dropdown and **Connect Zoho** |
+| Order alerts | WhatsApp numbers told about every paid order |
 | Business rules | Tax, payment timings, public URLs |
+
+### Order alerts
+
+The WhatsApp numbers that get a message **the moment an order is paid**: one
+row per number (with country code, 10 to 15 digits) and an optional name.
+**Add number** adds a row, the x removes one; an empty list turns alerts off.
+**Send test alert** sends a message marked `TEST - not a real order` to the
+saved numbers.
+
+The alert (template `shero_new_order_alert`) shows the order number, customer
+name and phone, amount, delivery slot, kitchen, address and dishes. Until Meta
+approves the template it goes as an ordinary message, which WhatsApp only
+delivers to a number that messaged the bot in the last 24 hours. A failed
+alert never affects the order. Stored as `ORDER_ALERT_NUMBERS`
+(`number|name,...`), not read from `.env`; the sending is
+`services/order_alerts.py`.
 
 The service keys — WhatsApp (Gallabox), Stripe, Uber Direct, Meta Catalogue
 and Google Maps — are **not** on this page: they are read from the server's
@@ -455,6 +472,17 @@ Which messages start the bot. Separate from the whitelist above; both apply.
 
   Capitals, punctuation and emoji are ignored. A keyword can be a phrase
   (`order food`).
+- **Reply with** (per keyword): what the bot answers with.
+
+  | Reply with | The customer gets |
+  |---|---|
+  | **Both messages** | The welcome with the **Order Now** (website) button, then **Continue on WhatsApp** |
+  | **Only Order Now** | Just the welcome with the website button |
+  | **Only WhatsApp** | One message: the welcome and the **Continue on WhatsApp** button |
+
+  A new customer is asked their name and email first and then gets the
+  chosen reply (it is kept on the chat as `welcome_reply`). With *Reply to any
+  message* on, everyone gets both.
 - **Always answered**, keyword or not, so ordering never breaks half-way:
   - a customer part-way through an order who wrote in the last 24 hours (they
     have to be able to type their address or email);
@@ -473,7 +501,8 @@ Which messages start the bot. Separate from the whitelist above; both apply.
   keeps the keywords for next time.
 
 Stored in the database as `BOT_REPLY_TRIGGER` (`any` / `keywords`) and
-`BOT_TRIGGER_KEYWORDS` (JSON: `[{"keyword": "hi", "match": "exact"}]`). Not
+`BOT_TRIGGER_KEYWORDS` (JSON: `[{"keyword": "hi", "match": "exact", "reply": "both"}]`;
+a keyword saved without `reply` means both). Not
 read from `.env`. The check is `services/reply_triggers.decide`, run by the
 WhatsApp webhook after the whitelist.
 

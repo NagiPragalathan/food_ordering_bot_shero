@@ -225,7 +225,7 @@ def test_the_page_renders_the_switch_and_rows(monkeypatch):
     _set(monkeypatch, ("hi", rt.EXACT), ("order food", rt.CONTAINS))
     html = templates.env.get_template("admin/_bot_triggers.html").render(
         url_for=lambda name, **_: f"/{name}", trigger_mode=rt.mode(), triggers=rt.triggers(),
-        matches=rt.MATCHES, active_hours=rt.ACTIVE_HOURS, message_query="hi",
+        matches=rt.MATCHES, replies=rt.REPLIES, active_hours=rt.ACTIVE_HOURS, message_query="hi",
         message_check=bot_replies._message_check("hi"))
     assert 'name="any_message"' in html and "checked" not in html.split('id="any-message"')[1][:80]
     assert 'value="order food"' in html and "Keywords only" in html
@@ -265,4 +265,55 @@ async def test_the_webhook_leaves_a_message_without_a_trigger_for_the_team(sessi
 
 async def test_the_webhook_starts_the_bot_on_a_trigger(session, keywords, monkeypatch):
     result, handled = await _webhook(session, monkeypatch, "Hi!")
-    assert result["status"] == "ok" and handled == [{"fresh_start": True}]
+    assert result["status"] == "ok" and handled == [{"fresh_start": True, "reply": "both"}]
+
+
+# --- what the bot answers a trigger with --------------------------------------------
+def test_each_keyword_keeps_its_reply(monkeypatch):
+    _set(monkeypatch, ("hi", rt.EXACT))
+    monkeypatch.setattr(settings, "bot_trigger_keywords", rt.dump(
+        [rt.Trigger("hi", rt.EXACT, rt.ORDER_NOW), rt.Trigger("order", rt.CONTAINS)]))
+    assert [t.reply for t in rt.triggers()] == [rt.ORDER_NOW, rt.BOTH]
+
+
+def test_a_list_saved_before_replies_existed_means_both(monkeypatch):
+    monkeypatch.setattr(settings, "bot_reply_trigger", rt.KEYWORDS)
+    monkeypatch.setattr(settings, "bot_trigger_keywords", '[{"keyword": "hi", "match": "exact"}]')
+    assert rt.triggers() == [rt.Trigger("hi", rt.EXACT, rt.BOTH)]
+
+
+def test_the_reply_only_applies_in_keyword_mode(monkeypatch):
+    assert rt.welcome_reply(rt.WHATSAPP) == rt.BOTH          # Reply to any message is on
+    _set(monkeypatch, ("hi", rt.EXACT))
+    assert rt.welcome_reply(rt.WHATSAPP) == rt.WHATSAPP
+    assert rt.welcome_reply(None) == rt.BOTH and rt.welcome_reply("rubbish") == rt.BOTH
+
+
+@pytest.mark.parametrize("reply, kinds", [
+    (rt.BOTH, ["cta_url", "buttons"]),
+    (rt.ORDER_NOW, ["cta_url"]),
+    (rt.WHATSAPP, ["buttons"]),
+])
+async def test_the_welcome_follows_the_triggers_reply(session, monkeypatch, reply, kinds):
+    from app.integrations.gallabox.sender import use_sender
+    from app.services.conversation.engine import handle_event
+    from tests.conversation.test_happy_path import FakeGallabox
+
+    monkeypatch.setattr(settings, "bot_reply_trigger", rt.KEYWORDS)
+    monkeypatch.setattr(settings, "bot_trigger_keywords",
+                        rt.dump([rt.Trigger("hi", rt.EXACT, reply)]))
+    customer = Customer(whatsapp_number=PHONE, name="Nagi", email="nagi@example.com")
+    session.add(customer)
+    await session.flush()
+
+    fake = FakeGallabox()
+    with use_sender(fake):
+        await handle_event(session, text("hi"), fresh_start=True, reply=reply)
+
+    assert [m.kind for m in fake.sent] == kinds
+    first = fake.sent[0]
+    if reply == rt.WHATSAPP:
+        assert "Nagi" in first.body and "Order right here on WhatsApp" in first.body
+        assert first.payload["buttons"] == [("Continue on WhatsApp", "Continue on WhatsApp")]
+    else:
+        assert first.payload["url"] == "https://www.shero.us/"

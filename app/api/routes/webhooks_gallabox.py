@@ -104,7 +104,8 @@ async def gallabox_webhook(
                     if isinstance(body.get("whatsapp"), dict) else [],
                     event_name=str(body.get("event") or body.get("type") or ""))
 
-    handled = await handle_event(session, event, fresh_start=decision.fresh_start)
+    handled = await handle_event(session, event, fresh_start=decision.fresh_start,
+                                 reply=decision.reply)
     return {"status": "ok" if handled else "ignored"}
 
 

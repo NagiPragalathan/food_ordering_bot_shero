@@ -59,12 +59,14 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
     ],
 }
 
-# Saved from their own admin pages (Bot replies), not the Settings form.
+# Saved from their own forms (Bot replies, the Order alerts card), not the
+# Settings page's generic fields.
 OTHER_EDITABLE: list[tuple[str, str, bool]] = [
     ("BOT_REPLY_MODE", "Who the bot replies to (all / allowlist)", False),
     ("BOT_ALLOWED_NUMBERS", "Whitelisted WhatsApp numbers", False),
     ("BOT_REPLY_TRIGGER", "Reply to any message, or only to trigger keywords", False),
     ("BOT_TRIGGER_KEYWORDS", "Trigger keywords", False),
+    ("ORDER_ALERT_NUMBERS", "WhatsApp numbers told about every paid order", False),
 ]
 
 EDITABLE_KEYS: dict[str, tuple[str, bool]] = {

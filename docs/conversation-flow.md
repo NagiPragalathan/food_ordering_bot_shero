@@ -55,7 +55,9 @@ The other two are set on the admin Bot replies page:
    a customer mid-order (any step but `START` / `COMPLETED` / `HANDED_OVER`,
    active within `ACTIVE_HOURS` = 24) always pass. A trigger on a chat that is
    not mid-order sets `fresh_start`, and the engine runs `onboarding.start`
-   instead of the parked step's handler.
+   instead of the parked step's handler. The trigger's **Reply with** is kept
+   on the chat (`welcome_reply`), and `onboarding.show_main_menu` sends both
+   welcome messages, only Order Now, or only Continue on WhatsApp accordingly.
 
 A message stopped by any gate creates no customer record and gets no
 reply; it reaches the team in Gallabox. See

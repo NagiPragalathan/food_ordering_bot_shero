@@ -49,6 +49,7 @@ async def bot_replies_page(
         # The saved list even while switched off, so switching back keeps it.
         "triggers": reply_triggers.triggers(),
         "matches": reply_triggers.MATCHES,
+        "replies": reply_triggers.REPLIES,
         "active_hours": reply_triggers.ACTIVE_HOURS,
         "message_check": _message_check(message) if message.strip() else None,
         "message_query": message,
@@ -104,11 +105,14 @@ async def save_triggers(
     url = str(request.url_for("admin_bot_replies"))
     form = await request.form()
     any_message = form.get("any_message") == "1"
-    rows = [reply_triggers.Trigger(reply_triggers.clean_keyword(str(k)), str(match))
-            for k, match in zip(form.getlist("keyword"), form.getlist("match"))
+    replies = form.getlist("reply") or [reply_triggers.BOTH] * len(form.getlist("keyword"))
+    rows = [reply_triggers.Trigger(reply_triggers.clean_keyword(str(k)), str(match), str(reply))
+            for k, match, reply in zip(form.getlist("keyword"), form.getlist("match"), replies)
             if str(k).strip()]
     if any(t.match not in reply_triggers.MATCHES for t in rows):
         return redirect(url, flash=("error", "Choose how each keyword should match."))
+    if any(t.reply not in reply_triggers.REPLIES for t in rows):
+        return redirect(url, flash=("error", "Choose what the bot replies to each keyword."))
     if len(rows) > reply_triggers.MAX_KEYWORDS:
         return redirect(url, flash=("error", f"At most {reply_triggers.MAX_KEYWORDS} keywords."))
     blank = [t.keyword for t in rows if not reply_triggers.normalise(t.keyword)]
@@ -140,7 +144,8 @@ def _message_check(message: str) -> dict:
     trigger = reply_triggers.matching(message)
     return {"any": reply_triggers.mode() == reply_triggers.ANY, "trigger": trigger,
             "built_in": reply_triggers.normalise(message) in reply_triggers.BUILT_IN,
-            "match_label": reply_triggers.MATCHES.get(trigger.match, "") if trigger else ""}
+            "match_label": reply_triggers.MATCHES.get(trigger.match, "") if trigger else "",
+            "reply_label": reply_triggers.REPLIES.get(trigger.reply, "") if trigger else ""}
 
 
 def _check(number: str) -> dict:

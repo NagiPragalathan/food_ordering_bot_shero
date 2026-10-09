@@ -75,6 +75,8 @@
   </form>
 </section>
 
+{% include "admin/_order_alerts.html" %}
+
 <form method="post" action="{{ url_for('admin_settings_save') }}" class="space-y-5">
   {# Zoho is rendered above as its own OAuth card. #}
   {% for group in groups if group.title != 'Zoho CRM' %}

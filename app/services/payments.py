@@ -31,7 +31,7 @@ from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
-from app.services import crm_sync, dispatch, kitchen_alerts, orders, receipts, slots
+from app.services import crm_sync, dispatch, kitchen_alerts, order_alerts, orders, receipts, slots
 from app.services.customers import advance, get_or_create_conversation
 
 log = get_logger(__name__)
@@ -233,6 +233,12 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     # 2. Confirmation to the customer. The money is taken by now, so a
     # WhatsApp failure must not stop the CRM record and the kitchen alert.
     await send_payment_confirmation(customer, order, outlet_name)
+
+    # The team's WhatsApp alert (Settings > Order alerts). Never blocks the rest.
+    try:
+        await order_alerts.notify_new_order(order, customer, outlet_name)
+    except Exception as exc:  # noqa: BLE001 - the order is paid and on the dashboard
+        log.error("order_alerts_failed", order_number=order.order_number, error=str(exc))
 
     # 3. Lead -> Contact, the Order record and its Order Items (spec step 16).
     await crm_sync.convert_and_record_order(customer, order, ctx)

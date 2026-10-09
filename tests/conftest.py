@@ -39,6 +39,8 @@ def _answer_everyone(monkeypatch):
     # filter sets it itself (tests/integrations/test_channel_filter.py).
     monkeypatch.setattr(settings, "gallabox_channel_id", "")
     monkeypatch.setattr(settings, "whatsapp_business_number", "")
+    # No team alerts unless a test asks for them.
+    monkeypatch.setattr(settings, "order_alert_numbers", "")
 
 
 @pytest.fixture(autouse=True)

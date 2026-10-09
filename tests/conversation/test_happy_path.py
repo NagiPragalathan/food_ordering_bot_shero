@@ -188,7 +188,7 @@ async def _add_drumstick(session, bot, quantity: str = "2"):
 
 
 # --- the walk ----------------------------------------------------------------
-async def test_full_order_journey(session, outlet, menu, bot):
+async def test_full_order_journey(session, outlet, menu, bot, monkeypatch):
     # Steps 1-3: first contact from a Click-to-WhatsApp ad.
     first = _event(kind=InboundKind.TEXT, text="hi", ad_id="ad_99",
                    campaign_id="camp_7")
@@ -355,7 +355,15 @@ async def test_full_order_journey(session, outlet, menu, bot):
     # is not told the payment link is still open.
     from app.services import payments
 
+    from app.core.config import settings
+
+    # The team's order alert (Settings > Order alerts) goes out with it.
+    monkeypatch.setattr(settings, "order_alert_numbers", "14438011011|Manager")
     assert await payments.handle_payment_success(session, order, customer)
+    alert = next(m for m in bot.sent if m.body == tpl.ORDER_ALERT.name)
+    assert alert.to == "14438011011"
+    assert alert.payload["values"][0] == order.order_number
+    assert alert.payload["values"][1] == f"Asha Menon, +{customer.whatsapp_number}"
     customer, conversation = await _state(session)
     assert conversation.step == ConversationStep.COMPLETED
     await handle_event(session, text("hello"))

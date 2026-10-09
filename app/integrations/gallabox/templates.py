@@ -244,6 +244,27 @@ OUT_OF_AREA = TemplateSpec(
     ),
 )
 
+# To the team, not the customer: every paid order, sent to the numbers set on
+# the Settings page (services/order_alerts.py). Starts and ends on words, as
+# Meta requires; every value is one line (a parameter may not hold a newline).
+ORDER_ALERT = TemplateSpec(
+    name="shero_new_order_alert",
+    category="UTILITY",
+    trigger="An order is paid - sent to the order alert numbers on the Settings page",
+    params=("order_number", "customer", "amount", "delivery", "kitchen", "address", "items"),
+    sample_body=(
+        "New order received \U0001F6CE\n\n"
+        "Order: {{1}}\n"
+        "Customer: {{2}}\n"
+        "Amount: ${{3}}\n"
+        "Delivery: {{4}}\n"
+        "Kitchen: {{5}}\n"
+        "Address: {{6}}\n"
+        "Items: {{7}}\n\n"
+        "Full details are on the admin dashboard."
+    ),
+)
+
 ORDER_SUMMARY = TemplateSpec(
     name="order_summary_v2",
     category="UTILITY",
@@ -308,7 +329,7 @@ ALL_TEMPLATES: tuple[TemplateSpec, ...] = (
 # (View Menu with Get new link) and the in-chat welcomes (website or
 # WhatsApp), none of which the spec lists.
 MANAGED_TEMPLATES: tuple[TemplateSpec, ...] = ALL_TEMPLATES + (
-    WELCOME, ORDER_SUMMARY, MENU_LINK, WELCOME_BACK, WELCOME_NEW, OUT_OF_AREA)
+    WELCOME, ORDER_SUMMARY, MENU_LINK, WELCOME_BACK, WELCOME_NEW, OUT_OF_AREA, ORDER_ALERT)
 
 BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in MANAGED_TEMPLATES}
 

@@ -37,6 +37,11 @@ EXAMPLES = {
     "outlet_name": "Shero Kitchen",
     "items": "2 x Drumstick Sambar, 1 x Beans Sambar",
     "delivery_address": "6360 Lawyers Hill Road, Apt 4, 21075",
+    # The team's new-order alert.
+    "customer": "Asha Menon, +1 443 555 0142",
+    "delivery": "Wed 23 Sep, 7:00 PM - 8:00 PM",
+    "kitchen": "Shero Elkridge",
+    "address": "6360 Lawyers Hill Road, Apt 4, 21075",
 }
 
 EXAMPLE_ORDER_NUMBER = "SHO-260923-AB12X"

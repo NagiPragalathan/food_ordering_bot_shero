@@ -1,0 +1,99 @@
+{# Settings page: the WhatsApp numbers told about every paid order.
+   Saved by admin_order_alerts_save (services/order_alerts.py). #}
+
+{% macro alert_row(number, name) %}
+<div data-row class="grid grid-cols-[1fr_1fr_2rem] items-center gap-2">
+  <input name="number" value="{{ number }}" inputmode="tel" placeholder="14438011011"
+         class="rounded-lg border border-stone-300 px-3 py-2 font-mono text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+  <input name="name" value="{{ name }}" placeholder="e.g. Kitchen manager"
+         class="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+  <button type="button" data-remove title="Remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-600">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+</div>
+{% endmacro %}
+
+<form id="order-alerts" method="post" action="{{ url_for('admin_order_alerts_save') }}"
+      class="mb-5 scroll-mt-24 overflow-hidden rounded-xl border border-stone-200 bg-white">
+  <header class="flex items-center justify-between gap-3 border-b border-stone-200 bg-stone-50 px-5 py-3">
+    <div>
+      <h2 class="text-sm font-semibold">Order alerts</h2>
+      <p class="text-xs text-stone-500">These WhatsApp numbers get a message the moment an order is paid.</p>
+    </div>
+    {% if alert_entries %}
+      <span class="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">On &middot; {{ alert_entries | length }} number{{ '' if alert_entries | length == 1 else 's' }}</span>
+    {% else %}
+      <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-[11px] font-semibold text-stone-600">Off</span>
+    {% endif %}
+  </header>
+  <div class="p-5">
+    <div class="mb-1 grid grid-cols-[1fr_1fr_2rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-stone-400">
+      <span>WhatsApp number</span><span>Name (optional)</span><span></span>
+    </div>
+    <div id="alert-rows" class="space-y-2">
+      {% for e in alert_entries %}{{ alert_row(e.number, e.name) }}{% endfor %}
+    </div>
+    <template id="alert-template">{{ alert_row('', '') }}</template>
+    <button type="button" id="alert-add"
+            class="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 px-3 py-2 text-xs font-semibold text-stone-600 hover:border-brand-500 hover:text-brand-700">
+      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      Add number
+    </button>
+    <p class="mt-2 text-[11px] text-stone-400">Full number with country code (1 for the US, 91 for India). Spaces, + and dashes are fine. Leave empty to turn alerts off.</p>
+    <div class="mt-3 rounded-lg bg-stone-50 px-3 py-2 text-[11px] text-stone-500">
+      The alert shows the order number, customer and phone, amount, delivery slot, kitchen,
+      address and dishes. Until WhatsApp approves the <code class="font-mono">shero_new_order_alert</code>
+      template, it only reaches a number that has messaged the bot in the last 24 hours.
+    </div>
+  </div>
+  <div class="flex flex-wrap items-center justify-between gap-2 border-t border-stone-200 bg-stone-50 px-5 py-3">
+    <span id="alert-unsaved" class="hidden text-xs font-medium text-amber-700">Unsaved changes</span>
+    <div class="ml-auto flex gap-2">
+      {% if alert_entries %}
+      <button formaction="{{ url_for('admin_order_alerts_test') }}" data-test
+              class="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50">
+        Send test alert
+      </button>
+      {% endif %}
+      <button class="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save</button>
+    </div>
+  </div>
+</form>
+
+<script>
+(function () {
+  var form = document.getElementById('order-alerts');
+  var rows = document.getElementById('alert-rows');
+  var tpl = document.getElementById('alert-template');
+  var dirty = false;
+
+  function addRow(focus) {
+    var row = tpl.content.firstElementChild.cloneNode(true);
+    rows.appendChild(row);
+    if (focus) row.querySelector('input').focus();
+  }
+  function markDirty() { dirty = true; document.getElementById('alert-unsaved').classList.remove('hidden'); }
+
+  document.getElementById('alert-add').addEventListener('click', function () { addRow(true); markDirty(); });
+  rows.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-remove]');
+    if (!btn) return;
+    btn.closest('[data-row]').remove();
+    if (!rows.children.length) addRow(false);
+    markDirty();
+  });
+  form.addEventListener('input', markDirty);
+  form.addEventListener('submit', function (e) {
+    // The test sends to the saved numbers, so unsaved edits would be ignored.
+    if (e.submitter && e.submitter.hasAttribute('data-test') && dirty) {
+      e.preventDefault();
+      alert('Save your changes first, then send the test alert.');
+      return;
+    }
+    dirty = false;
+  });
+  window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+  if (!rows.children.length) addRow(false);
+})();
+</script>

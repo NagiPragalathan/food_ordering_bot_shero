@@ -1,16 +1,23 @@
 {# Bot replies page: "Reply to any message" switch, trigger keywords and the
    message tester. Saved by admin_bot_triggers_save (services/reply_triggers). #}
 
-{% macro keyword_row(keyword, match, options) %}
-<div data-row class="grid grid-cols-[1fr_10rem_2rem] items-center gap-2">
-  <input name="keyword" value="{{ keyword }}" maxlength="60" placeholder="e.g. order food"
+{# One trigger: the words, how they match, and which welcome messages it gets.
+   Stacks on a phone; one line from sm up. #}
+{% macro keyword_row(keyword, match, reply, options, reply_options) %}
+<div data-row class="grid grid-cols-[1fr_2rem] items-center gap-2 rounded-lg border border-stone-100 p-2 sm:grid-cols-[1fr_11rem_10rem_2rem] sm:border-0 sm:p-0">
+  <input name="keyword" value="{{ keyword }}" maxlength="60" placeholder="e.g. order food" aria-label="Keyword or phrase"
          class="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-  <select name="match" class="rounded-lg border border-stone-300 px-2 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+  <select name="match" aria-label="Match" class="rounded-lg border border-stone-300 px-2 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 col-start-1 sm:col-start-auto">
     {% for value, label in options.items() %}
     <option value="{{ value }}" {% if match == value %}selected{% endif %}>{{ label }}</option>
     {% endfor %}
   </select>
-  <button type="button" data-remove title="Remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-600">
+  <select name="reply" aria-label="Reply with" class="rounded-lg border border-stone-300 px-2 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 col-start-1 sm:col-start-auto">
+    {% for value, label in reply_options.items() %}
+    <option value="{{ value }}" {% if reply == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="button" data-remove title="Remove" class="col-start-2 row-start-1 flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-600 sm:col-start-auto sm:row-start-auto">
     <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
   </button>
 </div>
@@ -53,13 +60,13 @@
         <h3 class="text-sm font-semibold text-stone-900">Trigger keywords</h3>
         <span id="kw-count" class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600"></span>
       </div>
-      <div class="mb-1 grid grid-cols-[1fr_10rem_2rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-stone-400">
-        <span>Keyword or phrase</span><span>Match</span><span></span>
+      <div class="mb-1 hidden grid-cols-[1fr_11rem_10rem_2rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-stone-400 sm:grid">
+        <span>Keyword or phrase</span><span>Match</span><span>Reply with</span><span></span>
       </div>
       <div id="kw-rows" class="space-y-2">
-        {% for t in triggers %}{{ keyword_row(t.keyword, t.match, matches) }}{% endfor %}
+        {% for t in triggers %}{{ keyword_row(t.keyword, t.match, t.reply, matches, replies) }}{% endfor %}
       </div>
-      <template id="kw-template">{{ keyword_row('', 'contains', matches) }}</template>
+      <template id="kw-template">{{ keyword_row('', 'contains', 'both', matches, replies) }}</template>
       <button type="button" id="kw-add"
               class="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 px-3 py-2 text-xs font-semibold text-stone-600 hover:border-brand-500 hover:text-brand-700">
         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -70,6 +77,10 @@
         <li><b>Contains the word</b>: the keyword appears anywhere as whole words ("order" matches "I want to order", not "reorder").</li>
         <li><b>Starts with</b>: the message begins with the keyword ("menu" matches "menu please").</li>
         <li>Capitals, punctuation and emoji are ignored.</li>
+        <li class="pt-1"><b>Reply with</b>: <b>Both messages</b> sends the welcome with the Order Now
+          (website) button, then the Continue on WhatsApp button. <b>Only Order Now</b> sends just the
+          website one; <b>Only WhatsApp</b> sends the welcome with just the Continue on WhatsApp button.
+          A new customer gets it after giving their name and email.</li>
       </ul>
       <div class="mt-3 rounded-lg bg-stone-50 px-3 py-2 text-[11px] text-stone-500">
         Always answered, even without a keyword: a customer part-way through an order
@@ -102,7 +113,8 @@
       </div>
     {% elif message_check.trigger %}
       <div class="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-        <b>Starts the bot</b>: matches &ldquo;{{ message_check.trigger.keyword }}&rdquo; ({{ message_check.match_label | lower }}).
+        <b>Starts the bot</b>: matches &ldquo;{{ message_check.trigger.keyword }}&rdquo; ({{ message_check.match_label | lower }}),
+        and replies with: {{ message_check.reply_label }}.
       </div>
     {% elif message_check.built_in %}
       <div class="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">

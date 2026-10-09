@@ -176,6 +176,12 @@ class Settings(BaseSettings):
     bot_trigger_keywords: str = Field(default="",
                                       validation_alias="ADMIN_PAGE_ONLY_BOT_TRIGGER_KEYWORDS")
 
+    # --- Team alerts -----------------------------------------------------
+    # WhatsApp numbers told about every paid order, "number|name,...". Set on
+    # the admin Settings page (Order alerts) only. See services/order_alerts.py.
+    order_alert_numbers: str = Field(default="",
+                                     validation_alias="ADMIN_PAGE_ONLY_ORDER_ALERT_NUMBERS")
+
     # --- Geo -----------------------------------------------------------------
     google_maps_api_key: str = ""
     # A second key for the map drawn in the customer's browser. Anything a

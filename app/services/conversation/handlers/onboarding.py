@@ -9,6 +9,7 @@ from app.integrations.gallabox.messages import Button
 from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
 from app.services.conversation.validators import clean_email, clean_name
+from app.services import reply_triggers
 from app.services.crm_sync import ensure_record, push_details
 
 log = get_logger(__name__)
@@ -85,12 +86,22 @@ async def show_main_menu(ctx: FlowContext, *, returning: bool = False) -> None:
     Stale ids from older buttons (`menu:order`, `menu:talk`) are still
     honoured by `handle_main_menu`, so nobody who tapped one is left without
     an answer.
+
+    The trigger keyword that started the chat may ask for only one of them
+    (Bot replies page, services/reply_triggers.REPLIES): the website alone,
+    or WhatsApp alone, which is then the greeting and the button together.
     """
     name = ctx.customer.greeting_name
     greeting = (p.WELCOME_BACK if returning else p.WELCOME_READY).format(name=name)
-    await ctx.reply_cta_url(greeting, url=tpl.SHERO_WEBSITE, display_text=p.BTN_ORDER_NOW)
-    await ctx.reply_buttons(p.CONTINUE_PROMPT,
-                            [Button(tpl.CONTINUE_ON_WHATSAPP, tpl.CONTINUE_ON_WHATSAPP)])
+    reply = reply_triggers.welcome_reply(ctx.conversation.get("welcome_reply"))
+    continue_button = [Button(tpl.CONTINUE_ON_WHATSAPP, tpl.CONTINUE_ON_WHATSAPP)]
+
+    if reply == reply_triggers.WHATSAPP:
+        await ctx.reply_buttons(f"{greeting}\n\n{p.CONTINUE_ONLY_PROMPT}", continue_button)
+    else:
+        await ctx.reply_cta_url(greeting, url=tpl.SHERO_WEBSITE, display_text=p.BTN_ORDER_NOW)
+        if reply == reply_triggers.BOTH:
+            await ctx.reply_buttons(p.CONTINUE_PROMPT, continue_button)
     ctx.goto(ConversationStep.MAIN_MENU)
 
 

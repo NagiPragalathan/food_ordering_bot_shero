@@ -381,6 +381,33 @@ Not spam: it goes **at most once every 24 hours per customer**
 (`customers.out_of_area_notified_at`, `services/out_of_area.NOTICE_EVERY`).
 Every try still gets the refusal on the page itself.
 
+## `shero_new_order_alert`
+
+- **Category:** Utility
+- **To:** the team, not the customer: the numbers under Settings > Order alerts
+- **Trigger:** an order is paid (`payments.handle_payment_success`)
+- **Parameters:** `{{1}}` = order_number, `{{2}}` = customer (name and phone),
+  `{{3}}` = amount, `{{4}}` = delivery slot, `{{5}}` = kitchen,
+  `{{6}}` = address, `{{7}}` = items (`2 x Carrot Sambar, ...`, cut at 300
+  characters)
+- **Buttons:** none
+
+**Body:**
+
+```
+New order received 🛎
+
+Order: {{1}}
+Customer: {{2}}
+Amount: ${{3}}
+Delivery: {{4}}
+Kitchen: {{5}}
+Address: {{6}}
+Items: {{7}}
+
+Full details are on the admin dashboard.
+```
+
 ---
 
 ## Order and delivery templates

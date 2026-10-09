@@ -59,6 +59,9 @@ WELCOME_BACK = "Welcome back to Shero Home Food, {name}! \U0001F44B"
 WELCOME_READY = "Thanks, {name}! You are all set with Shero Home Food. \U0001F44B"
 # WhatsApp needs a line of text on every message, buttons alone are refused.
 CONTINUE_PROMPT = "Or order right here on WhatsApp \U0001F447"
+# The same button sent alone (a trigger set to "Only Continue on WhatsApp"),
+# under the greeting in one message - without the "Or".
+CONTINUE_ONLY_PROMPT = "Order right here on WhatsApp \U0001F447"
 BTN_ORDER_NOW = "Order Now"
 # The welcome's "Continue on WhatsApp" tap (its label comes back as the reply).
 CONTINUE_KEYWORDS = {"continue on whatsapp"}

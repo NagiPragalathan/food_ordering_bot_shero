@@ -23,7 +23,7 @@ from app.core.logging import get_logger
 from app.db.models import AdminUser
 from app.db.session import get_session
 from app.integrations.zoho import oauth as zoho_oauth
-from app.services import connection_tests, zoho_connect
+from app.services import connection_tests, order_alerts, zoho_connect
 from app.services.settings_store import (
     EDITABLE_KEYS,
     SETTING_GROUPS,
@@ -74,6 +74,8 @@ async def settings_page(
             "centres": zoho_connect.DATA_CENTRES,
             "data_centre": settings.zoho_data_center or "com",
         },
+        # The Order alerts card (saved by admin/routes/order_alerts.py).
+        "alert_entries": order_alerts.entries(),
     })
 
 

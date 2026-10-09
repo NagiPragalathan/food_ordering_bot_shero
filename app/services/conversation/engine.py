@@ -74,12 +74,16 @@ STEP_HANDLERS = {
 
 
 async def handle_event(session: AsyncSession, event: InboundEvent, *,
-                       fresh_start: bool = False) -> bool:
+                       fresh_start: bool = False, reply: str = "") -> bool:
     """Process one inbound message. Returns False if it was ignored.
 
     `fresh_start`: the message is a trigger keyword (services/reply_triggers)
     on a chat the bot is not in the middle of, so it starts from the welcome
     rather than being read as the answer to an old question.
+
+    `reply`: which welcome messages that trigger asked for (reply_triggers.
+    REPLIES). Kept on the chat, so it still applies after a new customer
+    gives their name and email.
     """
     if not event.is_actionable:
         log.info("inbound_ignored", reason="not actionable",
@@ -104,6 +108,8 @@ async def handle_event(session: AsyncSession, event: InboundEvent, *,
     await _note_profile_name(customer, event.contact_name, is_new=_created)
 
     conversation = await get_or_create_conversation(session, customer)
+    if reply:
+        conversation.set(welcome_reply=reply)
     ctx = FlowContext(session=session, customer=customer,
                       conversation=conversation, event=event)
 

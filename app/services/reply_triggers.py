@@ -4,7 +4,8 @@ Set on the admin **Bot replies** page, which stores two values in the
 database (never read from .env):
 
     BOT_REPLY_TRIGGER     any | keywords
-    BOT_TRIGGER_KEYWORDS  [{"keyword": "order food", "match": "contains"}, ...]
+    BOT_TRIGGER_KEYWORDS  [{"keyword": "order food", "match": "contains",
+                            "reply": "both"}, ...]
 
 With "any" (the default, and what nothing saved means) the bot answers every
 message, as it always has. With "keywords" a chat only *starts* the bot when
@@ -16,6 +17,11 @@ Always answered in keyword mode, trigger or not:
   * a tap on one of the bot's own buttons (it is a reply to the bot)
   * the bot's own prefilled messages ("New menu link" from an expired page)
   * a customer part-way through an order, active in the last ACTIVE_HOURS
+
+Each keyword also says how the bot answers it (REPLIES): the welcome's two
+messages, only the Order Now (website) one, or only Continue on WhatsApp.
+The choice is kept on the conversation, so a new customer who first gives
+their name and email still gets it (onboarding.show_main_menu).
 
 Anything else is left alone - no customer record, no reply, no Zoho lead - and
 reaches the team in Gallabox exactly as if the bot were not there.
@@ -48,6 +54,10 @@ EXACT, CONTAINS, STARTS = "exact", "contains", "starts"
 # Shown on the admin page, in this order.
 MATCHES = {EXACT: "Exact message", CONTAINS: "Contains the word", STARTS: "Starts with"}
 
+# How the bot answers a trigger: which of the welcome's messages it sends.
+BOTH, ORDER_NOW, WHATSAPP = "both", "order_now", "whatsapp"
+REPLIES = {BOTH: "Both messages", ORDER_NOW: "Only Order Now", WHATSAPP: "Only WhatsApp"}
+
 MAX_KEYWORDS = 50
 MAX_KEYWORD_LENGTH = 60
 
@@ -67,6 +77,7 @@ BUILT_IN = p.NEW_LINK_KEYWORDS | p.CONTINUE_KEYWORDS
 class Trigger:
     keyword: str        # as typed on the admin page
     match: str = EXACT
+    reply: str = BOTH
 
 
 @dataclass(frozen=True)
@@ -76,6 +87,8 @@ class Decision:
     # A trigger on a chat the bot is not in the middle of: start over rather
     # than feed "order food" to whatever question an old chat stopped at.
     fresh_start: bool = False
+    # The matched trigger's reply (REPLIES); "" when no trigger matched.
+    reply: str = ""
 
 
 # --- the stored list ---------------------------------------------------------
@@ -105,15 +118,17 @@ def parse(raw: str) -> list[Trigger]:
             continue
         keyword = clean_keyword(str(row.get("keyword") or ""))
         match = str(row.get("match") or EXACT)
-        if match not in MATCHES or not normalise(keyword):
+        reply = str(row.get("reply") or BOTH)       # saved before replies existed
+        if match not in MATCHES or reply not in REPLIES or not normalise(keyword):
             continue
-        seen.setdefault((normalise(keyword), match), Trigger(keyword, match))
+        seen.setdefault((normalise(keyword), match), Trigger(keyword, match, reply))
     return list(seen.values())[:MAX_KEYWORDS]
 
 
 def dump(triggers: list[Trigger]) -> str:
     """The stored form read back by `parse`."""
-    return json.dumps([{"keyword": t.keyword, "match": t.match} for t in triggers],
+    return json.dumps([{"keyword": t.keyword, "match": t.match, "reply": t.reply}
+                       for t in triggers],
                       ensure_ascii=False)
 
 
@@ -167,7 +182,7 @@ async def decide(session: AsyncSession, event: InboundEvent,
                              now or datetime.now(timezone.utc))
     trigger = matching(message)
     if trigger:
-        return Decision(True, "trigger", fresh_start=not in_flow)
+        return Decision(True, "trigger", fresh_start=not in_flow, reply=trigger.reply)
     if in_flow:
         return Decision(True, "order in progress")
     return Decision(False, "no trigger")
@@ -196,3 +211,14 @@ async def _in_flow(session: AsyncSession, number: str, now: datetime) -> bool:
 def _latest(*moments: datetime | None) -> datetime | None:
     known = [m if m.tzinfo else m.replace(tzinfo=timezone.utc) for m in moments if m]
     return max(known) if known else None
+
+
+def welcome_reply(saved: str | None) -> str:
+    """Which welcome messages to send, given the reply kept on the chat.
+
+    Only while keyword mode is on: switched back to Reply to any message,
+    everyone gets both again, whatever an earlier trigger said.
+    """
+    if is_keyword_mode() and saved in REPLIES:
+        return saved
+    return BOTH
