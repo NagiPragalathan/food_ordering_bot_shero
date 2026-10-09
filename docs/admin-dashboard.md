@@ -229,6 +229,10 @@ will be sent to Uber: **2 hours before its delivery slot starts**
 courier through Uber Direct: pickup from the kitchen from the send time,
 delivery inside the customer's slot.
 
+The booking happens whatever the order's stage, including after someone sets
+**Out for Delivery** by hand on the Orders page. Only an order already booked,
+or marked Delivered, Cancelled or Refunded, is skipped.
+
 | Status | Meaning |
 |---|---|
 | Waiting | Paid; booked automatically at the time shown |

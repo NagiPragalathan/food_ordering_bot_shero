@@ -34,8 +34,12 @@ from app.services.slots import as_utc
 
 log = get_logger(__name__)
 
-# Stages at which a paid order still needs its courier.
-AWAITING_COURIER = (str(OrderStage.PAID_SLOT_BOOKED), str(OrderStage.SENT_TO_KITCHEN))
+# Stages at which a paid order still needs its courier. Out for Delivery is
+# one of them: the kitchen marking it by hand (Orders page) must not stop the
+# booking - only a courier booked, or the order delivered, cancelled or
+# refunded, does.
+AWAITING_COURIER = (str(OrderStage.PAID_SLOT_BOOKED), str(OrderStage.SENT_TO_KITCHEN),
+                    str(OrderStage.OUT_FOR_DELIVERY))
 
 
 def due_time(slot_starts_at: datetime | None) -> datetime | None:

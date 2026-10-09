@@ -65,6 +65,19 @@ async def test_an_order_is_due_two_hours_before_its_slot(session, customer, outl
     assert later not in due and soon in due
 
 
+async def test_marking_out_for_delivery_by_hand_does_not_stop_the_booking(
+        session, customer, outlet):
+    """SHO-261007-HANF9 was moved to Out for Delivery on the Orders page before
+    its send time, so the job skipped it and the slot ended with no courier."""
+    order = await _order(session, customer, outlet, starts_in=timedelta(hours=1))
+    order.stage = OrderStage.OUT_FOR_DELIVERY
+    assert order in await dispatch.due_orders(session, NOW)
+
+    for finished in (OrderStage.DELIVERED, OrderStage.CANCELLED, OrderStage.REFUNDED):
+        order.stage = finished
+        assert await dispatch.due_orders(session, NOW) == []
+
+
 async def test_dispatch_books_the_courier_inside_the_slot(session, customer, outlet, uber_calls):
     order = await _order(session, customer, outlet, starts_in=timedelta(hours=2))
 
