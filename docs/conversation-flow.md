@@ -65,6 +65,18 @@ reply; it reaches the team in Gallabox. See
 
 ## Failure paths
 
+### Payments at the edges
+
+| What happens | What the bot does |
+|---|---|
+| Stripe's webhook is lost or rejected (e.g. a wrong signing secret) | The 30-minute expiry job asks Stripe for the session's real state (`payments.settle_lapsed_link`). Paid: the order is confirmed as paid, never told it expired |
+| The link is still open at Stripe when it lapses | It is closed at Stripe first (`expire_session`), then expired, so nobody pays after the slot is given away. Paid in that last second: confirmed |
+| Stripe cannot be reached by the expiry job | Nothing is expired; the next run (every minute) asks again |
+| A payment lands after the link lapsed and the slot was released | The slot is claimed again; if it filled up meanwhile the order is booked one over capacity (`slots.book_after_late_payment`) - a paid customer always keeps the window they chose |
+| The same Stripe event arrives twice | Ignored the second time (`handle_payment_success` is idempotent) |
+| Card declined / payment failed | `shero_payment_failed_v2` with a retry link; the slot stays held until the link lapses |
+| Refund issued from the Stripe dashboard | `charge.refunded` marks the order Refunded |
+
 Each matches the spec's "If it fails" column.
 
 | Situation | Behaviour |

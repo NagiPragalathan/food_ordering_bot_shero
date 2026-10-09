@@ -67,6 +67,8 @@ async def queue_page(
         # Kitchens Uber cannot collect from: the courier needs a number.
         "no_phone": [k.name for k in kitchens if not (k.phone or k.kitchen_whatsapp)],
         "has_kitchen": bool(kitchens),
+        # Stripe on test keys: the job books nothing (dispatch.auto_booking_paused).
+        "auto_paused": dispatch.auto_booking_paused(),
     })
 
 

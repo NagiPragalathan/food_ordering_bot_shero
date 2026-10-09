@@ -3,11 +3,15 @@
 Orders are placed at least a day ahead (slots.earliest_bookable), so the
 courier is not booked at payment time: an Uber booking made a day early
 would expire. A job runs every few minutes and books each paid order whose
-slot starts within UBER_DISPATCH_HOURS_BEFORE (2 hours by default). The
-courier may collect from then on and must deliver inside the slot:
+slot starts within UBER_DISPATCH_HOURS_BEFORE (2 hours by default, set on the
+Settings page). The courier may collect from then on and must deliver inside
+the slot:
 
     pickup   from now (booking time)      until the slot ends
     dropoff  from the slot start           until the slot ends
+
+While Stripe is on test keys the job books nothing (auto_booking_paused):
+with Uber live, a test payment would otherwise book a real, paid courier.
 
 A failure (Uber down, credentials missing, an address Uber rejects) is kept
 on the order and logged, and the next run tries again until the slot is
@@ -42,6 +46,19 @@ AWAITING_COURIER = (str(OrderStage.PAID_SLOT_BOOKED), str(OrderStage.SENT_TO_KIT
                     str(OrderStage.OUT_FOR_DELIVERY))
 
 
+# Why the automatic booking is paused, or "" when it runs. With Uber live and
+# Stripe on test keys, a test payment (a fake card) would book - and pay for -
+# a real courier. So the job books nothing while Stripe is in test mode;
+# Send to Uber now still books on purpose.
+PAUSED_FOR_TEST_PAYMENTS = ("Stripe is in test mode, so couriers are not booked "
+                            "automatically (a test payment would book a real, "
+                            "paid Uber courier). Use Send to Uber now to book one.")
+
+
+def auto_booking_paused() -> str:
+    return PAUSED_FOR_TEST_PAYMENTS if settings.stripe_secret_key.startswith("sk_test") else ""
+
+
 def due_time(slot_starts_at: datetime | None) -> datetime | None:
     """When an order is sent to Uber: UBER_DISPATCH_HOURS_BEFORE its slot."""
     if slot_starts_at is None:
@@ -69,6 +86,35 @@ async def due_orders(session: AsyncSession, now: datetime | None = None) -> list
         .order_by(DeliverySlot.starts_at)
     )
     return list(rows.scalars())
+
+
+async def reschedule(session: AsyncSession, now: datetime | None = None) -> int:
+    """Move the send time of every order still waiting for its courier to the
+    current UBER_DISPATCH_HOURS_BEFORE, after the setting changes.
+
+    The send time is stored at payment, so without this a changed setting
+    would only reach orders paid after it. The kitchen alert moves with it:
+    the kitchen always hears before the courier is sent.
+    """
+    from app.services import kitchen_alerts     # kitchen_alerts imports this module
+
+    now = now or datetime.now(timezone.utc)
+    rows = (await session.execute(
+        select(Order, DeliverySlot, Outlet)
+        .join(DeliverySlot, DeliverySlot.id == Order.slot_id)
+        .outerjoin(Outlet, Outlet.id == Order.outlet_id)
+        .where(Order.payment_status == str(PaymentStatus.PAID),
+               Order.stage.in_(AWAITING_COURIER),
+               Order.uber_delivery_id.is_(None),
+               DeliverySlot.ends_at > now))).all()
+    for order, slot, outlet in rows:
+        order.uber_dispatch_due_at = due_time(slot.starts_at)
+        if order.kitchen_notified_at is None:
+            order.kitchen_notify_at = kitchen_alerts.notify_time(slot.starts_at, outlet)
+    await session.flush()
+    log.info("uber_send_times_moved", orders=len(rows),
+             hours_before=settings.uber_dispatch_hours_before)
+    return len(rows)
 
 
 # --- the admin's Uber queue ----------------------------------------------------

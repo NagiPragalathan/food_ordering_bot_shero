@@ -233,6 +233,18 @@ The booking happens whatever the order's stage, including after someone sets
 **Out for Delivery** by hand on the Orders page. Only an order already booked,
 or marked Delivered, Cancelled or Refunded, is skipped.
 
+**When to book** is set on the Settings page under Business rules (*When to
+book the Uber courier*, 0.5 to 12 hours, default 2). Saving a new value also
+moves the send time of every order still waiting for its courier, and their
+kitchen alerts, so the kitchen always hears first.
+
+**Paused while Stripe is in test mode.** Uber Direct has no sandbox address:
+the credentials decide whether a booking is real. With live Uber keys and
+Stripe on `sk_test_` keys, a test payment would book a real, paid courier, so
+the job books nothing and the queue shows a blue *Automatic booking is
+paused* notice. **Send to Uber now** still books (a real courier). Booking
+resumes by itself once Stripe has live keys.
+
 | Status | Meaning |
 |---|---|
 | Waiting | Paid; booked automatically at the time shown |
@@ -294,7 +306,7 @@ effect immediately** — no redeploy.
 |---|---|
 | Zoho CRM | Domain dropdown and **Connect Zoho** |
 | Order alerts | WhatsApp numbers told about every paid order |
-| Business rules | Tax, payment timings, public URLs |
+| Business rules | Tax, payment timings, when to book the Uber courier, public URLs |
 
 ### Order alerts
 

@@ -213,8 +213,10 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     order.payment_status = PaymentStatus.PAID
     order.paid_at = datetime.now(timezone.utc)
 
-    # 1. Convert the held slot into a booking (spec step 16).
-    await slots.book_slot(session, order.id)
+    # 1. Convert the held slot into a booking (spec step 16). A payment that
+    # lands after the link lapsed finds its hold released: claim the slot again.
+    if not await slots.book_slot(session, order.id) and order.slot_id:
+        await slots.book_after_late_payment(session, order)
     orders.set_stage(order, OrderStage.PAID_SLOT_BOOKED)
     # The chat was parked waiting for this payment. Close it, or the next
     # message the customer sends is told their payment link is still open.
@@ -270,6 +272,39 @@ async def handle_payment_failed(session: AsyncSession, order: Order,
     await crm_sync.advance_stage(customer, LeadStage.PAYMENT_FAILED)
     log.info("payment_failed", order_number=order.order_number)
     return True
+
+
+# What Stripe calls a paid Checkout Session.
+PAID_STATES = ("paid", "no_payment_required")
+
+
+async def settle_lapsed_link(session: AsyncSession, order: Order,
+                             customer: Customer) -> str:
+    """An unpaid order whose link has run out: ask Stripe before expiring it.
+
+    The expiry job is the safety net for a webhook that never arrived - so
+    it must not trust our own "not paid" either. A link Stripe says was paid
+    is confirmed as paid; a link still open is closed at Stripe first, so the
+    customer cannot pay after their slot is given away. Returns "paid",
+    "expired", "skipped" (already settled) or "unchecked" (Stripe could not
+    be asked: left for the next run, never expired blind).
+    """
+    if order.stripe_session_id:
+        try:
+            state = await checkout.session_state(order.stripe_session_id)
+            if state and state["status"] == "open":
+                await checkout.expire_session(order.stripe_session_id)
+                state = await checkout.session_state(order.stripe_session_id)
+        except PaymentError:
+            log.warning("payment_expiry_unchecked", order_number=order.order_number)
+            return "unchecked"
+        if state and state["payment_status"] in PAID_STATES:
+            log.warning("payment_found_paid_at_expiry", order_number=order.order_number)
+            paid = await handle_payment_success(session, order, customer,
+                                                payment_intent_id=state["payment_intent"])
+            return "paid" if paid else "skipped"
+    expired = await handle_payment_expired(session, order, customer)
+    return "expired" if expired else "skipped"
 
 
 async def handle_payment_expired(session: AsyncSession, order: Order,

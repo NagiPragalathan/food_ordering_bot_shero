@@ -54,6 +54,8 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("PAYMENT_LINK_TTL_MINUTES", "Payment link expiry (minutes, min 30)", False),
         ("PAYMENT_REMINDER_MINUTES", "Unpaid reminder after (minutes)", False),
         ("FEEDBACK_DELAY_MINUTES", "Feedback request after delivery (minutes)", False),
+        ("UBER_DISPATCH_HOURS_BEFORE",
+         "When to book the Uber courier: hours before the delivery slot (e.g. 1, 2, 3)", False),
         ("PUBLIC_BASE_URL", "Public API URL", False),
         ("PAY_REDIRECT_BASE_URL", "Pay redirect URL", False),
     ],
@@ -80,6 +82,32 @@ TOKEN_INVALIDATORS = {
     "ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN",
     "ZOHO_DATA_CENTER",
 }
+
+
+# Number settings the page checks before saving: (lowest, highest).
+NUMBER_RANGES: dict[str, tuple[float, float]] = {
+    # At least half an hour, so the courier has time to reach the kitchen;
+    # at most 12, as Uber will not hold a booking much longer.
+    "UBER_DISPATCH_HOURS_BEFORE": (0.5, 12),
+}
+
+
+class SettingValueError(ValueError):
+    """A value the page refuses (not a number, or out of range)."""
+
+
+def check_value(key: str, value: str) -> None:
+    """Raise SettingValueError when `value` is not allowed for `key`."""
+    if key not in NUMBER_RANGES or not (value or "").strip():
+        return
+    low, high = NUMBER_RANGES[key]
+    label = EDITABLE_KEYS[key][0].split(":")[0]
+    try:
+        number = float(value)
+    except ValueError:
+        raise SettingValueError(f"{label} must be a number.") from None
+    if not low <= number <= high:
+        raise SettingValueError(f"{label} must be between {low:g} and {high:g}.")
 
 
 class SecretsUnavailable(RuntimeError):
@@ -270,6 +298,8 @@ async def save_many(session: AsyncSession, values: dict[str, str], *,
     clearable = allow_blank or set()
     changed: list[str] = []
 
+    for key, value in values.items():
+        check_value(key, value)
     for key, value in values.items():
         if key not in EDITABLE_KEYS:
             continue

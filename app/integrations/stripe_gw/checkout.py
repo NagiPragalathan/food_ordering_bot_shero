@@ -203,6 +203,26 @@ async def expire_session(session_id: str) -> None:
         log.info("stripe_session_expire_skipped", session_id=session_id, error=str(exc))
 
 
+async def session_state(session_id: str) -> dict | None:
+    """What Stripe says about a Checkout Session: {status, payment_status,
+    payment_intent}. None for a mock session (nothing exists at Stripe).
+
+    Raises PaymentError when Stripe cannot be asked, so a caller never takes
+    "could not check" for "not paid".
+    """
+    if session_id.startswith(MOCK_SESSION_PREFIX):
+        return None
+    _apply_api_key()
+    try:
+        found = await stripe.checkout.Session.retrieve_async(session_id)
+    except stripe.StripeError as exc:
+        log.error("stripe_session_lookup_failed", session_id=session_id, error=str(exc))
+        raise PaymentError(f"Stripe session lookup failed: {exc}") from exc
+    intent = found.get("payment_intent")
+    return {"status": found.get("status"), "payment_status": found.get("payment_status"),
+            "payment_intent": intent.get("id") if isinstance(intent, dict) else intent}
+
+
 async def create_refund(payment_intent_id: str,
                         amount: Decimal | None = None) -> dict:
     """Full or partial refund (spec: Cancelled / Refunded order stage)."""

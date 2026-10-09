@@ -260,3 +260,15 @@ def test_database_url_is_not_editable_from_the_browser():
     assert "DATABASE_URL" not in EDITABLE_KEYS
     assert "ADMIN_SESSION_SECRET" not in EDITABLE_KEYS
     assert "SETTINGS_ENCRYPTION_KEY" not in EDITABLE_KEYS
+
+
+@pytest.mark.parametrize("value, ok", [("1", True), ("2.5", True), ("12", True),
+                                       ("0", False), ("13", False), ("two", False)])
+def test_the_uber_hours_must_be_sensible(value, ok):
+    from app.services.settings_store import SettingValueError, check_value
+
+    if ok:
+        check_value("UBER_DISPATCH_HOURS_BEFORE", value)
+    else:
+        with pytest.raises(SettingValueError):
+            check_value("UBER_DISPATCH_HOURS_BEFORE", value)

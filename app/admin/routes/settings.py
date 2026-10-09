@@ -23,11 +23,12 @@ from app.core.logging import get_logger
 from app.db.models import AdminUser
 from app.db.session import get_session
 from app.integrations.zoho import oauth as zoho_oauth
-from app.services import connection_tests, order_alerts, zoho_connect
+from app.services import connection_tests, dispatch, order_alerts, zoho_connect
 from app.services.settings_store import (
     EDITABLE_KEYS,
     SETTING_GROUPS,
     SecretsUnavailable,
+    SettingValueError,
     save_many,
     stored_keys,
 )
@@ -94,11 +95,14 @@ async def save_settings(
 
     try:
         changed = await save_many(session, values, updated_by=current_user.email)
-    except SecretsUnavailable as exc:
+    except (SecretsUnavailable, SettingValueError) as exc:
         return redirect(str(request.url_for("admin_settings")),
                         flash=("error", str(exc)))
 
     url = str(request.url_for("admin_settings"))
+    if "UBER_DISPATCH_HOURS_BEFORE" in changed:
+        # Orders already waiting keep their old send time unless moved.
+        await dispatch.reschedule(session)
     if not changed:
         return redirect(url, flash=("success", "No changes to save."))
 

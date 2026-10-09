@@ -59,7 +59,8 @@ async def expire_payment_links() -> int:
     """Expire lapsed links and release their slots.
 
     Stripe also emits `checkout.session.expired`; this is the safety net for a
-    webhook that never arrives. Both paths call the same idempotent handler.
+    webhook that never arrives. It asks Stripe first (payments.settle_lapsed_link),
+    so a payment whose webhook was lost is confirmed rather than expired.
     """
     expired = 0
     async with session_scope() as session:
@@ -69,7 +70,7 @@ async def expire_payment_links() -> int:
             if customer is None:
                 continue
             try:
-                if await payments.handle_payment_expired(session, order, customer):
+                if await payments.settle_lapsed_link(session, order, customer) == "expired":
                     expired += 1
             except Exception as exc:  # noqa: BLE001
                 log.error("expiry_job_failed", order_number=order.order_number,
@@ -107,6 +108,10 @@ async def send_feedback_requests() -> int:
 async def dispatch_couriers() -> int:
     """Book the Uber courier for orders whose slot starts within
     UBER_DISPATCH_HOURS_BEFORE (services/dispatch.py)."""
+    paused = dispatch.auto_booking_paused()
+    if paused:
+        log.info("courier_dispatch_paused", reason="stripe test mode")
+        return 0
     booked = 0
     async with session_scope() as session:
         for order in await dispatch.due_orders(session):

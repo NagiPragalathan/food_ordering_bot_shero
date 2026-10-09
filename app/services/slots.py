@@ -190,6 +190,31 @@ async def book_slot(session: AsyncSession, order_id: uuid.UUID) -> bool:
     return True
 
 
+async def book_after_late_payment(session: AsyncSession, order) -> None:
+    """Book the slot of an order paid after its hold was released.
+
+    The customer has paid, so they keep the window they chose: claimed
+    normally while it has room, otherwise booked one over capacity (one extra
+    order for the kitchen beats a paid customer with no delivery).
+    """
+    try:
+        await hold_slot(session, slot_id=order.slot_id, order_id=order.id)
+    except NoSlotsAvailableError:
+        slot = await session.get(DeliverySlot, order.slot_id)
+        if slot is None:
+            log.error("late_payment_slot_missing", order_id=str(order.id))
+            return
+        slot.reserved_count = (slot.reserved_count or 0) + 1
+        session.add(SlotHold(slot_id=slot.id, order_id=order.id,
+                             status=SlotHoldStatus.HELD,
+                             expires_at=datetime.now(timezone.utc)))
+        await session.flush()
+        log.warning("slot_overbooked_for_late_payment", slot_id=str(slot.id),
+                    order_id=str(order.id), reserved=slot.reserved_count,
+                    capacity=slot.capacity)
+    await book_slot(session, order.id)
+
+
 async def release_holds_for_order(session: AsyncSession, order_id: uuid.UUID, *,
                                   reason: str = "expired",
                                   include_booked: bool = False) -> int:

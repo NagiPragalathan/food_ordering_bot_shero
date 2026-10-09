@@ -164,3 +164,50 @@ async def test_a_booking_can_be_cancelled(session, customer, outlet, uber_calls,
     assert await dispatch.cancel(order)
     (row,) = await dispatch.queue(session, NOW)
     assert row.status == dispatch.CANCELLED
+
+
+# --- the send time setting and the test-mode pause --------------------------------
+async def test_changing_the_hours_moves_orders_already_waiting(session, customer, outlet,
+                                                                monkeypatch):
+    from app.core.config import settings
+
+    order = await _order(session, customer, outlet, starts_in=timedelta(days=1))
+    slot_start = NOW + timedelta(days=1)
+    order.uber_dispatch_due_at = slot_start - timedelta(hours=2)
+
+    monkeypatch.setattr(settings, "uber_dispatch_hours_before", 3.0)
+    assert await dispatch.reschedule(session, NOW) == 1
+    assert dispatch.as_utc(order.uber_dispatch_due_at) == slot_start - timedelta(hours=3)
+    # The kitchen still hears no later than the courier is booked.
+    assert dispatch.as_utc(order.kitchen_notify_at) <= slot_start - timedelta(hours=3)
+
+
+async def test_a_booked_order_keeps_its_time(session, customer, outlet, monkeypatch):
+    from app.core.config import settings
+
+    order = await _order(session, customer, outlet, starts_in=timedelta(days=1))
+    order.uber_delivery_id = "del_9"
+    monkeypatch.setattr(settings, "uber_dispatch_hours_before", 3.0)
+    assert await dispatch.reschedule(session, NOW) == 0
+
+
+def test_booking_pauses_while_stripe_is_in_test_mode(monkeypatch):
+    """With Uber live, a fake-card payment would book a real, paid courier."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_123")
+    assert "test mode" in dispatch.auto_booking_paused()
+    monkeypatch.setattr(settings, "stripe_secret_key", "rk_live_123")
+    assert dispatch.auto_booking_paused() == ""
+
+
+async def test_the_job_books_nothing_while_paused(monkeypatch):
+    from app.core.config import settings
+    from app.workers import jobs
+
+    monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_123")
+
+    async def never(*_a, **_k):
+        raise AssertionError("the queue must not even be read")
+    monkeypatch.setattr(jobs.dispatch, "due_orders", never)
+    assert await jobs.dispatch_couriers() == 0
