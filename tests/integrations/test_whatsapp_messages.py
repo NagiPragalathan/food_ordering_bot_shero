@@ -93,22 +93,24 @@ def test_the_specs_ten_templates_are_registered():
 def test_managed_templates_add_the_welcome_opener_and_order_summary():
     """ALL_TEMPLATES is the spec's ten; MANAGED is what we create on the WABA."""
     assert set(tpl.MANAGED_TEMPLATES) - set(tpl.ALL_TEMPLATES) == {
-        tpl.WELCOME, tpl.ORDER_SUMMARY, tpl.MENU_LINK}
-    assert len(tpl.BY_NAME) == len(tpl.MANAGED_TEMPLATES) == 13
+        tpl.WELCOME, tpl.ORDER_SUMMARY, tpl.MENU_LINK, tpl.WELCOME_BACK, tpl.WELCOME_NEW,
+        tpl.OUT_OF_AREA}
+    assert len(tpl.BY_NAME) == len(tpl.MANAGED_TEMPLATES) == 16
 
 
 def test_template_names_match_the_spec():
     # The templates with a link button are the _v2 versions, which point at
     # the hosted address (see templates.RENAMED).
     expected = {
-        "shero_payment_link_v2", "shero_payment_reminder_v2", "payment_confirmed_v2",
+        "shero_payment_link_v2", "shero_payment_reminder_v2", "payment_confirmed_v4",
         "shero_payment_failed_v2",
         "payment_expired_v2", "refund_processed", "order_out_for_delivery",
         "order_delivered", "order_cancelled", "shero_feedback",
     }
     assert {s.name for s in tpl.ALL_TEMPLATES} == expected
     assert set(tpl.BY_NAME) == expected | {"shero_welcome_message", "order_summary_v2",
-                                           "menu_link_v2"}
+                                           "menu_link_v2", "shero_welcome_back",
+                                           "shero_welcome_ready", "shero_out_of_area"}
 
 
 def test_declared_params_match_the_placeholders_in_the_body():

@@ -1,7 +1,8 @@
 """Runtime settings: environment floor, database overrides.
 
-The admin Settings page writes here, so the client can rotate a Zoho secret or
-repoint the WhatsApp channel without a redeploy.
+The admin Settings page writes here, so the client can connect Zoho and change
+the business rules without a redeploy. The service keys (Gallabox, Stripe,
+Uber Direct, Meta, Google Maps) are read from .env only.
 
 Resolution order is database -> environment. On save, the values are applied
 straight onto the live `settings` singleton, so every integration client picks
@@ -34,13 +35,11 @@ log = get_logger(__name__)
 
 # Keys the admin Settings page may write, grouped for the UI. `secret=True`
 # values are encrypted at rest and never rendered back to the browser.
+#
+# The service keys (Gallabox, Stripe, Uber Direct, Meta, Google Maps) are not
+# here: they live in .env only. Zoho stays because Connect Zoho saves its
+# refresh token from the page.
 SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
-    "WhatsApp (Gallabox)": [
-        ("GALLABOX_API_KEY", "API Key", False),
-        ("GALLABOX_API_SECRET", "API Secret", True),
-        ("GALLABOX_CHANNEL_ID", "Channel ID", False),
-        ("GALLABOX_WEBHOOK_TOKEN", "Webhook Token", True),
-    ],
     "Zoho CRM": [
         ("ZOHO_CLIENT_ID", "Client ID", False),
         ("ZOHO_CLIENT_SECRET", "Client Secret", True),
@@ -49,26 +48,6 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("ZOHO_ORDERS_MODULE", "Orders Module API Name", False),
         ("ZOHO_ORDER_ITEMS_MODULE", "Order Items Module API Name", False),
         ("ZOHO_ORG_ID", "Org ID (recorded by Connect Zoho)", False),
-    ],
-    "Stripe": [
-        ("STRIPE_SECRET_KEY", "Secret Key", True),
-        ("STRIPE_PUBLISHABLE_KEY", "Publishable Key", False),
-        ("STRIPE_WEBHOOK_SECRET", "Webhook Secret", True),
-        ("STRIPE_CURRENCY", "Currency", False),
-    ],
-    "Uber Direct": [
-        ("UBER_CUSTOMER_ID", "Customer ID", False),
-        ("UBER_CLIENT_ID", "Client ID", False),
-        ("UBER_CLIENT_SECRET", "Client Secret", True),
-    ],
-    "Meta Catalogue": [
-        ("META_CATALOG_ID", "Catalogue ID", False),
-        ("META_SYSTEM_USER_TOKEN", "System User Token", True),
-    ],
-    "Maps": [
-        ("GOOGLE_MAPS_API_KEY", "Google Maps API Key (server: Geocoding API)", True),
-        ("GOOGLE_MAPS_BROWSER_KEY",
-         "Google Maps Browser Key (Maps JavaScript API, referrer-restricted)", False),
     ],
     "Business rules": [
         ("TAX_PERCENT", "Tax percent applied to the dish subtotal", False),
@@ -84,6 +63,8 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
 OTHER_EDITABLE: list[tuple[str, str, bool]] = [
     ("BOT_REPLY_MODE", "Who the bot replies to (all / allowlist)", False),
     ("BOT_ALLOWED_NUMBERS", "Whitelisted WhatsApp numbers", False),
+    ("BOT_REPLY_TRIGGER", "Reply to any message, or only to trigger keywords", False),
+    ("BOT_TRIGGER_KEYWORDS", "Trigger keywords", False),
 ]
 
 EDITABLE_KEYS: dict[str, tuple[str, bool]] = {
@@ -95,7 +76,7 @@ EDITABLE_KEYS: dict[str, tuple[str, bool]] = {
 # Changing any of these invalidates a cached OAuth token.
 TOKEN_INVALIDATORS = {
     "ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN",
-    "ZOHO_DATA_CENTER", "UBER_CLIENT_ID", "UBER_CLIENT_SECRET",
+    "ZOHO_DATA_CENTER",
 }
 
 
@@ -171,6 +152,11 @@ async def apply_overrides(session: AsyncSession) -> int:
 
     for key, value in overrides.items():
         field = key.lower()
+        # A value saved for a key the page no longer edits (the service keys
+        # moved to .env only) is ignored, so .env is the one place to look.
+        if key not in EDITABLE_KEYS:
+            log.warning("setting_not_editable_ignored", key=key)
+            continue
         if not hasattr(settings, field):
             log.warning("setting_unknown_key", key=key)
             continue

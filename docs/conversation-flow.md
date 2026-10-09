@@ -8,10 +8,10 @@ Every step from section 1 of the spec, with where it lives in the code.
 
 | # | Step | Conversation step | Handler |
 |---|---|---|---|
-| 1-2 | Entry, returning check. A known customer's "hi" / "hello" / "menu" gets one message: "Welcome back to Shero Home Food, {name}! 👋 What would you like to do?" with **Order Now**. The name comes from our own database, or from the Zoho record found by the phone number when ours has none | `START` | `onboarding.start` |
+| 1-2 | Entry, returning check. A known customer's "hi" / "hello" / "menu" gets one message, the `shero_welcome_back` template: "Welcome back to Shero Home Food, {name}! 👋" with **Order Now** (opens https://www.shero.us/) and **Continue on WhatsApp** (carries on with the bot). The name comes from our own database, or from the Zoho record found by the phone number when ours has none | `START` | `onboarding.start` |
 | 3 | Ask name | `AWAIT_NAME` | `onboarding.handle_name` |
 | 4 | Ask email, with a **Change name** button | `AWAIT_EMAIL` | `onboarding.handle_email` |
-| 5 | Main menu (one button: **Order Now**) | `MAIN_MENU` | `onboarding.handle_main_menu` |
+| 5 | Main menu: the welcome template (`shero_welcome_back`, or `shero_welcome_ready` right after sign-up) with **Order Now** (the website) and **Continue on WhatsApp** (the ordering flow, from any step) | `MAIN_MENU` | `onboarding.handle_main_menu` |
 | 6 | Cuisine + Check Availability | `CUISINE_MENU` | `menu.handle_cuisine_menu` |
 | 6a | Check Availability | `AWAIT_AVAILABILITY_LOCATION` | `menu.handle_availability_location` |
 | 7a | Categories (paged) | `BROWSING_CATEGORIES` | `menu.handle_categories` |
@@ -33,6 +33,34 @@ Every step from section 1 of the spec, with where it lives in the code.
 Terminal steps: `HANDED_OVER` (with an agent, bot stays quiet), `COMPLETED`
 (next message restarts).
 
+## Before step 1: does the bot answer at all?
+
+The webhook (`webhooks_gallabox.py`) runs three gates before the engine:
+
+0. **Our channel only** (`integrations/gallabox/channel.is_ours`). Gallabox
+   sends the messages of *every* WhatsApp number in the account to the one
+   webhook, other teams' numbers included. Only messages whose `channelId`
+   is `GALLABOX_CHANNEL_ID` (or, without an id, whose `channelNumber` is
+   `WHATSAPP_BUSINESS_NUMBER`) go on; a message with neither is refused.
+   `python -m scripts.report_other_channels` lists the customers recorded
+   from other channels before this gate existed (read only).
+
+The other two are set on the admin Bot replies page:
+
+1. **Whitelist** (`services/allowlist.permits`): in test mode, only listed
+   numbers.
+2. **Trigger keywords** (`services/reply_triggers.decide`): with *Reply to any
+   message* off, a chat starts only on a trigger keyword. Button taps, the
+   bot's own prefilled messages (`NEW_LINK_KEYWORDS`, `CONTINUE_KEYWORDS`) and
+   a customer mid-order (any step but `START` / `COMPLETED` / `HANDED_OVER`,
+   active within `ACTIVE_HOURS` = 24) always pass. A trigger on a chat that is
+   not mid-order sets `fresh_start`, and the engine runs `onboarding.start`
+   instead of the parked step's handler.
+
+A message stopped by any gate creates no customer record and gets no
+reply; it reaches the team in Gallabox. See
+[admin-dashboard.md](admin-dashboard.md#trigger-keywords).
+
 ## Failure paths
 
 Each matches the spec's "If it fails" column.
@@ -43,7 +71,8 @@ Each matches the spec's "If it fails" column.
 | Invalid email format | Re-ask, stay on `AWAIT_EMAIL` (Change name button still offered) |
 | Wrong name noticed at the email step | Tap **Change name** - back to `AWAIT_NAME`; the new name replaces the old |
 | "Talk to Us" | Hand to a Gallabox agent, bot goes quiet |
-| Not serviceable | Polite message, Zoho stage `Not Serviceable`, end |
+| Not serviceable | The address is measured against **every active kitchen**; the nearest one whose area covers it cooks the order (radius per kitchen, set in admin -> Kitchens, 10 miles by default). None covers it: the ordering page shows a "We do not deliver here yet" panel in the address sheet - the address, the distance to the nearest kitchen and how far it delivers, with Add a new address / Choose another, Zoho stage `Not Serviceable`, and WhatsApp gets the `shero_out_of_area` message - **at most once every 24 hours** per customer, however many addresses they try (`services/out_of_area.py`). The check runs again at the price and confirm steps, so an address switched after a good one cannot reach payment. In the chat flow, a shared pin or ZIP gets the in-chat reply |
+| Delivery time (ordering page) | The page offers **7 days**: a strip of day tiles (a day with nothing free shows as Closed), then that day's times. Nothing starts sooner than `SLOT_MIN_LEAD_HOURS` (24 by default) after ordering, measured in the **kitchen's timezone** (set from its pin) - at 1 PM on the 7th, the first choice is 1 PM on the 8th, inside opening hours. The page says so: "Orders need 24 hours' notice. Earliest delivery: ..." |
 | Item unavailable | Name the item, re-show the menu |
 | Location unreadable | Re-ask for a pin or ZIP |
 | Invalid quantity | Re-ask for a number between 1 and 20 |
@@ -56,7 +85,7 @@ Each matches the spec's "If it fails" column.
 | Unpaid after 15 min | `payment_reminder` template |
 | Unpaid after 30 min | Link expires, slot released, dishes put back in the cart, `payment_expired` template. Its **Order Now** button opens the menu with that cart (`/pay/<order>` redirects a dead order to a fresh menu link) |
 | Order changed (Change menu / Update location) | Old order cancelled and its link marked expired, so neither the 15- nor the 30-minute message is sent for it |
-| Payment succeeded | `payment_confirmed` template with a **Download Bill** button; until Meta approves it, the same words as plain text with a bill link (`payments.send_payment_confirmation`) |
+| Payment succeeded | `payment_confirmed` template with a **Download Invoice** button (the PDF invoice); until Meta approves it, the same words as an ordinary message with the same button (`payments.send_payment_confirmation`) |
 | Payment failed | `payment_failed` template with a retry link |
 | Voice note, photo, sticker, video, file or contact card | "I can only read typed messages and button taps", plus what to do at this step; the step does not change. As the very first message it gets the normal welcome |
 | Anything a step did not match and so sent no reply | The engine notices nothing was sent and replies "Sorry, I did not understand that" (at a name/email/address step: "please type your answer") |
@@ -78,7 +107,8 @@ is recognisable rather than misread. All defined in `prompts.py`.
 
 | Prefix / id | Meaning |
 |---|---|
-| `menu:order` | Main menu's only button, **Order Now** |
+| `menu:order` | The old main-menu **Order Now** reply button; still honoured so a stale button works |
+| `Continue on WhatsApp` | The welcome template's quick reply (its label comes back as the reply); goes on to ordering from any step |
 | `menu:talk` | Retired from the main menu; still honoured so a stale button works |
 | `email:change_name` | Change name, under the email question |
 | `link:new` | Get new link on the old separate message (still honoured); the `menu_link` template's quick reply arrives as the text "Get new link" |

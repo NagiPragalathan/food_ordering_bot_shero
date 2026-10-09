@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import IntegrationError, NoSlotsAvailableError
 from app.core.logging import get_logger
-from app.db.models import DeliverySlot, Outlet, SlotHold, SlotHoldStatus
+from app.db.models import DeliverySlot, Order, Outlet, SlotHold, SlotHoldStatus
 
 log = get_logger(__name__)
 
@@ -266,6 +266,56 @@ async def ensure_slots(session: AsyncSession, outlet: Outlet, *,
         await session.flush()
         log.info("slots_generated", outlet=outlet.code, created=created)
     return created
+
+
+async def rebuild_future(session: AsyncSession, outlet: Outlet) -> int:
+    """After a kitchen is edited: drop future slots that no longer fit it.
+
+    ensure_slots only adds, so slots made under the old opening hours, slot
+    length or timezone would otherwise stay on offer. A slot is removed when
+    it no longer matches the kitchen's windows and nobody holds or ordered
+    it; a booked slot always stays. Kept free slots take the new capacity.
+    Returns how many were removed.
+    """
+    tz = _outlet_tz(outlet)
+    now = datetime.now(timezone.utc)
+    future = list((await session.execute(
+        select(DeliverySlot).where(DeliverySlot.outlet_id == outlet.id,
+                                   DeliverySlot.starts_at > now)
+    )).scalars())
+    if not future:
+        return 0
+    ids = [s.id for s in future]
+    taken = set((await session.execute(
+        select(SlotHold.slot_id).where(SlotHold.slot_id.in_(ids)))).scalars())
+    taken |= set((await session.execute(
+        select(Order.slot_id).where(Order.slot_id.in_(ids)))).scalars())
+
+    windows: dict = {}
+
+    def wanted(day) -> set[tuple[datetime, datetime]]:
+        if day not in windows:
+            windows[day] = {(a.astimezone(timezone.utc), b.astimezone(timezone.utc))
+                            for a, b in _windows_for_day(outlet, day, tz)}
+        return windows[day]
+
+    removed = 0
+    for slot in future:
+        start, end = as_utc(slot.starts_at), as_utc(slot.ends_at)
+        local_day = start.astimezone(tz).date()
+        # The day before too: a window that runs past midnight.
+        fits = (start, end) in wanted(local_day) | wanted(local_day - timedelta(days=1))
+        if slot.id in taken or slot.reserved_count:
+            continue
+        if fits:
+            slot.capacity = outlet.slot_capacity
+            continue
+        await session.delete(slot)
+        removed += 1
+    if removed:
+        await session.flush()
+        log.info("slots_rebuilt", outlet=outlet.code, removed=removed)
+    return removed
 
 
 def _windows_for_day(outlet: Outlet, day, tz) -> list[tuple[datetime, datetime]]:

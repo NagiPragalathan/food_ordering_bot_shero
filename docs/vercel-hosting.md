@@ -55,7 +55,7 @@ On this computer, in the project folder. Take the two values from
 store and `BLOB_READ_WRITE_TOKEN` from the Blob store.
 
 ```bash
-python -m scripts.copy_to_postgres --to "DATABASE_URL_UNPOOLED value" --blob-token "BLOB_READ_WRITE_TOKEN value"
+python -m scripts.copy_database --to "DATABASE_URL_UNPOOLED value" --blob-token "BLOB_READ_WRITE_TOKEN value"
 ```
 
 This creates the tables, copies the menu, kitchens, customers, orders and

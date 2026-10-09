@@ -68,3 +68,76 @@
   {{ message }}
 </div>
 {% endmacro %}
+
+{# --- List screens: search, tabs, pager (with app/admin/listing.py) ------- #}
+
+{# A search box inside a GET form; Escape clears it. #}
+{% macro search(name, value, placeholder) %}
+<div class="relative min-w-0 flex-1 sm:max-w-sm">
+  <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" viewBox="0 0 24 24"
+       fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+  <input type="search" name="{{ name }}" value="{{ value }}" placeholder="{{ placeholder }}" autocomplete="off"
+         class="w-full rounded-lg border border-stone-300 bg-white py-2 pl-9 pr-3 text-sm outline-none transition
+                placeholder:text-stone-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+</div>
+{% endmacro %}
+
+{# A filter drop-down that applies as soon as it changes. `options` is a list
+   of (value, label). #}
+{% macro select(name, value, options, label) %}
+<label class="flex items-center gap-2 text-xs text-stone-500">
+  <span class="hidden whitespace-nowrap font-medium sm:inline">{{ label }}</span>
+  <select name="{{ name }}" onchange="this.form.requestSubmit()" aria-label="{{ label }}"
+          class="rounded-lg border border-stone-300 bg-white py-2 pl-3 pr-8 text-sm text-stone-700 outline-none
+                 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    {% for v, l in options %}<option value="{{ v }}" {% if v == value %}selected{% endif %}>{{ l }}</option>{% endfor %}
+  </select>
+</label>
+{% endmacro %}
+
+{# Tabs with counts. `items`: (label, count, url, active, tone). #}
+{% macro tabs(items) %}
+<nav class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1" aria-label="Filter">
+  {% for label, count, url, active, tone in items %}
+  <a href="{{ url }}" {% if active %}aria-current="page"{% endif %}
+     class="inline-flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition
+            {{ 'bg-stone-900 text-white shadow-sm' if active else 'bg-white text-stone-600 ring-1 ring-inset ring-stone-200 hover:bg-stone-50' }}">
+    {{ label }}
+    <span class="rounded-full px-1.5 text-[11px] font-semibold tabular-nums
+      {% if active %}bg-white/20 text-white
+      {% elif tone == 'bad' and count %}bg-red-100 text-red-700
+      {% elif tone == 'warn' and count %}bg-amber-100 text-amber-800
+      {% elif tone == 'good' and count %}bg-emerald-100 text-emerald-700
+      {% else %}bg-stone-100 text-stone-500{% endif %}">{{ count }}</span>
+  </a>
+  {% endfor %}
+</nav>
+{% endmacro %}
+
+{# "Showing 26-50 of 312" with Previous / Next. #}
+{% macro pager(page, url_with) %}
+{% if page.total %}
+<div class="flex items-center justify-between gap-3 border-t border-stone-100 px-4 py-3 text-xs text-stone-500">
+  <span>Showing <b class="text-stone-700">{{ page.first }}-{{ page.last }}</b> of <b class="text-stone-700">{{ page.total }}</b></span>
+  {% if page.pages > 1 %}
+  <div class="flex items-center gap-1">
+    <a {% if page.has_prev %}href="{{ url_with(page=page.number - 1) }}"{% endif %}
+       class="rounded-lg px-3 py-1.5 font-semibold ring-1 ring-inset ring-stone-200 {{ 'text-stone-700 hover:bg-stone-50' if page.has_prev else 'pointer-events-none text-stone-300' }}">Previous</a>
+    <span class="px-2 tabular-nums">Page {{ page.number }} of {{ page.pages }}</span>
+    <a {% if page.has_next %}href="{{ url_with(page=page.number + 1) }}"{% endif %}
+       class="rounded-lg px-3 py-1.5 font-semibold ring-1 ring-inset ring-stone-200 {{ 'text-stone-700 hover:bg-stone-50' if page.has_next else 'pointer-events-none text-stone-300' }}">Next</a>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{# Initials in a tinted circle, coloured by the name so it stays the same. #}
+{% macro avatar(name, fallback) %}
+{% set text = (name or fallback or '?').strip() %}
+{% set parts = text.split() %}
+{% set initials = ((parts[0][0] ~ (parts[1][0] if parts | length > 1 else '')) if parts else '?') | upper %}
+{% set tones = ['bg-brand-100 text-brand-800', 'bg-amber-100 text-amber-800', 'bg-sky-100 text-sky-800',
+                'bg-rose-100 text-rose-800', 'bg-violet-100 text-violet-800', 'bg-emerald-100 text-emerald-800'] %}
+<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold {{ tones[(text | length) % 6] }}">{{ initials }}</span>
+{% endmacro %}

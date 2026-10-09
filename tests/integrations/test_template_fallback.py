@@ -66,7 +66,7 @@ async def test_a_url_button_becomes_a_link_button_to_the_same_place(client, monk
     (payload,), = [client.sent]
     action = payload["interactive"]["action"]["parameters"]
     assert action["url"] == "https://shero.test/receipt/TOKEN"
-    assert action["display_text"] == "Download Bill"
+    assert action["display_text"] == "Download Invoice"
     assert "Payment received! Your order #SHO-1 of $33.80" in payload["interactive"]["body"]["text"]
 
 

@@ -63,7 +63,7 @@ def _order_page_base_url() -> str:
 
 
 def _receipt_base_url() -> str:
-    """Base of the Download Bill button: the PDF bill, receipt token appended."""
+    """Base of the Download Invoice button: the PDF invoice, receipt token appended."""
     return _order_page_base_url().removesuffix("/order") + "/receipt"
 
 
@@ -130,6 +130,9 @@ def components(spec: TemplateSpec) -> list[dict]:
             "url": f"{base}/{{{{1}}}}",
             "example": [f"{base}/{example}"],
         })
+    elif spec.button_kind == "static_url":
+        buttons.append({"type": "URL", "text": spec.button_label or "Open",
+                        "url": spec.button_url})
     # Quick replies may sit alongside a URL button (order_summary: Pay Now,
     # then Change menu and Update location). Meta wants each kind grouped,
     # which appending them after the URL satisfies.

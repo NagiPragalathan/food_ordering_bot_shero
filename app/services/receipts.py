@@ -54,7 +54,7 @@ def receipt_url(order_number: str) -> str:
 
 
 def filename(order: Order) -> str:
-    return f"Shero-bill-{order.order_number}.pdf"
+    return f"Shero-invoice-{order.order_number}.pdf"
 
 
 def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
@@ -80,7 +80,7 @@ def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
     pdf.set_xy(130, 17)
     pdf.set_font("Helvetica", "B", 14)
     pdf.set_text_color(20, 20, 20)
-    pdf.cell(62, 8, "PAID BILL", align="R")
+    pdf.cell(62, 8, "PAID INVOICE", align="R")
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*MUTED)
     for offset, line in enumerate((f"Order #{order.order_number}",

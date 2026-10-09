@@ -17,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.core.security import verify_gallabox_token
 from app.db.session import get_session
+from app.integrations.gallabox import channel
 from app.schemas.inbound import parse_inbound
-from app.services import allowlist
+from app.services import allowlist, reply_triggers
 from app.services.conversation.engine import handle_event
 
 log = get_logger(__name__)
@@ -62,6 +63,13 @@ async def gallabox_webhook(
 
     event = parse_inbound(body)
 
+    # Another team's WhatsApp number in the same Gallabox account: not ours to
+    # answer, record or send to Zoho. Checked first of all.
+    if not channel.is_ours(event):
+        log.info("other_channel_ignored", message_id=event.message_id,
+                 channel_id=event.channel_id, channel_number_tail=event.channel_number[-4:])
+        return {"status": "ignored", "reason": "another channel"}
+
     # Test mode: answer only the listed numbers. Checked before anything else
     # happens, so another customer gets no record, no reply and no Zoho lead -
     # their message simply carries on to your team in Gallabox.
@@ -72,8 +80,16 @@ async def gallabox_webhook(
                  number_tail=event.whatsapp_number[-4:])
         return {"status": "ignored", "reason": "sender not whitelisted"}
 
+    # Keyword mode: a chat only starts the bot on a trigger keyword. Like the
+    # whitelist, a message that does not is left for your team untouched.
+    decision = await reply_triggers.decide(session, event)
+    if not decision.answer:
+        log.info("message_without_trigger", message_id=event.message_id,
+                 number_tail=event.whatsapp_number[-4:])
+        return {"status": "ignored", "reason": "no trigger keyword"}
+
     log.info("gallabox_webhook_received", kind=str(event.kind),
-             message_id=event.message_id)
+             message_id=event.message_id, reply_reason=decision.reason)
 
     if not event.is_actionable:
         # An envelope we could not read looks identical to a delivered message
@@ -88,7 +104,7 @@ async def gallabox_webhook(
                     if isinstance(body.get("whatsapp"), dict) else [],
                     event_name=str(body.get("event") or body.get("type") or ""))
 
-    handled = await handle_event(session, event)
+    handled = await handle_event(session, event, fresh_start=decision.fresh_start)
     return {"status": "ok" if handled else "ignored"}
 
 

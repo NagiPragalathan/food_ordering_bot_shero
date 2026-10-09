@@ -138,6 +138,12 @@
           <span class="h-2 w-2 rounded-full bg-amber-500"></span>Test mode
         </a>
         {% endif %}
+        {% if bot_keyword_mode %}
+        <a href="{{ url_for('admin_bot_replies') }}" title="The bot starts only on trigger keywords"
+           class="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100">
+          <span class="h-2 w-2 rounded-full bg-sky-500"></span>Keywords only
+        </a>
+        {% endif %}
         {% block actions %}{% endblock %}
       </div>
     </header>

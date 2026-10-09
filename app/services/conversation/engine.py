@@ -73,8 +73,14 @@ STEP_HANDLERS = {
 }
 
 
-async def handle_event(session: AsyncSession, event: InboundEvent) -> bool:
-    """Process one inbound message. Returns False if it was ignored."""
+async def handle_event(session: AsyncSession, event: InboundEvent, *,
+                       fresh_start: bool = False) -> bool:
+    """Process one inbound message. Returns False if it was ignored.
+
+    `fresh_start`: the message is a trigger keyword (services/reply_triggers)
+    on a chat the bot is not in the middle of, so it starts from the welcome
+    rather than being read as the answer to an old question.
+    """
     if not event.is_actionable:
         log.info("inbound_ignored", reason="not actionable",
                  kind=str(event.kind), raw_keys=list(event.raw)[:8])
@@ -102,7 +108,7 @@ async def handle_event(session: AsyncSession, event: InboundEvent) -> bool:
                       conversation=conversation, event=event)
 
     try:
-        await _dispatch(ctx)
+        await _dispatch(ctx, fresh_start=fresh_start)
         await _never_silent(ctx)
     except BotFlowError as exc:
         # Expected flow failures carry a message written for the customer.
@@ -121,7 +127,7 @@ async def handle_event(session: AsyncSession, event: InboundEvent) -> bool:
     return True
 
 
-async def _dispatch(ctx: FlowContext) -> None:
+async def _dispatch(ctx: FlowContext, *, fresh_start: bool = False) -> None:
     """Route one event to the right handler."""
     # A native catalogue cart can still arrive if the Meta catalogue is ever
     # wired up alongside this menu; treat it as a checkout request.
@@ -130,6 +136,10 @@ async def _dispatch(ctx: FlowContext) -> None:
         return
 
     if await _handle_global_intent(ctx):
+        return
+
+    if fresh_start:
+        await onboarding.start(ctx)
         return
 
     step = _current_step(ctx)
@@ -195,6 +205,15 @@ async def _handle_global_intent(ctx: FlowContext) -> bool:
     # "Get new link" button, or the expired page's prefilled message. Goes
     # through show_cuisines so ORDER_MODE still decides link vs chat menu.
     if text == p.NEW_LINK or text in p.NEW_LINK_KEYWORDS:
+        if ctx.customer.has_details:
+            await menu.show_cuisines(ctx)
+        else:
+            await onboarding.start(ctx)
+        return True
+
+    # The welcome's Continue on WhatsApp button, tapped from an older message:
+    # straight on to ordering, as from the main menu.
+    if text in p.CONTINUE_KEYWORDS:
         if ctx.customer.has_details:
             await menu.show_cuisines(ctx)
         else:

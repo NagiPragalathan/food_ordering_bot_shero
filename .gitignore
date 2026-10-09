@@ -25,3 +25,6 @@ htmlcov/
 
 # Browser checks (Playwright MCP screenshots and logs)
 .playwright-mcp/
+
+# SSH keys (e.g. the AWS server key) must never be committed.
+*.pem

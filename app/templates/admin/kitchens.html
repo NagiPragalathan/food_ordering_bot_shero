@@ -1,151 +1,273 @@
 {% extends "admin/base.html" %}
+{% import "admin/_macros.html" as ui %}
 {% block title %}Kitchens{% endblock %}
 {% block heading %}Kitchens{% endblock %}
 {% block subheading %}
-<p class="text-xs text-stone-500">Customers are served when their location is inside a kitchen's
-  delivery area. The nearest kitchen that covers them gets the order.</p>
+<p class="text-xs text-stone-500">A customer can order when their address is inside a kitchen's delivery
+  area. The nearest kitchen that covers them gets the order.</p>
 {% endblock %}
 {% block actions %}
 <a href="{{ url_for('admin_kitchen_new') }}"
-   class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+   class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
+  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
   Add kitchen
 </a>
 {% endblock %}
 
 {% block content %}
+{% if not maps_browser_key %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+{% endif %}
 
+<div class="space-y-5">
 {% if kitchens %}
-<div class="grid gap-5 lg:grid-cols-5">
-  <div class="overflow-hidden rounded-xl border border-stone-200 bg-white lg:col-span-3">
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead class="border-b border-stone-200 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
-          <tr>
-            <th class="px-4 py-2.5 font-medium">Kitchen</th>
-            <th class="px-4 py-2.5 font-medium">Delivers</th>
-            <th class="px-4 py-2.5 font-medium">WhatsApp / phone</th>
-            <th class="px-4 py-2.5"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-stone-100">
-        {% for k in kitchens %}
-          <tr class="align-top {% if not k.is_active %}opacity-60{% endif %}">
-            <td class="px-4 py-3">
-              <div class="font-medium text-stone-900">{{ k.name }}
-                {% if k.is_primary %}<span class="ml-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700">Default</span>{% endif %}
-                {% if not k.is_active %}<span class="ml-1 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-500">Off</span>{% endif %}
-              </div>
-              <div class="text-xs text-stone-500">{{ k.full_address }}</div>
-            </td>
-            <td class="px-4 py-3 text-xs text-stone-600">
-              {% if k.service_area_mode == 'zips' %}ZIP list ({{ k.service_zips | length }})
-              {% elif k.service_area_mode == 'both' %}{{ miles(k.delivery_radius_km) | round(1) }} mi + ZIP list
-              {% else %}Within {{ miles(k.delivery_radius_km) | round(1) }} mi{% endif %}
-              {% if not k.operating_hours %}<div class="font-semibold text-amber-700">No opening hours</div>{% endif %}
-            </td>
-            <td class="px-4 py-3 text-xs text-stone-600">
-              {{ k.kitchen_whatsapp or '—' }}<br>{{ k.phone or '' }}
-              {% if not (k.phone or k.kitchen_whatsapp) %}<div class="font-semibold text-amber-700">No number: Uber cannot book</div>{% endif %}
-            </td>
-            <td class="px-4 py-3 text-right">
-              <a href="{{ url_for('admin_kitchen_edit', kitchen_id=k.id) }}"
-                 class="text-xs font-semibold text-brand-700 underline">Edit</a>
-              {% if not k.is_primary and k.is_active %}
-              <form method="post" action="{{ url_for('admin_kitchen_primary', kitchen_id=k.id) }}" class="mt-1">
-                <button class="text-xs text-stone-500 underline">Make default</button>
-              </form>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+
+  {# --- Numbers ---------------------------------------------------------- #}
+  <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    {{ ui.stat('Taking orders', stats.active, 'of ' ~ (kitchens | length) ~ ' kitchen' ~ ('' if kitchens | length == 1 else 's'),
+               tone='good' if stats.active else 'warn', icon='M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z') }}
+    {{ ui.stat('Open right now', stats.open, 'inside opening hours', tone='accent',
+               icon='M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2') }}
+    {{ ui.stat('Paused', stats.paused, 'not matched to customers', tone='warn' if stats.paused else 'default',
+               icon='M10 4H6v16h4zM18 4h-4v16h4z') }}
+    {{ ui.stat('No opening hours', stats.no_hours, 'no delivery slots', tone='warn' if stats.no_hours else 'default',
+               icon='M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0') }}
+  </div>
+
+  {% if not stats.active %}
+  <div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+    No kitchen is taking orders, so customers cannot order at all. Resume one below.
+  </div>
+  {% endif %}
+
+  <div class="grid gap-5 xl:grid-cols-5">
+    {# --- List ------------------------------------------------------------ #}
+    <div class="space-y-3 xl:col-span-3">
+      <form method="get" action="{{ url_for('admin_kitchens') }}"
+            class="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-3 shadow-card sm:flex-row sm:items-center">
+        {{ ui.search('find', find, 'Search kitchen name, street, city or ZIP') }}
+        <div class="flex items-center gap-2 sm:ml-auto">
+          {{ ui.select('status', status, [('', 'All kitchens')] + status_options.items() | list, 'Show') }}
+          <button class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800">Search</button>
+          {% if find or status %}<a href="{{ url_for('admin_kitchens') }}" class="px-1 text-xs font-semibold text-stone-500 hover:text-stone-800">Clear</a>{% endif %}
+        </div>
+      </form>
+
+      {% for k in shown %}
+      {% set st = states[k.id] %}
+      {% set phone = k.phone or k.kitchen_whatsapp %}
+      <article class="group overflow-hidden rounded-2xl border bg-white shadow-card transition hover:shadow-lg
+                      {{ 'border-stone-200' if k.is_active else 'border-dashed border-stone-300 bg-stone-50/60' }}">
+        <div class="flex flex-col gap-4 p-4 sm:flex-row sm:items-start">
+          <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl
+                       {{ 'bg-brand-50 text-brand-700' if k.is_active else 'bg-stone-100 text-stone-400' }}">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+          </span>
+
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-[15px] font-semibold text-stone-900">{{ k.name }}</h2>
+              {% if k.is_primary %}{{ ui.badge('Default', 'info') }}{% endif %}
+              {% if not k.is_active %}{{ ui.badge('Paused', 'warn') }}
+              {% elif st.open_now %}{{ ui.badge('Open now', 'good') }}
+              {% elif st.today %}{{ ui.badge('Closed now') }}
+              {% else %}{{ ui.badge('Closed today') }}{% endif %}
+            </div>
+            <p class="mt-0.5 truncate text-xs text-stone-500">{{ k.full_address }}</p>
+
+            <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-stone-600">
+              <span class="inline-flex items-center gap-1.5" title="Delivery area">
+                <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+                {% if k.service_area_mode == 'zips' %}{{ k.service_zips | length }} ZIP codes
+                {% elif k.service_area_mode == 'both' %}{{ miles(k.delivery_radius_km) | round(1) }} mi + {{ k.service_zips | length }} ZIPs
+                {% else %}Within <b class="font-semibold text-stone-800">{{ miles(k.delivery_radius_km) | round(1) }} mi</b>{% endif %}
+              </span>
+              <span class="inline-flex items-center gap-1.5" title="Today's hours">
+                <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                {% if st.today %}Today {{ st.today[0] }}-{{ st.today[1] }}{% elif k.operating_hours %}Closed today{% else %}<b class="text-amber-700">No opening hours</b>{% endif %}
+              </span>
+              <span class="inline-flex items-center gap-1.5" title="Phone for the courier">
+                <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>
+                {% if phone %}<span class="font-mono">+{{ phone | replace('+', '') }}</span>{% else %}<b class="text-amber-700">No number: Uber cannot book</b>{% endif %}
+              </span>
+            </div>
+          </div>
+
+          <div class="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end">
+            <a href="{{ url_for('admin_kitchen_edit', kitchen_id=k.id) }}"
+               class="rounded-lg bg-stone-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-stone-800">Edit</a>
+            <form method="post" action="{{ url_for('admin_kitchen_active', kitchen_id=k.id) }}"
+                  {% if k.is_active %}data-confirm="Pause {{ k.name }}? New customers will not be matched to it until you resume it."{% endif %}>
+              <input type="hidden" name="active" value="{{ '0' if k.is_active else '1' }}">
+              <button class="rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ring-inset
+                             {{ 'text-stone-600 ring-stone-300 hover:bg-stone-50' if k.is_active else 'text-emerald-700 ring-emerald-300 hover:bg-emerald-50' }}">
+                {{ 'Pause' if k.is_active else 'Resume' }}
+              </button>
+            </form>
+            {% if not k.is_primary and k.is_active %}
+            <form method="post" action="{{ url_for('admin_kitchen_primary', kitchen_id=k.id) }}">
+              <button class="text-[11px] font-medium text-stone-500 hover:text-stone-800 hover:underline">Make default</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+      </article>
+      {% else %}
+      <div class="rounded-2xl border border-stone-200 bg-white">
+        {{ ui.empty('No kitchens match.') }}
+        <p class="-mt-6 pb-8 text-center"><a href="{{ url_for('admin_kitchens') }}" class="text-xs font-semibold text-brand-700 underline">Show all kitchens</a></p>
+      </div>
+      {% endfor %}
+    </div>
+
+    {# --- Map and address checker -------------------------------------- #}
+    <div class="space-y-5 xl:col-span-2">
+      <section class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-card">
+        <header class="flex items-center justify-between border-b border-stone-100 px-4 py-3">
+          <h2 class="text-sm font-semibold text-stone-900">Delivery areas</h2>
+          <span class="text-[11px] text-stone-400">active kitchens</span>
+        </header>
+        <div id="kitchen-map" class="h-80 w-full bg-stone-100"></div>
+      </section>
+
+      <section class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card">
+        <h2 class="text-sm font-semibold text-stone-900">Check an address</h2>
+        <p class="mt-0.5 text-xs text-stone-500">Which kitchen would a customer at this address get?</p>
+        <form method="get" action="{{ url_for('admin_kitchens') }}" class="mt-3 flex gap-2">
+          {% if find %}<input type="hidden" name="find" value="{{ find }}">{% endif %}
+          {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+          <input name="q" value="{{ q }}" placeholder="12 Maple St, Edison, NJ 08820"
+                 class="min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Check</button>
+        </form>
+
+        {% if check %}
+          {% if check.error %}
+          <p class="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{{ check.error }}</p>
+          {% else %}
+          <div class="mt-3 rounded-xl px-3 py-2.5 text-sm {{ 'bg-emerald-50 text-emerald-900' if check.result.is_serviceable else 'bg-red-50 text-red-900' }}">
+            {% if check.result.is_serviceable %}
+              <b>Served</b> by {{ check.result.kitchen_name }}, {{ miles(check.result.distance_km) }} mi away.
+            {% else %}
+              <b>Not served</b>: no kitchen covers this address.
+            {% endif %}
+            <div class="mt-0.5 text-[11px] opacity-70">{{ check.point.formatted_address }}</div>
+          </div>
+          <ul class="mt-2 divide-y divide-stone-100 text-xs">
+            {% for row in check.rows %}
+            <li class="flex items-center justify-between gap-3 py-2">
+              <span class="font-medium text-stone-800">{{ row.kitchen.name }}</span>
+              <span class="flex items-center gap-3">
+                <span class="tabular-nums text-stone-500">{{ row.miles if row.miles is not none else '—' }} mi</span>
+                {{ ui.badge('Covers it', 'good') if row.serves else ui.badge('Out of area') }}
+              </span>
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        {% endif %}
+      </section>
     </div>
   </div>
 
-  <div class="lg:col-span-2">
-    <div id="kitchen-map" class="h-72 w-full overflow-hidden rounded-xl border border-stone-200 bg-stone-100 lg:h-full lg:min-h-[18rem]"></div>
-  </div>
-</div>
 {% else %}
-<div class="rounded-xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">
-  No kitchens yet. <a class="font-semibold text-brand-700 underline" href="{{ url_for('admin_kitchen_new') }}">Add the first one</a>.
-</div>
+  <div class="rounded-2xl border border-dashed border-stone-300 bg-white px-6 py-16 text-center">
+    <span class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
+      <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+    </span>
+    <p class="mt-3 text-sm font-semibold text-stone-900">No kitchens yet</p>
+    <p class="mt-1 text-xs text-stone-500">Customers can order once a kitchen with a delivery area and opening hours is set up.</p>
+    <a href="{{ url_for('admin_kitchen_new') }}" class="mt-4 inline-block rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Add the first kitchen</a>
+  </div>
 {% endif %}
-
-<!-- Address checker -->
-<section class="mt-6 rounded-xl border border-stone-200 bg-white p-5">
-  <h2 class="text-sm font-semibold">Check an address</h2>
-  <p class="mt-0.5 text-xs text-stone-500">See which kitchen a customer at this address would be matched to.</p>
-  <form method="get" action="{{ url_for('admin_kitchens') }}" class="mt-3 flex flex-col gap-2 sm:flex-row">
-    <input name="q" value="{{ q }}" placeholder="12 Maple St, Edison, NJ 08820"
-           class="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-    <button class="rounded-lg border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50">Check</button>
-  </form>
-
-  {% if check %}
-    {% if check.error %}
-      <p class="mt-3 text-sm text-red-700">{{ check.error }}</p>
-    {% else %}
-      <p class="mt-3 text-sm">
-        {% if check.result.is_serviceable %}
-          <span class="font-semibold text-emerald-700">Served</span> by <b>{{ check.result.kitchen_name }}</b>
-          ({{ miles(check.result.distance_km) }} mi away).
-        {% else %}
-          <span class="font-semibold text-red-700">Not served</span> - no kitchen covers this address.
-        {% endif %}
-      </p>
-      <table class="mt-2 w-full text-xs">
-        <tbody class="divide-y divide-stone-100">
-        {% for row in check.rows %}
-          <tr>
-            <td class="py-1.5 pr-3 font-medium">{{ row.kitchen.name }}</td>
-            <td class="py-1.5 pr-3">{{ row.miles if row.miles is not none else '—' }} mi</td>
-            <td class="py-1.5 {{ 'text-emerald-700' if row.serves else 'text-stone-500' }}">{{ 'Covers it' if row.serves else 'Out of area' }}</td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% endif %}
-  {% endif %}
-</section>
+</div>
 {% endblock %}
 
 {% block scripts %}
-{% if kitchens %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-(function () {
-  // Each kitchen with its delivery circle; the checked address, if any.
-  var kitchens = [
+  document.querySelectorAll('form[data-confirm]').forEach(form =>
+    form.addEventListener('submit', e => { if (!confirm(form.dataset.confirm)) e.preventDefault(); }));
+</script>
+{% if kitchens %}
+<script>
+// Each active kitchen with its delivery circle; the checked address, if any.
+window.__kitchenMapData = {
+  kitchens: [
     {% for k in kitchens if k.is_active %}
     {name: {{ k.name | tojson }}, lat: {{ k.latitude }}, lng: {{ k.longitude }},
      radiusM: {{ (k.delivery_radius_km * 1000) if k.service_area_mode != 'zips' else 0 }}},
     {% endfor %}
-  ];
-  var customer = {% if check and check.point %}{lat: {{ check.point.latitude }}, lng: {{ check.point.longitude }}}{% else %}null{% endif %};
-  var el = document.getElementById('kitchen-map');
-  if (!el || typeof L === 'undefined') { if (el) el.textContent = 'Map could not load.'; return; }
-  var map = L.map(el);
+  ],
+  customer: {% if check and check.point %}{lat: {{ check.point.latitude }}, lng: {{ check.point.longitude }}}{% else %}null{% endif %},
+};
+</script>
+{% if maps_browser_key %}
+<script>
+window.__sheroKitchensMap = () => {
+  const { kitchens, customer } = window.__kitchenMapData;
+  const map = new google.maps.Map(document.getElementById('kitchen-map'), {
+    center: { lat: 39.2, lng: -76.7 }, zoom: 9, mapTypeControl: false,
+    streetViewControl: false, fullscreenControl: true,
+  });
+  const bounds = new google.maps.LatLngBounds();
+  const info = new google.maps.InfoWindow();
+  kitchens.forEach((k) => {
+    const at = { lat: k.lat, lng: k.lng };
+    const marker = new google.maps.Marker({ map, position: at, title: k.name });
+    marker.addListener('click', () => { info.setContent(k.name); info.open({ map, anchor: marker }); });
+    bounds.extend(at);
+    if (k.radiusM) {
+      const circle = new google.maps.Circle({ map, center: at, radius: k.radiusM, clickable: false,
+        strokeColor: '#0f766e', strokeOpacity: 0.8, strokeWeight: 2, fillColor: '#14b8a6', fillOpacity: 0.1 });
+      bounds.union(circle.getBounds());
+    }
+  });
+  if (customer) {
+    new google.maps.Marker({ map, position: customer, title: 'Checked address',
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#dc2626', fillOpacity: 1,
+              strokeColor: '#fff', strokeWeight: 2 } });
+    bounds.extend(customer);
+  }
+  if (!bounds.isEmpty()) map.fitBounds(bounds, 24);
+};
+(() => {
+  const s = document.createElement('script');
+  s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent({{ maps_browser_key | tojson }}) +
+          '&callback=__sheroKitchensMap&loading=async';
+  s.async = true;
+  s.onerror = () => { document.getElementById('kitchen-map').textContent = 'The map could not load.'; };
+  document.head.appendChild(s);
+})();
+</script>
+{% else %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function () {
+  // No Google key: the same map drawn with OpenStreetMap.
+  const { kitchens, customer } = window.__kitchenMapData;
+  const el = document.getElementById('kitchen-map');
+  if (!el || typeof L === 'undefined') { if (el) el.textContent = 'The map could not load.'; return; }
+  const map = L.map(el);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-              {maxZoom: 18, attribution: '&copy; OpenStreetMap'}).addTo(map);
-  var bounds = [];
-  kitchens.forEach(function (k) {
+              { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  const bounds = [];
+  kitchens.forEach((k) => {
     L.marker([k.lat, k.lng]).addTo(map).bindPopup(k.name);
     bounds.push([k.lat, k.lng]);
     if (k.radiusM) {
-      var c = L.circle([k.lat, k.lng], {radius: k.radiusM, color: '#0f766e', weight: 1, fillOpacity: 0.08}).addTo(map);
+      const c = L.circle([k.lat, k.lng], { radius: k.radiusM, color: '#0f766e', weight: 2, fillOpacity: 0.1 }).addTo(map);
       bounds.push(c.getBounds().getNorthEast(), c.getBounds().getSouthWest());
     }
   });
   if (customer) {
-    L.circleMarker([customer.lat, customer.lng], {radius: 7, color: '#b91c1c', fillOpacity: 0.9})
+    L.circleMarker([customer.lat, customer.lng], { radius: 7, color: '#b91c1c', fillOpacity: 0.9 })
       .addTo(map).bindPopup('Checked address').openPopup();
     bounds.push([customer.lat, customer.lng]);
   }
-  if (bounds.length) map.fitBounds(bounds, {padding: [20, 20]}); else map.setView([39.5, -76.6], 9);
+  if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] }); else map.setView([39.5, -76.6], 9);
 })();
 </script>
+{% endif %}
 {% endif %}
 {% endblock %}

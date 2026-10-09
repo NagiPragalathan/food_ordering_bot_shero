@@ -22,6 +22,7 @@ Start here.
 | [deployment.md](deployment.md) | Local setup, AWS shape, DNS, webhooks, monitoring |
 | [vercel-hosting.md](vercel-hosting.md) | Hosting on Vercel: Postgres, Blob photos, Cron jobs, data copy |
 | [aws-hosting-guide.pdf](aws-hosting-guide.pdf) | Step-by-step AWS hosting for the server team (one EC2 server, SQLite) |
+| [google-maps-key-setup.pdf](google-maps-key-setup.pdf) | Allowing the live address on the Google Maps browser key |
 | [testing.md](testing.md) | What is covered, and what still needs a real Postgres |
 
 ## Quick orientation

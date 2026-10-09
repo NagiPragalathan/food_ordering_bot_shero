@@ -40,6 +40,9 @@ class ServiceCheck:
     # The kitchen that will cook the order: the nearest one covering the
     # address. None when nothing covers it.
     kitchen: Outlet | None = field(default=None, compare=False, repr=False)
+    # The nearest kitchen's delivery radius, when nothing covers the address
+    # (so the customer can be told "delivers within 10 miles").
+    range_km: float | None = None
 
     @property
     def distance_display(self) -> str:
@@ -130,8 +133,11 @@ async def check_service(session: AsyncSession, point: GeoPoint | None, *,
     if not best.is_serviceable:
         # Nothing covers it: report the nearest kitchen's reason, but do not
         # hand back a kitchen the order must not be placed with.
+        nearest = best.kitchen
+        in_radius = nearest is not None and (nearest.service_area_mode or "radius") != "zips"
         return ServiceCheck(False, best.distance_km, best.reason,
-                            kitchen_name=best.kitchen_name)
+                            kitchen_name=best.kitchen_name,
+                            range_km=nearest.delivery_radius_km if in_radius else None)
     return best
 
 

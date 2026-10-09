@@ -9,8 +9,16 @@ asyncpg speaks neither the `postgres://` scheme nor libpq's `sslmode` and
 
     postgresql+asyncpg://user:pass@host/db?ssl=require
 
-Anything already in driver form (postgresql+asyncpg://, sqlite+aiosqlite://)
-passes through unchanged.
+MySQL (the database on the AWS server) is written plainly as
+
+    mysql://user:pass@host:3306/db
+
+and becomes `mysql+aiomysql://user:pass@host:3306/db?charset=utf8mb4`;
+utf8mb4 so dish names and WhatsApp messages keep every character, emoji
+included.
+
+Anything already in driver form (postgresql+asyncpg://, mysql+aiomysql://,
+sqlite+aiosqlite://) passes through unchanged.
 """
 
 from __future__ import annotations
@@ -26,6 +34,8 @@ _SSL_MODES = {"require", "verify-ca", "verify-full", "prefer", "allow"}
 def driver_url(url: str) -> str:
     raw = (url or "").strip()
     scheme, rest = raw.split("://", 1) if "://" in raw else ("", raw)
+    if scheme == "mysql":
+        return _mysql_url(rest)
     if scheme not in ("postgres", "postgresql"):
         return raw
 
@@ -36,3 +46,11 @@ def driver_url(url: str) -> str:
     if sslmode in _SSL_MODES and not any(k == "ssl" for k, _ in kept):
         kept.append(("ssl", "require"))
     return urlunsplit(parts._replace(query=urlencode(kept)))
+
+
+def _mysql_url(rest: str) -> str:
+    parts = urlsplit(f"mysql+aiomysql://{rest}")
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if not any(k == "charset" for k, _ in query):
+        query.append(("charset", "utf8mb4"))
+    return urlunsplit(parts._replace(query=urlencode(query)))

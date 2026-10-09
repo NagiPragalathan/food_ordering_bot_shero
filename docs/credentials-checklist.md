@@ -20,7 +20,7 @@ Legend: 🔴 blocks go-live · 🟡 needed before that area works · ⚪ optiona
 |---|---|---|
 | API Key | Settings → API Keys (**app.gallabox.com/apikey**) | `GALLABOX_API_KEY` |
 | API Secret | same screen, **shown only once** | `GALLABOX_API_SECRET` |
-| Channel ID | Settings → WhatsApp Channel → Channel Id | `GALLABOX_CHANNEL_ID` |
+| Channel ID | Settings → WhatsApp Channel → Channel Id. **Required in production:** the bot answers only messages on this channel (Gallabox sends every channel in the account to the webhook) | `GALLABOX_CHANNEL_ID` |
 | Account ID | the 24-hex id in any dashboard URL, `/accounts/<this>/…` | `GALLABOX_ACCOUNT_ID` |
 | Admin login for our team | invite our email as Admin | — |
 

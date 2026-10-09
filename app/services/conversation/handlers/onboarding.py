@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.core.logging import get_logger
 from app.db.models import ConversationStep, LeadStage
+from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.messages import Button
 from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
@@ -22,10 +23,7 @@ async def start(ctx: FlowContext) -> None:
     await ensure_record(ctx.customer)
 
     if ctx.customer.has_details:
-        # One message, greeting and button together, rather than a greeting
-        # followed by a separate "What would you like to do?".
-        await show_main_menu(
-            ctx, greeting=p.WELCOME_BACK.format(name=ctx.customer.greeting_name))
+        await show_main_menu(ctx, returning=True)
         return
 
     await ctx.reply_text(p.WELCOME_ASK_NAME)
@@ -75,15 +73,24 @@ async def handle_email(ctx: FlowContext) -> None:
     await show_main_menu(ctx)
 
 
-async def show_main_menu(ctx: FlowContext, *, greeting: str | None = None) -> None:
-    """Step 5: the one thing to do next.
+async def show_main_menu(ctx: FlowContext, *, returning: bool = False) -> None:
+    """Step 5: the greeting, with the two ways to order.
 
-    A stale `menu:talk` id from a button sent before this changed is still
-    honoured by `handle_main_menu`, so nobody who tapped the old one is
-    left without an answer.
+    Order Now opens the shop's website; Continue on WhatsApp carries on here.
+    One WhatsApp message cannot hold a link button and a reply button, and a
+    template that could was filed by Meta as Marketing - which Meta does not
+    deliver to US numbers. So it is two ordinary messages, sent back to back:
+    the greeting with the Order Now link button, then the reply button.
+
+    Stale ids from older buttons (`menu:order`, `menu:talk`) are still
+    honoured by `handle_main_menu`, so nobody who tapped one is left without
+    an answer.
     """
-    body = f"{greeting}\n\n{p.MAIN_MENU}" if greeting else p.MAIN_MENU
-    await ctx.reply_buttons(body, [Button(p.MENU_ORDER, p.BTN_ORDER_NOW)])
+    name = ctx.customer.greeting_name
+    greeting = (p.WELCOME_BACK if returning else p.WELCOME_READY).format(name=name)
+    await ctx.reply_cta_url(greeting, url=tpl.SHERO_WEBSITE, display_text=p.BTN_ORDER_NOW)
+    await ctx.reply_buttons(p.CONTINUE_PROMPT,
+                            [Button(tpl.CONTINUE_ON_WHATSAPP, tpl.CONTINUE_ON_WHATSAPP)])
     ctx.goto(ConversationStep.MAIN_MENU)
 
 
@@ -98,7 +105,7 @@ async def handle_main_menu(ctx: FlowContext) -> None:
         await hand_over(ctx)
         return
 
-    if choice == p.MENU_ORDER or "order" in choice:
+    if choice == p.MENU_ORDER or "order" in choice or choice in p.CONTINUE_KEYWORDS:
         await menu.show_cuisines(ctx)
         return
 

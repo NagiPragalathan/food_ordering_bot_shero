@@ -30,11 +30,16 @@ def _engine_options(url: str, *, serverless: bool = False) -> dict:
     if serverless:
         return {"poolclass": NullPool,
                 "connect_args": {"statement_cache_size": 0}}
-    return {
+    options = {
         "pool_pre_ping": True,   # webhooks arrive in bursts after idle periods
         "pool_size": 10,
         "max_overflow": 20,
     }
+    if url.startswith("mysql"):
+        # MySQL closes connections idle for longer than its wait_timeout;
+        # renew them well before that instead of meeting a dead one.
+        options["pool_recycle"] = 1800
+    return options
 
 
 DATABASE_URL = driver_url(settings.database_url)

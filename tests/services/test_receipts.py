@@ -70,7 +70,7 @@ async def test_a_paid_order_downloads_its_bill(session, customer, outlet):
     response = _client(session).get(f"/receipt/{receipts.build_token('SHO-260930-BILL1')}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
-    assert "Shero-bill-SHO-260930-BILL1.pdf" in response.headers["content-disposition"]
+    assert "Shero-invoice-SHO-260930-BILL1.pdf" in response.headers["content-disposition"]
     assert response.content.startswith(b"%PDF")
 
 

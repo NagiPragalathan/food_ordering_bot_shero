@@ -8,12 +8,14 @@ connection, or to rescue an order - or cancel a booking.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import partial
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.admin import listing
 from app.admin.deps import redirect, render, require_admin
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -29,17 +31,36 @@ router = APIRouter(prefix="/deliveries", tags=["admin"])
 @router.get("", name="admin_deliveries")
 async def queue_page(
     request: Request,
+    status: str | None = None,
+    q: str | None = None,
+    when: str | None = None,
     session: AsyncSession = Depends(get_session),
     current_user: AdminUser = Depends(require_admin),
 ):
     kitchens = await kitchen_service.active_kitchens(session)
     tz = _tz(kitchens[0].timezone if kitchens else None)
-    rows = await dispatch.queue(session)
+    now = datetime.now(timezone.utc)
+    status = listing.choice(status, set(dispatch.STATUSES), "")
+    when = listing.choice(when, dispatch.WHEN, "")
+
+    every = await dispatch.queue(session, now=now)
+    # Tabs count what the search and date filter leave; the tab then narrows.
+    searched = [r for r in every if dispatch.matches(r, query=q or "", when=when, now=now, tz=tz)]
+    rows = [r for r in searched if not status or r.status == status]
     return render(request, "admin/deliveries.html", {
         "current_user": current_user,
         "rows": rows,
+        "counts": dispatch.status_counts(searched),
+        "searched": len(searched),
+        "total": len(every),
+        "status": status,
+        "query": q or "",
+        "when": when,
+        "when_options": dispatch.WHEN,
+        "filtering": bool(q or when or status),
+        "url_with": partial(listing.url_with, request),
         "tz": tz,
-        "now": datetime.now(timezone.utc),
+        "now": now,
         "hours_before": settings.uber_dispatch_hours_before,
         "uber_ready": bool(settings.uber_customer_id and settings.uber_client_id
                            and settings.uber_client_secret),

@@ -15,7 +15,7 @@ from app.admin.auth import SESSION_COOKIE, get_user, read_session
 from app.core.config import settings
 from app.db.models import AdminUser
 from app.db.session import get_session
-from app.services import allowlist
+from app.services import allowlist, reply_triggers
 
 # Shared with the public ordering pages - see app/templating.py.
 TEMPLATE_DIR = templating.TEMPLATE_DIR
@@ -52,6 +52,8 @@ def render(request: Request, template: str, context: dict[str, Any] | None = Non
         "settings": settings,
         # For the "test mode" badge in every page's header.
         "bot_restricted": allowlist.is_restricted(),
+        # ...and the "keywords only" one.
+        "bot_keyword_mode": reply_triggers.is_keyword_mode(),
         **(context or {}),
     }
     response = templates.TemplateResponse(

@@ -169,6 +169,12 @@ class Settings(BaseSettings):
     # Whitelisted WhatsApp numbers, "number|name,...".
     bot_allowed_numbers: str = Field(default="",
                                      validation_alias="ADMIN_PAGE_ONLY_BOT_ALLOWED_NUMBERS")
+    # Reply to any message ("any", the default) or only start on a trigger
+    # keyword ("keywords"), and the keywords as JSON. Admin page only, like
+    # the two above. See services/reply_triggers.py.
+    bot_reply_trigger: str = Field(default="", validation_alias="ADMIN_PAGE_ONLY_BOT_REPLY_TRIGGER")
+    bot_trigger_keywords: str = Field(default="",
+                                      validation_alias="ADMIN_PAGE_ONLY_BOT_TRIGGER_KEYWORDS")
 
     # --- Geo -----------------------------------------------------------------
     google_maps_api_key: str = ""

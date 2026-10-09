@@ -63,6 +63,9 @@ class Customer(Base, UUIDPrimaryKey, Timestamps):
 
     is_converted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Last WhatsApp "we do not deliver to <address> yet" (services/out_of_area);
+    # it goes at most once a day, however often they try another address.
+    out_of_area_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Customer {self.whatsapp_number} stage={self.lead_stage}>"

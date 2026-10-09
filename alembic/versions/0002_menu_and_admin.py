@@ -20,6 +20,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from app.db.types import json_server_default
+
 revision = "0002_menu_and_admin"
 down_revision = "0001_initial"
 branch_labels = None
@@ -106,7 +108,8 @@ def upgrade() -> None:
         op.add_column('outlets', sa.Column('service_area_mode', sa.String(length=10),
               nullable=False, server_default='radius'))
         op.add_column('outlets', sa.Column('service_zips', postgresql.JSONB(astext_type=sa.Text()),
-              nullable=False, server_default='[]'))
+              nullable=False,
+              server_default=json_server_default('[]', op.get_bind().dialect.name)))
         op.add_column('outlets', sa.Column('is_primary', sa.Boolean(),
               nullable=False, server_default=sa.false()))
         # ### end Alembic commands ###

@@ -19,7 +19,7 @@ WhatsApp updates.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -226,3 +226,39 @@ def _e164(number: str | None) -> str:
 
 def _float(value) -> float | None:
     return None if value is None else float(value)
+
+
+# --- the Uber queue page's filters ------------------------------------------------
+STATUSES = (WAITING, BOOKED, RETRYING, MISSED, CANCELLED)
+WHEN = {"today": "Today", "upcoming": "Upcoming", "past": "Past"}
+
+
+def matches(row: QueueRow, *, query: str = "", when: str = "", now: datetime,
+            tz: tzinfo = timezone.utc) -> bool:
+    """Does this queue row pass the page's search and date filter?
+
+    The search looks at the order number, the customer's name and number,
+    and the delivery address and ZIP. "Today" is the kitchen's today.
+    """
+    if query:
+        needle = query.strip().lower().lstrip("+")
+        customer = row.customer
+        haystack = " ".join(str(part or "") for part in (
+            row.order.order_number, row.order.delivery_address, row.order.postal_code,
+            customer.name if customer else "", customer.whatsapp_number if customer else "",
+        )).lower()
+        if needle not in haystack:
+            return False
+    if when == "today":
+        return row.slot_start is not None and row.slot_start.astimezone(tz).date() == \
+            now.astimezone(tz).date()
+    if when == "upcoming":
+        return row.slot_end is not None and row.slot_end > now
+    if when == "past":
+        return row.slot_end is not None and row.slot_end <= now
+    return True
+
+
+def status_counts(rows: list[QueueRow]) -> dict[str, int]:
+    """How many rows have each status (for the page's tabs)."""
+    return {status: sum(1 for r in rows if r.status == status) for status in STATUSES}

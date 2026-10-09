@@ -1,0 +1,169 @@
+{# Bot replies page: "Reply to any message" switch, trigger keywords and the
+   message tester. Saved by admin_bot_triggers_save (services/reply_triggers). #}
+
+{% macro keyword_row(keyword, match, options) %}
+<div data-row class="grid grid-cols-[1fr_10rem_2rem] items-center gap-2">
+  <input name="keyword" value="{{ keyword }}" maxlength="60" placeholder="e.g. order food"
+         class="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+  <select name="match" class="rounded-lg border border-stone-300 px-2 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    {% for value, label in options.items() %}
+    <option value="{{ value }}" {% if match == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="button" data-remove title="Remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-600">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+</div>
+{% endmacro %}
+
+<!-- Trigger keywords -->
+<form id="triggers-form" method="post" action="{{ url_for('admin_bot_triggers_save') }}"
+      class="overflow-hidden rounded-xl border border-stone-200 bg-white lg:col-span-2">
+  <div class="space-y-4 p-5">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h2 class="text-sm font-semibold text-stone-900">Reply to any message</h2>
+        <p class="mt-0.5 text-xs text-stone-500">
+          On: every message gets the bot. Off: a chat only starts the bot when the message
+          matches one of the trigger keywords below.
+        </p>
+      </div>
+      <label class="relative inline-flex shrink-0 cursor-pointer items-center">
+        <input type="checkbox" id="any-message" name="any_message" value="1" class="peer sr-only"
+               {% if trigger_mode == 'any' %}checked{% endif %}>
+        <span class="h-6 w-11 rounded-full bg-stone-300 transition peer-checked:bg-brand-600
+                     peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500/40"></span>
+        <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
+        <span id="any-label" class="ml-2 w-7 text-xs font-semibold text-stone-700">{{ 'On' if trigger_mode == 'any' else 'Off' }}</span>
+      </label>
+    </div>
+
+    <div class="rounded-lg px-3 py-2 text-xs
+         {{ 'bg-emerald-50 text-emerald-800' if trigger_mode == 'any' else 'bg-sky-50 text-sky-800' }}">
+      {% if trigger_mode == 'any' %}
+        <b>Replying to any message.</b> Trigger keywords are not used.
+      {% else %}
+        <b>Keywords only.</b> The bot starts on {{ triggers | length }} trigger keyword{{ '' if triggers | length == 1 else 's' }};
+        other messages go to your team in Gallabox.
+      {% endif %}
+    </div>
+
+    <div id="keywords" class="transition {{ 'opacity-50' if trigger_mode == 'any' else '' }}">
+      <div class="mb-2 flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-stone-900">Trigger keywords</h3>
+        <span id="kw-count" class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600"></span>
+      </div>
+      <div class="mb-1 grid grid-cols-[1fr_10rem_2rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-stone-400">
+        <span>Keyword or phrase</span><span>Match</span><span></span>
+      </div>
+      <div id="kw-rows" class="space-y-2">
+        {% for t in triggers %}{{ keyword_row(t.keyword, t.match, matches) }}{% endfor %}
+      </div>
+      <template id="kw-template">{{ keyword_row('', 'contains', matches) }}</template>
+      <button type="button" id="kw-add"
+              class="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 px-3 py-2 text-xs font-semibold text-stone-600 hover:border-brand-500 hover:text-brand-700">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        Add keyword
+      </button>
+      <ul class="mt-3 space-y-1 text-[11px] text-stone-500">
+        <li><b>Exact message</b>: the whole message is the keyword ("hi" matches "Hi!" but not "hi there").</li>
+        <li><b>Contains the word</b>: the keyword appears anywhere as whole words ("order" matches "I want to order", not "reorder").</li>
+        <li><b>Starts with</b>: the message begins with the keyword ("menu" matches "menu please").</li>
+        <li>Capitals, punctuation and emoji are ignored.</li>
+      </ul>
+      <div class="mt-3 rounded-lg bg-stone-50 px-3 py-2 text-[11px] text-stone-500">
+        Always answered, even without a keyword: a customer part-way through an order
+        (active in the last {{ active_hours }} hours), taps on the bot&rsquo;s own buttons, and the
+        bot&rsquo;s own &ldquo;New menu link&rdquo; message.
+      </div>
+    </div>
+  </div>
+  <div class="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-5 py-3">
+    <span id="kw-unsaved" class="hidden text-xs font-medium text-amber-700">Unsaved changes</span>
+    <button class="ml-auto rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+      Save
+    </button>
+  </div>
+</form>
+
+<!-- Message tester -->
+<aside class="h-fit rounded-xl border border-stone-200 bg-white p-5">
+  <h2 class="text-sm font-semibold text-stone-900">Test a message</h2>
+  <p class="mt-0.5 text-xs text-stone-500">Would this first message start the bot, with the saved settings?</p>
+  <form method="get" action="{{ url_for('admin_bot_replies') }}" class="mt-3 space-y-2">
+    <input name="message" value="{{ message_query }}" placeholder="e.g. Hi, I want to order"
+           class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+    <button class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50">Test</button>
+  </form>
+  {% if message_check %}
+    {% if message_check.any %}
+      <div class="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+        <b>Starts the bot</b>: Reply to any message is on.
+      </div>
+    {% elif message_check.trigger %}
+      <div class="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+        <b>Starts the bot</b>: matches &ldquo;{{ message_check.trigger.keyword }}&rdquo; ({{ message_check.match_label | lower }}).
+      </div>
+    {% elif message_check.built_in %}
+      <div class="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+        <b>Starts the bot</b>: it is one of the bot&rsquo;s own messages.
+      </div>
+    {% else %}
+      <div class="mt-3 rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-700">
+        <b>Does not start the bot</b>: no trigger keyword matches, so it goes to your team in
+        Gallabox (unless that customer is already part-way through an order).
+      </div>
+    {% endif %}
+  {% endif %}
+</aside>
+
+<script>
+(function () {
+  var form = document.getElementById('triggers-form');
+  var rows = document.getElementById('kw-rows');
+  var tpl = document.getElementById('kw-template');
+  var toggle = document.getElementById('any-message');
+  var dirty = false;
+
+  function count() {
+    var n = Array.prototype.filter.call(rows.querySelectorAll('input[name=keyword]'),
+      function (i) { return i.value.trim(); }).length;
+    document.getElementById('kw-count').textContent = n + (n === 1 ? ' keyword' : ' keywords');
+    return n;
+  }
+  function paint() {
+    document.getElementById('keywords').classList.toggle('opacity-50', toggle.checked);
+    document.getElementById('any-label').textContent = toggle.checked ? 'On' : 'Off';
+  }
+  function addRow(focus) {
+    var row = tpl.content.firstElementChild.cloneNode(true);
+    rows.appendChild(row);
+    if (focus) row.querySelector('input').focus();
+    count();
+  }
+  function markDirty() { dirty = true; document.getElementById('kw-unsaved').classList.remove('hidden'); }
+
+  document.getElementById('kw-add').addEventListener('click', function () { addRow(true); markDirty(); });
+  rows.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-remove]');
+    if (!btn) return;
+    btn.closest('[data-row]').remove();
+    if (!rows.children.length) addRow(false);
+    count(); markDirty();
+  });
+  form.addEventListener('input', function () { count(); markDirty(); });
+  form.addEventListener('change', function () { paint(); markDirty(); });
+  form.addEventListener('submit', function (e) {
+    if (!toggle.checked && !count()) {
+      e.preventDefault();
+      alert('Add at least one trigger keyword, or switch Reply to any message on.');
+      return;
+    }
+    dirty = false;
+  });
+  window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+  if (!rows.children.length) addRow(false);
+  count(); paint();
+})();
+</script>

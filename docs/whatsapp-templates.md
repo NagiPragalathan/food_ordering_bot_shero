@@ -37,7 +37,7 @@ uses a `_v2` template only once it is approved **and** `PUBLIC_BASE_URL` is
 
 | Spec name | Name on the channel |
 |---|---|
-| `payment_success` | `payment_confirmed_v2` (with the Download Bill button) |
+| `payment_success` | `payment_confirmed_v4` (with the Download Invoice button; v2 said Download Bill, v3 was submitted with a test address and is unused) |
 | `payment_link` | `shero_payment_link_v2` |
 | `payment_reminder` | `shero_payment_reminder_v2` |
 | `payment_failed` | `shero_payment_failed_v2` |
@@ -68,11 +68,17 @@ WhatsApp message instead (`gallabox/fallback.py`):
 | Template has | Sent instead |
 |---|---|
 | Body only | A text with the same words, parameters filled in |
-| A URL button (Pay Now, Download Bill, View Menu) | A link button with the same label and address |
+| A URL button (Pay Now, Download Invoice, View Menu) | A link button with the same label and address |
 | Quick replies (Great / Good / Poor, Order Now) | Reply buttons; a tap answers exactly like the template's |
+| A fixed website link plus quick replies (the welcome) | The link written into the text, and the reply buttons kept |
 
 An approved template whose link button points at a different website than
 `PUBLIC_BASE_URL` counts as not approved too (log: `template_link_outdated`).
+Only per-customer links (`{{1}}` in the address) are checked; the welcome's
+fixed link to www.shero.us is meant to point elsewhere. A template we filed as
+Utility that Meta re-filed as Marketing is not used either (log:
+`template_recategorised_marketing`): Meta does not deliver marketing templates
+to US numbers.
 The button's address is fixed when Meta approves the template, so after the
 bot moves to a new address those templates must be resubmitted; until then
 the ordinary message carries the current link.
@@ -183,6 +189,30 @@ we contacted first is **asked for its name** before anything else.
 A tapped button works even where typed text is ignored (mid-address capture,
 so that somebody on "Order Street" can still give their address).
 
+## `shero_welcome_back` and `shero_welcome_ready`
+
+- **Category:** Utility (Marketing would not reach US numbers)
+- **Trigger:** `shero_welcome_back` when a known customer writes in;
+  `shero_welcome_ready` once a new customer has given name and email
+- **Parameters:** `{{1}}` = customer_name
+- **Buttons:** URL **Order Now** → `https://www.shero.us/` (fixed), then quick
+  reply **Continue on WhatsApp**
+
+**Bodies:**
+
+```
+Welcome back to Shero Home Food, {{1}}! 👋
+```
+
+```
+Thanks, {{1}}! You are all set with Shero Home Food. 👋
+```
+
+A plain WhatsApp message cannot hold a link button and a reply button
+together, which is why the greeting is a template. Tapping **Continue on
+WhatsApp** sends the label back; `handle_main_menu` and, from any other step,
+`_handle_global_intent` go straight on to ordering.
+
 ---
 
 ## Payment templates
@@ -273,8 +303,8 @@ Hi {{1}}, your order #{{2}} is waiting for payment. Complete it to keep your {{3
 |---|---|
 | Category | Utility |
 | Trigger | Stripe payment confirmed (step 16) |
-| Body | Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} for delivery at {{4}}. Thank you for ordering with Shero! Tap below for your bill. |
-| Button | **Download Bill**, dynamic URL `PUBLIC_BASE_URL/receipt/{{1}}` |
+| Body | Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} for delivery at {{4}}. Thank you for ordering with Shero! Tap below for your invoice. |
+| Button | **Download Invoice**, dynamic URL `PUBLIC_BASE_URL/receipt/{{1}}` |
 
 Submitted under a new name because the first `payment_success` came back in
 error, and a name stays taken until the template is deleted in Gallabox.
@@ -284,7 +314,7 @@ does not expire. An unpaid order has no bill.
 
 **Until it is approved the confirmation still arrives:** the bot checks
 approval first and otherwise sends the same words as a plain WhatsApp text,
-ending with a "Download your bill" link. The customer paid from a link sent
+ending with a Download Invoice button. The customer paid from a link sent
 moments earlier, so the chat is inside WhatsApp's 24-hour window and a
 plain text is delivered. Code: `payments.send_payment_confirmation`,
 `services/receipts.py`, route `GET /receipt/<token>`.
@@ -327,6 +357,31 @@ Hi {{1}}, your cart is still saved. Want to complete your Shero order?
 ```
 Your refund of ${{1}} for order #{{2}} has been processed. It may take 5-10 business days to reflect.
 ```
+
+## `shero_out_of_area`
+
+- **Category:** Utility
+- **Trigger:** the address chosen on the ordering page is outside every
+  kitchen's delivery area
+- **Parameters:** `{{1}}` = customer_name, `{{2}}` = delivery_address
+  (street, unit, ZIP)
+- **Buttons:** none
+
+**Body:**
+
+```
+Hi {{1}}, sorry - we do not deliver to {{2}} yet. 😞
+
+Our kitchens are not close enough to that address today, but we are growing and hope to be in your area soon.
+
+You can try a different delivery address any time.
+```
+
+Not spam: it goes **at most once every 24 hours per customer**
+(`customers.out_of_area_notified_at`, `services/out_of_area.NOTICE_EVERY`).
+Every try still gets the refusal on the page itself.
+
+---
 
 ## Order and delivery templates
 

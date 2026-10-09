@@ -115,7 +115,7 @@ async def test_the_listed_number_reaches_the_bot(session, only_me, monkeypatch):
 
     handled = []
 
-    async def spy(session, event):
+    async def spy(session, event, **_):
         handled.append(event)
         return True
 

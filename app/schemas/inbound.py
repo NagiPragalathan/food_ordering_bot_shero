@@ -62,6 +62,10 @@ class InboundEvent:
     ad_id: str = ""
     campaign_id: str = ""
     referral: dict = field(default_factory=dict)
+    # The Gallabox channel (business number) it arrived on. The webhook gets
+    # every channel in the account; see integrations/gallabox/channel.py.
+    channel_id: str = ""
+    channel_number: str = ""
     raw: dict = field(default_factory=dict)
 
     @property
@@ -107,6 +111,8 @@ def parse_inbound(body: dict) -> InboundEvent:
             or whatsapp.get("id") or body.get("id") or ""
         ),
         contact_name=str(contact.get("name") or payload.get("name") or ""),
+        channel_id=str(body.get("channelId") or payload.get("channelId") or ""),
+        channel_number=str(body.get("channelNumber") or payload.get("channelNumber") or ""),
         raw=body,
     )
 

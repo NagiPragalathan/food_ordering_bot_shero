@@ -70,7 +70,9 @@ window.SheroAddressBook = function (deps) {
       '<button id="addr-new" class="mt-1 w-full rounded-xl border-2 border-dashed border-brand-300 ' +
       'py-3 text-sm font-semibold text-brand-600">+ Add a new address</button>' +
       contactBox() +
-      '<div id="slots-wrap" class="mt-4 hidden"><h3 class="mb-2 text-sm font-semibold">Pick a delivery time</h3>' +
+      // Filled by the delivery check when no kitchen covers the address.
+      '<div id="area-note"></div>' +
+      '<div id="slots-wrap" class="mt-4 hidden"><h3 class="mb-2 text-sm font-semibold">When should we deliver?</h3>' +
       '<div id="slots" class="grid grid-cols-2 gap-2"></div></div>',
       '<button id="check" class="w-full bg-brand-500 text-white ' + btn + '">' +
       'Check delivery &amp; show times</button>');

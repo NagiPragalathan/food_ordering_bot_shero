@@ -11,6 +11,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import tzfpy
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,6 +118,28 @@ async def locate(data: KitchenForm) -> tuple[float, float]:
     return point.latitude, point.longitude
 
 
+def timezone_for(latitude: float, longitude: float) -> str | None:
+    """The timezone at the kitchen's pin ("America/New_York", "Asia/Kolkata").
+
+    Slots, opening hours and the 24-hour notice are all worked out in this
+    zone, so it has to be where the kitchen really is: a Chennai pin on New
+    York time offered "9 AM" slots that were 6:30 PM in Chennai. None at
+    sea (Etc/GMT+2 and the like), where the form's choice is kept.
+    """
+    try:
+        name = tzfpy.get_tz(longitude, latitude)
+    except Exception as exc:  # noqa: BLE001 - the form's own choice still works
+        log.warning("kitchen_timezone_lookup_failed", error=str(exc))
+        return None
+    if not name or name.startswith("Etc/"):
+        return None
+    try:
+        ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return None
+    return name
+
+
 async def save(session: AsyncSession, kitchen: Outlet | None, data: KitchenForm) -> Outlet:
     """Create the kitchen (kitchen=None) or update it from the form."""
     latitude, longitude = await locate(data)
@@ -138,7 +163,8 @@ async def save(session: AsyncSession, kitchen: Outlet | None, data: KitchenForm)
     kitchen.service_zips = data.service_zips
     kitchen.kitchen_whatsapp = data.kitchen_whatsapp
     kitchen.phone = data.phone
-    kitchen.timezone = data.timezone
+    # The pin decides; the form's choice only where the pin cannot (at sea).
+    kitchen.timezone = timezone_for(latitude, longitude) or data.timezone
     kitchen.operating_hours = data.operating_hours
     kitchen.slot_length_minutes = data.slot_length_minutes
     kitchen.slot_capacity = data.slot_capacity
@@ -229,3 +255,33 @@ def _number(text: str) -> float | None:
         return float(text) if text else None
     except ValueError:
         return None
+
+
+# --- the Kitchens list ---------------------------------------------------------------
+@dataclass(frozen=True)
+class OpenState:
+    """Is the kitchen open right now, and today's hours (for the list)."""
+
+    open_now: bool
+    today: tuple[str, str] | None      # ("09:00", "21:00"), or None when closed today
+
+
+def open_state(kitchen: Outlet, now: datetime) -> OpenState:
+    """Opening hours read in the kitchen's own timezone."""
+    try:
+        local = now.astimezone(ZoneInfo(kitchen.timezone or "America/New_York"))
+    except ZoneInfoNotFoundError:
+        local = now
+    windows = (kitchen.operating_hours or {}).get(WEEKDAY_KEYS[local.weekday()]) or []
+    if not windows:
+        return OpenState(False, None)
+    opens, closes = windows[0][0], windows[0][1]
+    clock = local.strftime("%H:%M")
+    return OpenState(opens <= clock < closes, (opens, closes))
+
+
+async def set_active(session: AsyncSession, kitchen: Outlet, active: bool) -> None:
+    """Pause or resume a kitchen: paused, no new customer is matched to it."""
+    kitchen.is_active = active
+    await session.flush()
+    log.info("kitchen_active_changed", outlet=kitchen.code, active=active)

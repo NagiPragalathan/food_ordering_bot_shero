@@ -27,10 +27,19 @@ from app.services import addresses, crm_sync, media_thumbs
 from app.services import cart as cart_service
 from app.services import kitchen as kitchen_service
 from app.services import menu as menu_service
-from app.services import order_link, orders, payments, pricing, slots
+from app.services import order_link, orders, out_of_area, payments, pricing, slots
+from app.services.kitchen import ServiceCheck
+from app.integrations.geo.geocoder import GeoPoint
 from app.templating import templates
 
 log = get_logger(__name__)
+# The page's date picker: this many days from the earliest bookable time
+# (SLOT_MIN_LEAD_HOURS after now), and at most this many slots in all.
+WEB_DAYS_AHEAD = 7
+SLOT_GONE = ("That delivery time is no longer available - it may now be less than "
+             "24 hours away. Please check delivery again and pick another time.")
+WEB_MAX_SLOTS = 300
+
 router = APIRouter(prefix="/order", tags=["ordering"])
 
 # Shown when an upstream we depend on is unconfigured or down. It names
@@ -235,25 +244,19 @@ async def check_address(request: Request, token: str,
     except addresses.AddressError as exc:
         return {"ok": False, "error": str(exc)}
 
-    # A map pin is exact; a typed address falls back to its ZIP.
-    point = await kitchen_service.resolve_location(
-        latitude=address.latitude,
-        longitude=address.longitude,
-        postal_code=address.postal_code,
-    )
-    check = await kitchen_service.check_service(session, point,
-                                               postal_code=address.postal_code)
+    check, point = await _serving(session, address)
     if not check.is_serviceable:
-        await crm_sync.advance_stage(customer, LeadStage.NOT_SERVICEABLE)
-        return {"ok": False, "serviceable": False,
-                "error": check.reason or "We do not deliver to that area yet."}
+        return await _refuse(customer, address, check)
 
     # The nearest kitchen that delivers to this address cooks the order.
     kitchen = check.kitchen
     if kitchen is None:
         return {"ok": False, "error": "No kitchen is configured yet."}
 
-    available = await slots.list_available_slots(session, kitchen)
+    # A week to choose from on the page (the chat offers a short list).
+    tz = slots.outlet_tz(kitchen)
+    available = await slots.list_available_slots(
+        session, kitchen, days_ahead=WEB_DAYS_AHEAD, limit=WEB_MAX_SLOTS)
     if not available:
         return {"ok": False, "error": "There are no delivery slots available "
                                       "right now. Please try again later."}
@@ -278,18 +281,81 @@ async def check_address(request: Request, token: str,
         "ok": True,
         "serviceable": True,
         "distance_km": check.distance_km,
-        "slots": [{"id": s.slot_id, "label": s.label} for s in available],
+        "slots": [_slot_json(s, tz) for s in available],
+        # "Orders need 24 hours' notice", with the first moment that allows.
+        "lead_hours": settings.slot_min_lead_hours,
+        "earliest": _when(slots.earliest_bookable(), tz),
     }
 
 
+def _slot_json(option: slots.SlotOption, tz) -> dict:
+    """One slot for the page's date picker: its day, and its time on that day."""
+    start, end = option.starts_at.astimezone(tz), option.ends_at.astimezone(tz)
+    return {
+        "id": option.slot_id,
+        "label": option.label,
+        "date": start.strftime("%Y-%m-%d"),
+        "weekday": start.strftime("%a"),
+        "day": start.strftime("%d").lstrip("0"),
+        "month": start.strftime("%b"),
+        "time": f"{_clock(start)} - {_clock(end)}",
+        "remaining": option.remaining,
+    }
+
+
+def _clock(moment) -> str:
+    return moment.strftime("%I:%M %p").lstrip("0")
+
+
+def _when(moment, tz) -> str:
+    local = moment.astimezone(tz)
+    return f"{local.strftime('%a %d %b')}, {_clock(local)}"
+
+
+async def _serving(session: AsyncSession, address) -> tuple[ServiceCheck, GeoPoint | None]:
+    """Which kitchen delivers to this address, measured from the address itself
+    against every active kitchen; the nearest one in range wins.
+
+    Run at every step that uses the address - check, quote and confirm - so
+    an address switched after a good one was checked cannot reach payment.
+    A map pin is exact; a typed address falls back to its ZIP.
+    """
+    point = await kitchen_service.resolve_location(
+        latitude=address.latitude,
+        longitude=address.longitude,
+        postal_code=address.postal_code,
+    )
+    check = await kitchen_service.check_service(session, point,
+                                               postal_code=address.postal_code)
+    return check, point
+
+
+async def _refuse(customer: Customer, address, check: ServiceCheck) -> dict:
+    """No kitchen delivers there: say so on the page, and (at most once a day)
+    on WhatsApp too. No kitchen set up at all is our problem, not the area."""
+    if not check.kitchen_name:
+        return {"ok": False, "error": check.reason or "No kitchen is configured yet."}
+    where = out_of_area.address_line(address)
+    await crm_sync.advance_stage(customer, LeadStage.NOT_SERVICEABLE)
+    notified = await out_of_area.notify(customer, where)
+    return {"ok": False, "serviceable": False,
+            "error": out_of_area.page_message(check, where),
+            # Drawn as a panel in the address sheet rather than a toast.
+            "out_of_area": out_of_area.details(check, where, notified=notified)}
+
+
 async def _kitchen_slot(session: AsyncSession, kitchen, slot_id) -> DeliverySlot | None:
-    """The chosen slot, if it is one of this kitchen's. A slot listed for a
-    different address (and so maybe a different kitchen) is refused."""
+    """The chosen slot, if it is still one the customer may book: this
+    kitchen's (a slot listed for a different address, and so maybe another
+    kitchen, is refused), and still at least SLOT_MIN_LEAD_HOURS away - a page
+    left open would otherwise let a slot that has since come too close through."""
     try:
         slot = await slots.get_slot(session, str(slot_id or ""))
     except ValueError:
         return None
     if slot is None or slot.outlet_id != kitchen.id:
+        return None
+    if slots.as_utc(slot.starts_at) < slots.earliest_bookable():
         return None
     return slot
 
@@ -311,26 +377,29 @@ async def quote(request: Request, token: str,
     if not cart:
         return {"ok": False, "error": "Your cart is empty."}
 
-    # The kitchen picked for the address at the check-address step.
-    kitchen = await kitchen_service.kitchen_for(session, customer)
-    if kitchen is None:
-        return {"ok": False, "error": "No kitchen is configured yet."}
-
-    slot = await _kitchen_slot(session, kitchen, body.get("slot_id"))
-    if slot is None:
-        return {"ok": False, "error": "Choose a delivery slot."}
-
     try:
         address = await addresses.get_owned(session, customer, body.get("address_id"))
     except addresses.AddressError as exc:
         return {"ok": False, "error": str(exc)}
 
+    # Checked again here, on the address being priced.
+    check, point = await _serving(session, address)
+    if not check.is_serviceable:
+        return await _refuse(customer, address, check)
+    kitchen = check.kitchen
+    if kitchen is None:
+        return {"ok": False, "error": "No kitchen is configured yet."}
+
+    slot = await _kitchen_slot(session, kitchen, body.get("slot_id"))
+    if slot is None:
+        return {"ok": False, "error": SLOT_GONE}
+
     try:
         priced = await pricing.price_cart(
             session, cart,
             outlet=kitchen,
-            dropoff_latitude=customer.latitude,
-            dropoff_longitude=customer.longitude,
+            dropoff_latitude=point.latitude if point else customer.latitude,
+            dropoff_longitude=point.longitude if point else customer.longitude,
             dropoff_address=_dropoff(address),
             slot_starts_at=slots.as_utc(slot.starts_at),
         )
@@ -377,18 +446,25 @@ async def confirm(request: Request, token: str,
     except addresses.AddressError as exc:
         return {"ok": False, "error": str(exc)}
 
-    # The kitchen picked for the address at the check-address step.
-    kitchen = await kitchen_service.kitchen_for(session, customer)
+    # Checked again here, on the address being ordered to: nothing reaches
+    # payment unless a kitchen delivers to it.
+    check, point = await _serving(session, address)
+    if not check.is_serviceable:
+        return await _refuse(customer, address, check)
+    kitchen = check.kitchen
     if kitchen is None:
         return {"ok": False, "error": "No kitchen is configured yet."}
 
     slot = await _kitchen_slot(session, kitchen, body.get("slot_id"))
     if slot is None:
-        return {"ok": False, "error": "Choose a delivery slot."}
+        return {"ok": False, "error": SLOT_GONE}
 
     # Copy the chosen address onto the customer so WhatsApp and the CRM
     # agree. The contact number is their WhatsApp number, never page input.
     await addresses.use_for_order(session, customer, address)
+    if point is not None:
+        customer.latitude, customer.longitude = point.latitude, point.longitude
+    customer.preferred_outlet_id = kitchen.id
 
     draft = None   # set once the order exists, so cleanup knows what to undo
     try:

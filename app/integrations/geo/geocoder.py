@@ -42,6 +42,8 @@ class GeoPoint:
     # Street and house number only, e.g. "12 Maple Street". Set by the
     # reverse lookup; a ZIP lookup has no street to give.
     street: str = ""
+    # The state's short form ("MD") where the source gives one; Google does.
+    state_code: str = ""
 
 
 _cache: dict[str, GeoPoint | None] = {}
@@ -112,6 +114,7 @@ async def _google_geocode(code: str, country: str) -> GeoPoint | None:
         postal_code=components.get("postal_code", code),
         city=components.get("locality", "") or components.get("sublocality", ""),
         state=components.get("administrative_area_level_1", ""),
+        state_code=short.get("administrative_area_level_1", ""),
         source="google",
     )
 
@@ -215,6 +218,11 @@ def _google_point(payload: dict, *, at: tuple[float, float] | None = None
         for comp in result.get("address_components", [])
         for comp_type in comp.get("types", [])
     }
+    short = {
+        comp_type: comp.get("short_name", "")
+        for comp in result.get("address_components", [])
+        for comp_type in comp.get("types", [])
+    }
     street = " ".join(part for part in (components.get("street_number", ""),
                                         components.get("route", "")) if part)
     location = result["geometry"]["location"]
@@ -226,6 +234,7 @@ def _google_point(payload: dict, *, at: tuple[float, float] | None = None
         postal_code=components.get("postal_code", ""),
         city=components.get("locality", "") or components.get("sublocality", ""),
         state=components.get("administrative_area_level_1", ""),
+        state_code=short.get("administrative_area_level_1", ""),
         source="google",
         street=street,
     )

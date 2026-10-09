@@ -5,12 +5,16 @@ See services/customer_admin.py for what each action touches.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from functools import partial
+
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.admin import listing
 from app.admin.deps import redirect, render, require_admin
 from app.core.logging import get_logger
-from app.db.models import AdminUser
+from app.db.models import AdminUser, LeadStage
 from app.db.session import get_session
 from app.services import customer_admin
 
@@ -18,18 +22,47 @@ log = get_logger(__name__)
 router = APIRouter(prefix="/customers", tags=["admin"])
 
 
+PER_PAGE = 25
+
+
 @router.get("", name="admin_customers")
 async def customers_index(
     request: Request,
     q: str | None = None,
+    stage: str | None = None,
+    activity: str | None = None,
+    zoho: str | None = None,
+    sort: str | None = None,
+    page: str | None = None,
     session: AsyncSession = Depends(get_session),
     current_user: AdminUser = Depends(require_admin),
 ):
-    rows = await customer_admin.list_customers(session, q, verify=True)
+    filters = {
+        "stage": listing.choice(stage, {str(s) for s in LeadStage}, "") or None,
+        "activity": listing.choice(activity, customer_admin.ACTIVITY, "") or None,
+        "zoho": listing.choice(zoho, customer_admin.ZOHO_FILTERS, "") or None,
+    }
+    order = listing.choice(sort, customer_admin.SORTS, "recent")
+    total = await customer_admin.count_customers(session, q, **filters)
+    pager = listing.Page.of(page, PER_PAGE, total)
+    rows = await customer_admin.list_customers(
+        session, q, PER_PAGE, verify=True, offset=pager.offset, sort=order, **filters)
     return render(request, "admin/customers.html", {
         "current_user": current_user,
         "rows": rows,
         "query": q or "",
+        "filters": filters,
+        "sort": order,
+        "page": pager,
+        "filtering": bool(q or any(filters.values())),
+        "stats": await customer_admin.customer_stats(
+            session, since=datetime.now(timezone.utc) - timedelta(days=7)),
+        "stages": [str(s) for s in LeadStage],
+        "activity_options": customer_admin.ACTIVITY,
+        "zoho_options": customer_admin.ZOHO_FILTERS,
+        "sort_options": customer_admin.SORTS,
+        "url_with": partial(listing.url_with, request),
+        "ago": listing.ago,
         "zoho_connected": customer_admin.zoho_connected(),
         "unsynced": sum(1 for r in rows if r.needs_push),
     })

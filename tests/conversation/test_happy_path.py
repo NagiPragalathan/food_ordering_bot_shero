@@ -221,11 +221,13 @@ async def test_full_order_journey(session, outlet, menu, bot):
     assert customer.lead_stage == LeadStage.DETAILS_CAPTURED
     assert conversation.step == ConversationStep.MAIN_MENU
 
-    # Step 5: main menu.
-    # One button: ordering is what people came for. A human is still
-    # reachable by typing "agent" - covered just below, and load-bearing
-    # now that the Talk to Us button is gone from this step.
-    assert [b[1] for b in bot.last().payload["buttons"]] == ["Order Now"]
+    # Step 5: Order Now (a link to the website), then Continue on WhatsApp.
+    # A human is still reachable by typing "agent" - covered just below, and
+    # load-bearing now that there is no Talk to Us button here.
+    link, choice = bot.sent[-2:]
+    assert link.kind == "cta_url" and link.body.startswith("Thanks, Asha Menon!")
+    assert link.payload == {"url": "https://www.shero.us/", "label": "Order Now"}
+    assert choice.payload["buttons"] == [("Continue on WhatsApp", "Continue on WhatsApp")]
 
     # Step 6: cuisines come from the imported menu, plus Check Availability.
     await handle_event(session, reply("menu:order"))

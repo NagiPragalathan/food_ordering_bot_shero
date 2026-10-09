@@ -7,13 +7,16 @@ goes through GallaboxClient.send_template, which checks approval first and
 sends this instead:
 
   * the same body, with the parameters filled in
-  * a URL button (Pay Now, Download Bill, View Menu) becomes a link button
+  * a URL button (Pay Now, Download Invoice, View Menu) becomes a link button
     with the same label and the same address
   * quick replies (Great / Good / Poor, Order Now) become reply buttons whose
     id is the label, which is exactly what a template quick-reply tap sends
     back, so the conversation handles both the same way
   * a template with a link and quick replies keeps the link; the quick
     replies are left out (an interactive message holds one or the other)
+  * except a fixed link (the welcome's www.shero.us): it goes into the text,
+    where WhatsApp makes it tappable, so the reply buttons can stay - the
+    customer keeps both choices
 
 A non-template message is only delivered inside WhatsApp's 24-hour window.
 Nearly every template here is sent right after the customer wrote or paid,
@@ -54,6 +57,8 @@ def message(spec: TemplateSpec, values: tuple, button_value: str | None) -> dict
     if spec.button_kind == "dynamic_url" and button_value:
         return m.cta_url_message(body, url=button_url(spec, button_value),
                                  display_text=(spec.button_label or "Open")[:MAX_BUTTON_LABEL])
+    if spec.button_kind == "static_url" and spec.button_url:
+        body = f"{body}\n\n{spec.button_label or 'Open'}: {spec.button_url}"
     if spec.quick_replies:
         buttons = [m.Button(id=label, title=label)
                    for label in spec.quick_replies[:m.MAX_REPLY_BUTTONS]]

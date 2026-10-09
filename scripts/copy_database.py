@@ -1,6 +1,7 @@
-"""Copy this machine's SQLite database into a hosted Postgres (for Vercel).
+"""Copy a SQLite database into MySQL (the AWS server) or a hosted Postgres (Vercel).
 
-    python -m scripts.copy_to_postgres --to "postgres://user:pass@host/db?sslmode=require"
+    python -m scripts.copy_database --to "mysql://user:pass@host:3306/db"
+    python -m scripts.copy_database --to "postgres://user:pass@host/db?sslmode=require"
 
   1. Creates the tables in the target (alembic upgrade head).
   2. Copies every row: menu, kitchens, customers, orders, saved settings,
@@ -10,11 +11,11 @@
      because a Vercel Function cannot serve files from data/media/.
 
 Refuses to write into a database that already has data, unless --replace
-(which empties it first). Use the database's direct (non-pooled) URL.
+(which empties it first). For Postgres use the direct (non-pooled) URL.
 The source is read only.
 
 The copied saved settings (Zoho connection and the rest) are encrypted with
-SETTINGS_ENCRYPTION_KEY, so Vercel must be given the same value as this
+SETTINGS_ENCRYPTION_KEY, so the new server must be given the same value as this
 machine's .env.
 """
 
@@ -89,7 +90,8 @@ async def copy(source: Path, target_url: str, *, replace: bool, upload: bool) ->
     src = create_async_engine(f"sqlite+aiosqlite:///{source}", poolclass=NullPool)
     target = driver_url(target_url)
     # asyncpg only: lets the copy also run through a connection pooler.
-    options = {} if target.startswith("sqlite") else {"connect_args": {"statement_cache_size": 0}}
+    options = ({"connect_args": {"statement_cache_size": 0}}
+               if target.startswith("postgresql+asyncpg") else {})
     dst = create_async_engine(target, poolclass=NullPool, **options)
     tables = Base.metadata.sorted_tables       # parents before children
     uploaded: dict[str, str] = {}
@@ -121,8 +123,8 @@ async def copy(source: Path, target_url: str, *, replace: bool, upload: bool) ->
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Copy the local SQLite database into a hosted Postgres.")
-    parser.add_argument("--to", required=True, help="target Postgres URL (direct, not pooled)")
+        description="Copy a SQLite database into MySQL or Postgres.")
+    parser.add_argument("--to", required=True, help="target MySQL or Postgres URL (for Postgres: direct, not pooled)")
     parser.add_argument("--from", dest="source", default=str(ROOT / "shero_local.db"),
                         help="source SQLite file (default shero_local.db)")
     parser.add_argument("--blob-token", default=os.environ.get("BLOB_READ_WRITE_TOKEN", ""),

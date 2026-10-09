@@ -3,189 +3,640 @@
 {% block title %}{{ k.name if k else 'Add kitchen' }}{% endblock %}
 {% block heading %}{{ k.name if k else 'Add kitchen' }}{% endblock %}
 {% block subheading %}
-<p class="text-xs text-stone-500">The pickup address sent to Uber, and the area this kitchen delivers to.</p>
+<p class="text-xs text-stone-500">Where this kitchen is, the area it delivers to, and when it takes orders.</p>
 {% endblock %}
 
+{# Shared input styling, so every field looks and focuses the same. #}
+{% set input_cls = "w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-stone-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20" %}
+{% set label_cls = "mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500" %}
+{% set mode = k.service_area_mode if k and k.service_area_mode else 'radius' %}
+{% set day_names = {'mon':'Monday','tue':'Tuesday','wed':'Wednesday','thu':'Thursday','fri':'Friday','sat':'Saturday','sun':'Sunday'} %}
+
+{% macro section(icon, title, note) %}
+<section class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-card">
+  <header class="flex items-start gap-3 border-b border-stone-100 px-5 py-4">
+    <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon | safe }}</svg>
+    </span>
+    <div>
+      <h2 class="text-sm font-semibold text-stone-900">{{ title }}</h2>
+      <p class="text-xs text-stone-500">{{ note }}</p>
+    </div>
+  </header>
+  <div class="p-5">{{ caller() }}</div>
+</section>
+{% endmacro %}
+
 {% block content %}
-<section class="overflow-hidden rounded-xl border border-stone-200 bg-white">
-  <form method="post"
-        action="{{ url_for('admin_kitchen_update', kitchen_id=k.id) if k else url_for('admin_kitchen_create') }}"
-        class="grid gap-4 p-5 sm:grid-cols-2">
-    <div class="sm:col-span-2">
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Kitchen name</label>
-      <input name="name" required value="{{ k.name if k else '' }}" placeholder="Shero Elkridge"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-    </div>
+<form id="kitchen-form" method="post"
+      action="{{ url_for('admin_kitchen_update', kitchen_id=k.id) if k else url_for('admin_kitchen_create') }}"
+      class="grid max-w-6xl gap-5 pb-24 lg:grid-cols-3 lg:pb-0">
 
-    <div class="sm:col-span-2">
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Street address</label>
-      <input name="address_line1" required value="{{ k.address_line1 if k else '' }}"
-             placeholder="6639 Cambria Terrace"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-    </div>
+  <div class="space-y-5 lg:col-span-2">
 
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">City</label>
-      <input name="city" required value="{{ k.city if k else '' }}" placeholder="Elkridge"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-    </div>
-
-    <div class="grid grid-cols-2 gap-4">
+    {# --- 1. Kitchen ----------------------------------------------------- #}
+    {% call section('<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+                    'Kitchen', 'Its name, and whether customers are matched to it.') %}
+    <div class="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
       <div>
-        <label class="mb-1.5 block text-sm font-medium text-stone-700">State</label>
-        <input name="state" required value="{{ k.state if k else '' }}" placeholder="MD"
-               class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                      focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+        <label class="{{ label_cls }}" for="f-name">Kitchen name</label>
+        <input id="f-name" name="name" required value="{{ k.name if k else '' }}"
+               placeholder="Shero Elkridge" class="{{ input_cls }}">
       </div>
-      <div>
-        <label class="mb-1.5 block text-sm font-medium text-stone-700">ZIP</label>
-        <input name="postal_code" required value="{{ k.postal_code if k else '' }}" placeholder="21075"
-               class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                      focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-      </div>
-    </div>
-
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Latitude</label>
-      <input name="latitude" inputmode="decimal"
-             value="{{ k.latitude if k else '' }}" placeholder="39.2073"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-    </div>
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Longitude</label>
-      <input name="longitude" inputmode="decimal"
-             value="{{ k.longitude if k else '' }}" placeholder="-76.7147"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-    </div>
-    <p class="-mt-2 text-[11px] text-stone-400 sm:col-span-2">
-      Leave both blank and the address is found on the map when you save. To be exact,
-      right-click the kitchen in Google Maps and copy its coordinates. Customer distances
-      are measured from this point. If you change the address, clear these so it is found again.
-    </p>
-
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Delivery area rule</label>
-      <select name="service_area_mode"
-              class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                     focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-        {% for value, label in [('radius','Within a radius'),('zips','Only these ZIP codes'),('both','Radius AND ZIP list')] %}
-          <option value="{{ value }}" {% if k and k.service_area_mode == value %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Delivery radius (miles)</label>
-      <input name="radius_miles" inputmode="decimal"
-             value="{{ radius_miles | round(2) }}"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-    </div>
-
-    <div class="sm:col-span-2">
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">
-        ZIP codes served <span class="font-normal text-stone-400">(comma separated)</span>
+      <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-stone-200 px-4 py-2.5 sm:min-w-[15rem]">
+        <span>
+          <span class="block text-sm font-semibold text-stone-900">Taking orders</span>
+          <span class="block text-[11px] text-stone-500">Off: no new customers matched</span>
+        </span>
+        <input type="checkbox" name="is_active" value="1" id="f-active" class="peer sr-only"
+               {% if not k or k.is_active %}checked{% endif %}>
+        <span class="relative h-6 w-11 shrink-0 rounded-full bg-stone-300 transition peer-checked:bg-brand-600
+                     after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white
+                     after:shadow after:transition peer-checked:after:translate-x-5"></span>
       </label>
-      <textarea name="service_zips" rows="2" placeholder="21075, 21045, 21044"
-                class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-xs outline-none
-                       focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">{{ k.service_zips | join(', ') if k and k.service_zips else '' }}</textarea>
     </div>
+    {% endcall %}
 
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Kitchen WhatsApp</label>
-      <input name="kitchen_whatsapp" value="{{ k.kitchen_whatsapp if k and k.kitchen_whatsapp else '' }}"
-             placeholder="14438011011"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-      <p class="mt-1 text-[11px] text-stone-400">Gets the new-paid-order alert.</p>
+    {# --- 2. Location ---------------------------------------------------- #}
+    {% call section('<path d="M12 21s-7-6.3-7-12a7 7 0 0 1 14 0c0 5.7-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+                    'Location', 'Couriers collect here, and every customer distance is measured from this pin.') %}
+    <div id="kitchen-map-picker" class="space-y-3">
+      <div class="flex flex-col gap-2 sm:flex-row">
+        <div class="relative flex-1">
+          <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400"
+               viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="map-search" type="search" autocomplete="off"
+                 placeholder="Search an address, e.g. 6021 University Blvd, Elkridge"
+                 class="{{ input_cls }} pl-9">
+        </div>
+        <div class="flex gap-2">
+          <button type="button" id="map-search-go"
+                  class="flex-1 rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 sm:flex-none">
+            Find
+          </button>
+          <!-- Handy when setting up the kitchen while standing in it. -->
+          <button type="button" id="map-my-location"
+                  class="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-brand-600 px-4 py-2
+                         text-sm font-semibold text-brand-700 hover:bg-brand-50 sm:flex-none">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+              <circle cx="12" cy="12" r="7"/></svg>
+            Use my location
+          </button>
+        </div>
+      </div>
+
+      <div class="relative">
+        <!-- The lookups go through the server's geocoder (admin_kitchen_geo),
+             so the browser key only draws the map. -->
+        <div id="kitchen-map" class="h-[22rem] w-full overflow-hidden rounded-xl border border-stone-200 bg-stone-100 sm:h-[26rem]">
+          {% if not maps_browser_key %}
+          <div class="flex h-full items-center justify-center p-6 text-center text-sm text-stone-500">
+            The map needs GOOGLE_MAPS_BROWSER_KEY in .env.<br>Type the address and coordinates below instead.
+          </div>
+          {% endif %}
+        </div>
+        <p id="map-status" role="status"
+           class="pointer-events-none absolute inset-x-3 bottom-3 rounded-lg bg-white/95 px-3 py-2 text-xs text-stone-600 shadow-card backdrop-blur
+                  {{ '' if maps_browser_key else 'hidden' }}">
+          Click the map or drag the pin onto the kitchen door.
+        </p>
+      </div>
+
+      <div class="grid gap-3 sm:grid-cols-6">
+        <div class="sm:col-span-6">
+          <label class="{{ label_cls }}" for="f-street">Street address</label>
+          <input id="f-street" name="address_line1" required value="{{ k.address_line1 if k else '' }}"
+                 placeholder="6639 Cambria Terrace" class="{{ input_cls }}">
+        </div>
+        <div class="sm:col-span-3">
+          <label class="{{ label_cls }}" for="f-city">City</label>
+          <input id="f-city" name="city" required value="{{ k.city if k else '' }}"
+                 placeholder="Elkridge" class="{{ input_cls }}">
+        </div>
+        <div class="sm:col-span-1">
+          <label class="{{ label_cls }}" for="f-state">State</label>
+          <input id="f-state" name="state" required value="{{ k.state if k else '' }}"
+                 placeholder="MD" class="{{ input_cls }} uppercase">
+        </div>
+        <div class="sm:col-span-2">
+          <label class="{{ label_cls }}" for="f-zip">ZIP</label>
+          <input id="f-zip" name="postal_code" required value="{{ k.postal_code if k else '' }}"
+                 placeholder="21075" inputmode="numeric" class="{{ input_cls }}">
+        </div>
+      </div>
+
+      <details class="group rounded-xl border border-stone-200 bg-stone-50/60" {% if not maps_browser_key %}open{% endif %}>
+        <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-xs font-semibold text-stone-600">
+          <span>Exact coordinates <span id="coords-summary" class="ml-1 font-mono font-normal text-stone-400"></span></span>
+          <svg class="h-4 w-4 transition group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </summary>
+        <div class="grid gap-3 border-t border-stone-200 px-4 py-3 sm:grid-cols-2">
+          <div>
+            <label class="{{ label_cls }}" for="f-lat">Latitude</label>
+            <input id="f-lat" name="latitude" inputmode="decimal" value="{{ k.latitude if k else '' }}"
+                   placeholder="39.2073" class="{{ input_cls }} font-mono text-xs">
+          </div>
+          <div>
+            <label class="{{ label_cls }}" for="f-lng">Longitude</label>
+            <input id="f-lng" name="longitude" inputmode="decimal" value="{{ k.longitude if k else '' }}"
+                   placeholder="-76.7147" class="{{ input_cls }} font-mono text-xs">
+          </div>
+          <p class="text-[11px] text-stone-500 sm:col-span-2">
+            Filled in by the map. Leave both blank and the address is looked up when you save.
+          </p>
+        </div>
+      </details>
     </div>
+    {% endcall %}
 
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Kitchen phone (for the courier)</label>
-      <input name="kitchen_phone" value="{{ k.phone if k and k.phone else '' }}"
-             placeholder="14438011011"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-      <p class="mt-1 text-[11px] text-stone-400">Uber gives this to the courier. Empty: the WhatsApp number is used.</p>
-    </div>
-
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Timezone</label>
-      <input name="timezone_name" value="{{ k.timezone if k else 'America/New_York' }}"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-      <p class="mt-1 text-[11px] text-stone-400">Delivery slots are generated in this zone.</p>
-    </div>
-
-    <div class="sm:col-span-2 border-t border-stone-200 pt-4">
-      <h3 class="text-sm font-semibold text-stone-800">Opening hours</h3>
-      <p class="mt-1 text-[11px] text-stone-500">
-        Delivery slots exist only inside these windows. Leave a day blank to close it.
-        {% if k and not k.operating_hours %}
-          <span class="font-semibold text-amber-700">
-            No hours are set, so customers are currently told there are no slots.
+    {# --- 3. Delivery area ----------------------------------------------- #}
+    {% call section('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/>',
+                    'Delivery area', 'A customer can order when their address is inside this area. The nearest kitchen that covers them gets the order.') %}
+    <div class="space-y-5">
+      <div class="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Delivery area rule">
+        {% for value, title, note in [
+          ('radius', 'Within a radius', 'Everyone within the miles below'),
+          ('zips', 'Only these ZIP codes', 'Just the ZIP codes you list'),
+          ('both', 'Radius and ZIP list', 'Must be inside both'),
+        ] %}
+        <label data-mode-card class="flex cursor-pointer gap-3 rounded-xl border p-3.5 transition
+                      {{ 'border-brand-500 bg-brand-50 ring-1 ring-brand-500' if mode == value else 'border-stone-200 hover:border-stone-300' }}">
+          <input type="radio" name="service_area_mode" value="{{ value }}" {% if mode == value %}checked{% endif %}
+                 class="mt-0.5 text-brand-600 focus:ring-brand-500">
+          <span>
+            <span class="block text-sm font-semibold text-stone-900">{{ title }}</span>
+            <span class="block text-[11px] text-stone-500">{{ note }}</span>
           </span>
-        {% endif %}
-      </p>
+        </label>
+        {% endfor %}
+      </div>
 
-      <div class="mt-3 grid gap-2">
-        {% set day_names = {'mon':'Monday','tue':'Tuesday','wed':'Wednesday','thu':'Thursday','fri':'Friday','sat':'Saturday','sun':'Sunday'} %}
-        {% for key, label in day_names.items() %}
+      <div id="radius-block" class="{{ 'hidden' if mode == 'zips' else '' }}">
+        <div class="mb-2 flex items-end justify-between gap-4">
+          <label class="{{ label_cls }} mb-0" for="f-radius">Delivery radius</label>
+          <div class="flex items-center gap-2">
+            <input id="f-radius" name="radius_miles" inputmode="decimal" value="{{ radius_miles | round(2) }}"
+                   class="w-24 rounded-lg border border-stone-300 px-3 py-1.5 text-right text-sm font-semibold outline-none
+                          focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            <span class="text-sm text-stone-500">miles</span>
+          </div>
+        </div>
+        <input id="radius-slider" type="range" min="1" max="30" step="0.5" value="{{ radius_miles }}"
+               class="w-full accent-brand-600" aria-label="Delivery radius in miles">
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <span class="text-[11px] text-stone-400">Quick pick:</span>
+          {% for preset in [5, 10, 15, 20] %}
+          <button type="button" data-radius="{{ preset }}"
+                  class="rounded-full border border-stone-200 px-3 py-1 text-xs font-medium text-stone-600 hover:border-brand-500 hover:text-brand-700">
+            {{ preset }} mi{% if preset == 10 %} · default{% endif %}
+          </button>
+          {% endfor %}
+        </div>
+        <p class="mt-2 text-[11px] text-stone-500">The circle on the map shows this area around the pin.</p>
+      </div>
+
+      <div id="zips-block" class="{{ 'hidden' if mode == 'radius' else '' }}">
+        <label class="{{ label_cls }}" for="f-zips">ZIP codes served <span class="normal-case tracking-normal text-stone-400">(comma separated)</span></label>
+        <textarea id="f-zips" name="service_zips" rows="2" placeholder="21075, 21045, 21044"
+                  class="{{ input_cls }} font-mono text-xs">{{ k.service_zips | join(', ') if k and k.service_zips else '' }}</textarea>
+        <p id="zips-count" class="mt-1 text-[11px] text-stone-500"></p>
+      </div>
+    </div>
+    {% endcall %}
+
+    {# --- 4. Contact ----------------------------------------------------- #}
+    {% call section('<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+                    'Contact', 'Who hears about new orders, and the number couriers call.') %}
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div>
+        <label class="{{ label_cls }}" for="f-wa">Kitchen WhatsApp</label>
+        <input id="f-wa" name="kitchen_whatsapp" inputmode="tel" placeholder="14438011011"
+               value="{{ k.kitchen_whatsapp if k and k.kitchen_whatsapp else '' }}" class="{{ input_cls }}">
+        <p class="mt-1 text-[11px] text-stone-500">Gets each paid order on its delivery day.</p>
+      </div>
+      <div>
+        <label class="{{ label_cls }}" for="f-phone">Phone for the courier</label>
+        <input id="f-phone" name="kitchen_phone" inputmode="tel" placeholder="14438011011"
+               value="{{ k.phone if k and k.phone else '' }}" class="{{ input_cls }}">
+        <p class="mt-1 text-[11px] text-stone-500">Uber gives this to the courier. Empty: the WhatsApp number.</p>
+      </div>
+    </div>
+    {% endcall %}
+
+    {# --- 5. Hours and slots --------------------------------------------- #}
+    {% call section('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+                    'Opening hours and delivery slots', 'Delivery slots exist only inside these hours. Switch a day off to close it.') %}
+    <div class="space-y-5">
+      {% if k and not k.operating_hours %}
+      <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-900">
+        No hours are set, so customers are currently told there are no delivery slots.
+      </div>
+      {% endif %}
+
+      <div>
+        <label class="{{ label_cls }}" for="f-tz">Timezone</label>
+        {% set tz = k.timezone if k and k.timezone else 'America/New_York' %}
+        {% set zones = [('America/New_York','Eastern (New York)'),('America/Chicago','Central (Chicago)'),
+                        ('America/Denver','Mountain (Denver)'),('America/Phoenix','Mountain, no DST (Phoenix)'),
+                        ('America/Los_Angeles','Pacific (Los Angeles)'),('America/Anchorage','Alaska'),
+                        ('Pacific/Honolulu','Hawaii')] %}
+        <select id="f-tz" name="timezone_name" class="{{ input_cls }} sm:max-w-sm">
+          {% for value, label in zones %}
+          <option value="{{ value }}" {% if tz == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+          {% if tz not in zones | map('first') | list %}
+          <option value="{{ tz }}" selected>{{ tz }}</option>
+          {% endif %}
+        </select>
+        <p class="mt-1 text-[11px] text-stone-500">
+          Set from the kitchen's pin when you save, so slots, opening hours and the 24-hour
+          notice use the kitchen's local time.
+        </p>
+      </div>
+
+      <div class="overflow-hidden rounded-xl border border-stone-200">
+        <div class="flex items-center justify-between bg-stone-50 px-4 py-2">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-stone-500">Weekly hours</span>
+          <button type="button" id="copy-monday" class="text-xs font-semibold text-brand-700 hover:underline">
+            Copy Monday to all days
+          </button>
+        </div>
+        <div class="divide-y divide-stone-100">
+          {% for key, label in day_names.items() %}
           {# operating_hours is {"mon": [["11:00","21:00"]]} - first window only #}
           {% set window = (k.operating_hours.get(key) if k and k.operating_hours else None) %}
           {% set opens = window[0][0] if window else '' %}
           {% set closes = window[0][1] if window else '' %}
-          <div class="flex items-center gap-3">
-            <span class="w-24 text-sm text-stone-600">{{ label }}</span>
-            <input type="time" name="hours_{{ key }}_open" value="{{ opens }}"
-                   class="rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none
-                          focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-            <span class="text-xs text-stone-400">to</span>
-            <input type="time" name="hours_{{ key }}_close" value="{{ closes }}"
-                   class="rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none
-                          focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          <div data-day="{{ key }}" class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
+            <label class="flex w-36 cursor-pointer items-center gap-3">
+              <input type="checkbox" data-day-open class="peer sr-only" {% if opens %}checked{% endif %}>
+              <span class="relative h-5 w-9 shrink-0 rounded-full bg-stone-300 transition peer-checked:bg-brand-600
+                           after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white
+                           after:shadow after:transition peer-checked:after:translate-x-4"></span>
+              <span class="text-sm font-medium text-stone-800">{{ label }}</span>
+            </label>
+            <div data-day-times class="flex items-center gap-2 {{ '' if opens else 'hidden' }}">
+              <input type="time" name="hours_{{ key }}_open" value="{{ opens }}" aria-label="{{ label }} opens"
+                     class="rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+              <span class="text-xs text-stone-400">to</span>
+              <input type="time" name="hours_{{ key }}_close" value="{{ closes }}" aria-label="{{ label }} closes"
+                     class="rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            </div>
+            <span data-day-closed class="text-xs font-medium text-stone-400 {{ 'hidden' if opens else '' }}">Closed</span>
           </div>
-        {% endfor %}
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="{{ label_cls }}" for="f-slot">Slot length</label>
+          <div class="flex items-center gap-2">
+            <input id="f-slot" name="slot_length_minutes" inputmode="numeric"
+                   value="{{ k.slot_length_minutes if k else 60 }}" class="{{ input_cls }}">
+            <span class="text-sm text-stone-500">minutes</span>
+          </div>
+        </div>
+        <div>
+          <label class="{{ label_cls }}" for="f-cap">Orders per slot</label>
+          <input id="f-cap" name="slot_capacity" inputmode="numeric"
+                 value="{{ k.slot_capacity if k else 4 }}" class="{{ input_cls }}">
+          <p class="mt-1 text-[11px] text-stone-500">How many deliveries the kitchen can handle at once.</p>
+        </div>
       </div>
     </div>
+    {% endcall %}
+  </div>
 
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Slot length (minutes)</label>
-      <input name="slot_length_minutes" inputmode="numeric"
-             value="{{ k.slot_length_minutes if k else 60 }}"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+  {# --- Summary and save: beside the form on wide screens --------------- #}
+  <aside class="hidden lg:block">
+    <div class="sticky top-6 space-y-3">
+      <div class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-card">
+        <div class="border-b border-stone-100 px-5 py-4">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-stone-400">Summary</p>
+          <p id="sum-name" class="mt-1 truncate text-base font-semibold text-stone-900">{{ k.name if k else 'New kitchen' }}</p>
+          <p id="sum-status" class="mt-1 text-xs font-semibold"></p>
+        </div>
+        <dl class="space-y-2.5 px-5 py-4 text-xs">
+          <div class="flex justify-between gap-3"><dt class="text-stone-500">Pin</dt><dd id="sum-pin" class="text-right font-mono text-stone-800"></dd></div>
+          <div class="flex justify-between gap-3"><dt class="text-stone-500">Delivers</dt><dd id="sum-area" class="text-right font-medium text-stone-800"></dd></div>
+          <div class="flex justify-between gap-3"><dt class="text-stone-500">Open</dt><dd id="sum-days" class="text-right font-medium text-stone-800"></dd></div>
+        </dl>
+        <div class="space-y-2 border-t border-stone-100 px-5 py-4">
+          <p data-dirty class="hidden text-[11px] font-semibold text-amber-700">You have unsaved changes.</p>
+          <button class="w-full rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
+            Save kitchen
+          </button>
+          <a href="{{ url_for('admin_kitchens') }}" class="block text-center text-xs font-medium text-stone-500 hover:text-stone-800">Cancel</a>
+        </div>
+      </div>
     </div>
+  </aside>
 
-    <div>
-      <label class="mb-1.5 block text-sm font-medium text-stone-700">Orders per slot</label>
-      <input name="slot_capacity" inputmode="numeric"
-             value="{{ k.slot_capacity if k else 4 }}"
-             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
-                    focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-      <p class="mt-1 text-[11px] text-stone-400">How many deliveries the kitchen can handle at once.</p>
+  {# --- Save bar on phones and tablets ----------------------------------- #}
+  <div class="fixed inset-x-0 bottom-0 z-30 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
+    <div class="mx-auto flex max-w-6xl items-center justify-between gap-3">
+      <p data-dirty class="hidden text-xs font-semibold text-amber-700">Unsaved changes</p>
+      <div class="ml-auto flex items-center gap-3">
+        <a href="{{ url_for('admin_kitchens') }}" class="text-sm text-stone-500">Cancel</a>
+        <button class="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save kitchen</button>
+      </div>
     </div>
+  </div>
+</form>
+{% endblock %}
 
+{% block scripts %}
+<script>
+// The form's own behaviour; the map (below) plugs into it when it loads.
+(() => {
+  const form = document.getElementById('kitchen-form');
+  const field = (name) => form.querySelector(`[name="${name}"]`);
+  const modeInputs = [...form.querySelectorAll('[name="service_area_mode"]')];
+  const radius = field('radius_miles');
+  const slider = document.getElementById('radius-slider');
+  const KM_PER_MILE = 1.609344;
 
-    <div class="sm:col-span-2">
-      <label class="inline-flex items-center gap-2 text-sm text-stone-700">
-        <input type="checkbox" name="is_active" value="1" {% if not k or k.is_active %}checked{% endif %}
-               class="rounded border-stone-300 text-brand-600">
-        Taking orders
-      </label>
-      <p class="mt-1 text-[11px] text-stone-400">Untick to stop matching customers to this kitchen. Its past orders stay.</p>
-    </div>
-    <div class="sm:col-span-2">
-      <button class="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-        Save kitchen
-      </button>
-      <a href="{{ url_for('admin_kitchens') }}" class="ml-3 text-sm text-stone-500 underline">Cancel</a>
-    </div>
-    </form>
-</section>
+  window.__kitchenForm = { field, onChange: [] };
+  const changed = () => { summary(); window.__kitchenForm.onChange.forEach((fn) => fn()); };
+  const mode = () => (modeInputs.find((i) => i.checked) || {}).value || 'radius';
+  const miles = () => parseFloat(radius.value);
+
+  // Delivery-area rule: highlight the chosen card, show the fields it uses.
+  modeInputs.forEach((input) => input.addEventListener('change', () => {
+    form.querySelectorAll('[data-mode-card]').forEach((card) => {
+      const on = card.querySelector('input').checked;
+      card.classList.toggle('border-brand-500', on); card.classList.toggle('bg-brand-50', on);
+      card.classList.toggle('ring-1', on); card.classList.toggle('ring-brand-500', on);
+      card.classList.toggle('border-stone-200', !on);
+    });
+    document.getElementById('radius-block').classList.toggle('hidden', mode() === 'zips');
+    document.getElementById('zips-block').classList.toggle('hidden', mode() === 'radius');
+    changed();
+  }));
+
+  // Radius: slider, typed value and quick picks stay in step.
+  slider.addEventListener('input', () => { radius.value = slider.value; changed(); });
+  radius.addEventListener('input', () => {
+    if (Number.isFinite(miles())) slider.value = Math.min(30, Math.max(1, miles()));
+    changed();
+  });
+  form.querySelectorAll('[data-radius]').forEach((button) => button.addEventListener('click', () => {
+    radius.value = slider.value = button.dataset.radius; changed();
+  }));
+
+  // ZIP list: count what was typed.
+  const zips = field('service_zips');
+  const zipList = () => zips.value.split(/[\s,;]+/).filter(Boolean);
+  const countZips = () => {
+    const n = zipList().length;
+    document.getElementById('zips-count').textContent = n ? `${n} ZIP code${n === 1 ? '' : 's'}` : '';
+  };
+  zips.addEventListener('input', () => { countZips(); changed(); });
+
+  // Days: switching one off empties its times (blank = closed when saved);
+  // switching it back on restores what it had, or 09:00-21:00.
+  form.querySelectorAll('[data-day]').forEach((row) => {
+    const toggle = row.querySelector('[data-day-open]');
+    const [opens, closes] = row.querySelectorAll('input[type="time"]');
+    toggle.addEventListener('change', () => {
+      if (toggle.checked) {
+        opens.value = opens.dataset.kept || opens.value || '09:00';
+        closes.value = closes.dataset.kept || closes.value || '21:00';
+      } else {
+        opens.dataset.kept = opens.value; closes.dataset.kept = closes.value;
+        opens.value = closes.value = '';
+      }
+      row.querySelector('[data-day-times]').classList.toggle('hidden', !toggle.checked);
+      row.querySelector('[data-day-closed]').classList.toggle('hidden', toggle.checked);
+      changed();
+    });
+  });
+  document.getElementById('copy-monday').addEventListener('click', () => {
+    const rows = [...form.querySelectorAll('[data-day]')];
+    const monday = rows[0];
+    const on = monday.querySelector('[data-day-open]').checked;
+    const [o, c] = monday.querySelectorAll('input[type="time"]');
+    rows.slice(1).forEach((row) => {
+      const toggle = row.querySelector('[data-day-open]');
+      const [opens, closes] = row.querySelectorAll('input[type="time"]');
+      opens.value = on ? o.value : ''; closes.value = on ? c.value : '';
+      opens.dataset.kept = closes.dataset.kept = '';
+      if (toggle.checked !== on) { toggle.checked = on; toggle.dispatchEvent(new Event('change')); }
+    });
+    changed();
+  });
+
+  // Summary card.
+  function summary() {
+    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    set('sum-name', field('name').value.trim() || 'New kitchen');
+    const active = field('is_active').checked;
+    const status = document.getElementById('sum-status');
+    status.textContent = active ? '● Taking orders' : '● Paused - not taking orders';
+    status.className = 'mt-1 text-xs font-semibold ' + (active ? 'text-emerald-700' : 'text-amber-700');
+
+    const lat = parseFloat(field('latitude').value), lng = parseFloat(field('longitude').value);
+    const pin = Number.isFinite(lat) && Number.isFinite(lng) ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'not set';
+    set('sum-pin', pin);
+    set('coords-summary', pin === 'not set' ? '' : pin);
+
+    const m = Number.isFinite(miles()) ? `${miles()} mi` : '?';
+    const z = zipList().length;
+    set('sum-area', mode() === 'radius' ? `within ${m}`
+      : mode() === 'zips' ? `${z} ZIP code${z === 1 ? '' : 's'}`
+      : `within ${m}, ${z} ZIP${z === 1 ? '' : 's'}`);
+    const open = [...form.querySelectorAll('[data-day-open]')].filter((t) => t.checked).length;
+    set('sum-days', open ? `${open} day${open === 1 ? '' : 's'} a week` : 'closed every day');
+  }
+  window.__kitchenForm.miles = () => (mode() === 'zips' ? null : miles() * KM_PER_MILE * 1000);
+  window.__kitchenForm.refresh = changed;
+
+  ['name', 'latitude', 'longitude'].forEach((n) => field(n).addEventListener('input', changed));
+  field('is_active').addEventListener('change', changed);
+
+  // Unsaved-changes guard.
+  let dirty = false, saving = false;
+  form.addEventListener('input', () => {
+    if (!dirty) { dirty = true; form.querySelectorAll('[data-dirty]').forEach((el) => el.classList.remove('hidden')); }
+  });
+  form.addEventListener('submit', () => { saving = true; });
+  window.addEventListener('beforeunload', (e) => { if (dirty && !saving) { e.preventDefault(); e.returnValue = ''; } });
+  window.__kitchenForm.markDirty = () => form.dispatchEvent(new Event('input'));
+
+  countZips(); summary();
+})();
+</script>
+
+{% if maps_browser_key %}
+<script>
+(() => {
+  const key = {{ maps_browser_key | tojson }};
+  const lookupUrl = {{ url_for('admin_kitchen_geo') | string | tojson }};
+  const kf = window.__kitchenForm;
+  const field = kf.field;
+  const status = document.getElementById('map-status');
+  const say = (text, bad = false) => {
+    status.textContent = text;
+    status.classList.toggle('text-red-700', bad);
+    status.classList.toggle('text-stone-600', !bad);
+  };
+
+  const start = () => {
+    const lat = parseFloat(field('latitude').value), lng = parseFloat(field('longitude').value);
+    return Number.isFinite(lat) && Number.isFinite(lng)
+      ? { center: { lat, lng }, zoom: 13, pinned: true }
+      : { center: { lat: 39.2, lng: -76.7 }, zoom: 10, pinned: false };   // Maryland
+  };
+
+  // Fill the form from a lookup. Only fields the lookup actually knows are
+  // overwritten, so a typed suite number is not wiped by a blank.
+  const fill = (found) => {
+    field('latitude').value = found.lat;
+    field('longitude').value = found.lng;
+    if (found.street) field('address_line1').value = found.street;
+    if (found.city) field('city').value = found.city;
+    if (found.state) field('state').value = found.state;
+    if (found.zip) field('postal_code').value = found.zip;
+    kf.markDirty(); kf.refresh();
+  };
+
+  function haversineMiles(lat1, lng1, lat2, lng2) {
+    const rad = (d) => d * Math.PI / 180;
+    const a = Math.sin(rad(lat2 - lat1) / 2) ** 2 +
+              Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(rad(lng2 - lng1) / 2) ** 2;
+    return 3958.8 * 2 * Math.asin(Math.sqrt(a));
+  }
+
+  async function lookup(params) {
+    const response = await fetch(lookupUrl + '?' + new URLSearchParams(params),
+                                 { credentials: 'same-origin' });
+    const data = await response.json().catch(() => ({ found: false }));
+    if (!data.found) throw new Error(data.error || 'Could not find that on the map.');
+    return data;
+  }
+
+  window.__sheroKitchenMap = () => {
+    const s = start();
+    const map = new google.maps.Map(document.getElementById('kitchen-map'), {
+      center: s.center, zoom: s.zoom, mapTypeControl: true,
+      mapTypeControlOptions: { mapTypeIds: ['roadmap', 'hybrid'] },
+      streetViewControl: false, fullscreenControl: true,
+    });
+    const pin = new google.maps.Marker({ map, position: s.center, draggable: true,
+                                         visible: s.pinned });
+    // The delivery area, redrawn whenever the pin, rule or miles change.
+    const area = new google.maps.Circle({
+      map, center: s.center, radius: 0, clickable: false,
+      strokeColor: '#0f766e', strokeOpacity: 0.8, strokeWeight: 2,
+      fillColor: '#14b8a6', fillOpacity: 0.12, visible: false,
+    });
+    const drawArea = () => {
+      const metres = kf.miles();
+      const show = pin.getVisible() && Number.isFinite(metres) && metres > 0;
+      area.setVisible(show);
+      if (show) { area.setCenter(pin.getPosition()); area.setRadius(metres); }
+    };
+    kf.onChange.push(drawArea);
+    drawArea();
+    if (s.pinned && area.getVisible()) map.fitBounds(area.getBounds());
+
+    // A dropped pin keeps its exact spot; the address comes from it.
+    async function dropAt(latLng) {
+      pin.setPosition(latLng); pin.setVisible(true); drawArea();
+      const lat = latLng.lat().toFixed(6), lng = latLng.lng().toFixed(6);
+      field('latitude').value = lat; field('longitude').value = lng;
+      kf.markDirty(); kf.refresh();
+      say('Finding the address…');
+      try {
+        const found = await lookup({ lat, lng });
+        fill(found);
+        say('Pinned: ' + (found.label || `${lat}, ${lng}`) + '. Check the address, then save.');
+      } catch (err) {
+        say('Pinned at ' + lat + ', ' + lng + '. ' + err.message + ' Type the address below.', true);
+      }
+    }
+
+    map.addListener('click', (e) => dropAt(e.latLng));
+    pin.addListener('dragend', (e) => dropAt(e.latLng));
+
+    async function search() {
+      const q = document.getElementById('map-search').value.trim();
+      if (!q) return;
+      say('Searching…');
+      try {
+        const found = await lookup({ q });
+        fill(found);
+        const at = { lat: found.lat, lng: found.lng };
+        pin.setPosition(at); pin.setVisible(true); drawArea();
+        map.setCenter(at); map.setZoom(17);
+        say('Found: ' + (found.label || q) + '. Drag the pin onto the kitchen door if needed, then save.');
+      } catch (err) {
+        say(err.message, true);
+      }
+    }
+
+    // The browser's own position (GPS on a phone, Wi-Fi on a laptop). Works
+    // only over https, which the admin is; the browser asks permission first.
+    document.getElementById('map-my-location').addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        say('This browser cannot share its location. Search the address instead.', true);
+        return;
+      }
+      say('Finding your location… allow it if the browser asks.');
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const here = new google.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+          // Guard: clicked from an office far away, this would move the
+          // kitchen there - and every customer would be "too far".
+          if (pin.getVisible()) {
+            const was = pin.getPosition();
+            const miles = google.maps.geometry
+              ? google.maps.geometry.spherical.computeDistanceBetween(was, here) / 1609.344
+              : haversineMiles(was.lat(), was.lng(), here.lat(), here.lng());
+            if (miles > 50 && !confirm(`You are about ${Math.round(miles).toLocaleString()} miles from this ` +
+                'kitchen\'s current pin. Move the kitchen to where you are now?\n\nOnly do this if you ' +
+                'are standing in the kitchen.')) {
+              say('Location not used - the pin stayed where it was.');
+              return;
+            }
+          }
+          map.setCenter(here); map.setZoom(19);
+          await dropAt(here);
+          if (pos.coords.accuracy > 100) {
+            // A laptop on Wi-Fi can be off by a few hundred metres.
+            say(status.textContent +
+                ` Accurate to about ${Math.round(pos.coords.accuracy)} m - drag the pin onto the door.`);
+          }
+        },
+        (err) => say(err.code === err.PERMISSION_DENIED
+          ? 'Location access was blocked. Allow it in the browser (the icon in the address bar), or search the address.'
+          : 'Could not get your location. Search the address instead.', true),
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+      );
+    });
+
+    document.getElementById('map-search-go').addEventListener('click', search);
+    document.getElementById('map-search').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); search(); }   // never submit the form
+    });
+  };
+
+  // Google calls this when the key is refused for this website.
+  window.gm_authFailure = () =>
+    say('Google refused the map key for this website. Add this address to the key\'s allowed websites.', true);
+
+  const script = document.createElement('script');
+  script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) +
+               '&callback=__sheroKitchenMap&loading=async';
+  script.async = true;
+  script.onerror = () => say('The map could not load. Type the address and coordinates instead.', true);
+  document.head.appendChild(script);
+})();
+</script>
+{% endif %}
 {% endblock %}

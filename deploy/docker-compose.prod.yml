@@ -16,11 +16,10 @@ services:
     restart: unless-stopped
     # Migrations first, so a new version never serves against an old schema.
     # --proxy-headers: links the bot builds use https://$DOMAIN, not the
-    # internal http address Caddy forwards to.
-    command: >
-      sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000
-             --proxy-headers --forwarded-allow-ips='*'"
+    # internal http address Caddy forwards to. Kept as one line on purpose:
+    # a line break inside the sh -c string ends the command there, and the
+    # flags after it were silently dropped (forms then posted to http://).
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"]
     volumes:
       # The database file (shero.db) and the dish photos (media/) live on the
       # server's disk, so restarts and new versions keep them. Owned by uid

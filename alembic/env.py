@@ -11,7 +11,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import Column, MetaData, PrimaryKeyConstraint, String, Table, pool
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -65,7 +65,23 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _create_version_table(connection: Connection) -> None:
+    """Create alembic_version with room for this project's revision ids.
+
+    Alembic's own table holds 32 characters, and ids such as
+    "0005_profile_name_and_sales_orders" are longer: MySQL and Postgres
+    refuse them (SQLite never checks). Alembic uses the table as it finds
+    it, so making it first, wider, is enough. No-op when it already exists.
+    """
+    table = Table("alembic_version", MetaData(),
+                  Column("version_num", String(64), nullable=False),
+                  PrimaryKeyConstraint("version_num", name="alembic_version_pkc"))
+    table.create(connection, checkfirst=True)
+    connection.commit()
+
+
 def do_run_migrations(connection: Connection) -> None:
+    _create_version_table(connection)
     _configure(connection)
     with context.begin_transaction():
         context.run_migrations()

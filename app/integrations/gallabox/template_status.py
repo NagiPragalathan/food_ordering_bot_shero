@@ -63,6 +63,9 @@ async def is_approved(name: str) -> bool:
 def usable(row: dict, now: datetime | None) -> bool:
     if str(row.get("status") or "").lower() != "approved":
         return False
+    if _recategorised_as_marketing(row):
+        log.warning("template_recategorised_marketing", template=row.get("name"))
+        return False
     stale = _foreign_button_url(row)
     if stale:
         log.warning("template_link_outdated", template=row.get("name"), button_url=stale,
@@ -93,9 +96,22 @@ def _foreign_button_url(row: dict) -> str | None:
     for component in row.get("components") or []:
         for button in (component.get("buttons") or []) if isinstance(component, dict) else []:
             url = str(button.get("url") or "")
-            if str(button.get("type") or "").upper() == "URL" and url and _origin(url) not in ours:
+            # Only per-customer links ({{1}}) point at this bot.
+            if "{{" not in url:
+                continue
+            if str(button.get("type") or "").upper() == "URL" and _origin(url) not in ours:
                 return url
     return None
+
+
+def _recategorised_as_marketing(row: dict) -> bool:
+    """A template we submitted as UTILITY that Meta now files as MARKETING."""
+    # Imported here: templates is a plain catalogue, kept free of this module.
+    from app.integrations.gallabox.templates import BY_NAME
+
+    spec = BY_NAME.get(str(row.get("name")))
+    category = str(row.get("category") or "").upper()
+    return bool(spec and spec.category == "UTILITY" and category == "MARKETING")
 
 
 def _origin(url: str) -> str:

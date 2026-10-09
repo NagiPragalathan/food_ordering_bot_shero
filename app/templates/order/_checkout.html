@@ -19,26 +19,15 @@ window.SheroCheckout = function (ui, opts) {
     const done = busy($('check'), 'Checking delivery…');
     try {
       const data = await api('/address', { address_id: id });
-      if (!data.ok) { toast(data.error); return; }
+      if (!data.ok) {
+        if (data.out_of_area) { notHereYet(data.out_of_area); return; }
+        toast(data.error); return;
+      }
 
+      if ($('area-note')) $('area-note').innerHTML = '';
       addressId = id;
       slotId = null;
-      const box = $('slots');
-      box.innerHTML = '';
-      data.slots.forEach(s => {
-        const b = document.createElement('button');
-        b.className = slotClass;
-        b.textContent = s.label;
-        b.addEventListener('click', () => {
-          slotId = s.id;
-          Array.from(box.children).forEach(x => { x.className = slotClass; });
-          b.className = pickedClass;
-          $('sheet-foot').innerHTML =
-            '<button id="go-summary" class="w-full rounded-xl bg-brand-500 py-3 text-sm font-semibold text-white">See the total</button>';
-          $('go-summary').addEventListener('click', showSummary);
-        });
-        box.appendChild(b);
-      });
+      showDays(data);
       $('slots-wrap').classList.remove('hidden');
       $('slots-wrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (err) {
@@ -46,6 +35,142 @@ window.SheroCheckout = function (ui, opts) {
     } finally {
       done();
     }
+  }
+
+  // --- Date, then time ------------------------------------------------------
+  // Slots arrive with their day (in the kitchen's timezone). The customer
+  // picks a day from a strip covering the week - days with nothing free show
+  // as closed - then a time on that day.
+  function showDays(data) {
+    const byDate = {};
+    data.slots.forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
+    const first = data.slots[0].date;
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(first + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      days.push({ key, weekday: d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+                  day: d.getUTCDate(), month: d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }),
+                  slots: byDate[key] || [] });
+    }
+
+    const box = $('slots');
+    box.className = '';
+    box.innerHTML =
+      (data.lead_hours ? '<p class="mb-3 flex items-start gap-2 rounded-xl bg-mist-100 px-3 py-2 text-xs text-ink-700/80">' +
+        '<span>🕒</span><span>Orders need <b>' + esc(String(Math.round(data.lead_hours))) + ' hours&rsquo; notice</b>. ' +
+        'Earliest delivery: <b>' + esc(data.earliest) + '</b>.</span></p>' : '') +
+      '<h4 class="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-700/60">Choose a day</h4>' +
+      '<div id="day-strip" class="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2" role="listbox" aria-label="Delivery day"></div>' +
+      '<h4 id="times-title" class="mb-2 mt-3 text-xs font-semibold uppercase tracking-wide text-ink-700/60">Choose a time</h4>' +
+      '<div id="time-grid" class="grid grid-cols-2 gap-2"></div>';
+
+    const strip = $('day-strip');
+    days.forEach(d => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.date = d.key;
+      b.disabled = !d.slots.length;
+      b.setAttribute('role', 'option');
+      b.innerHTML =
+        '<span class="block text-[11px] font-medium uppercase">' + esc(d.weekday) + '</span>' +
+        '<span class="block text-xl font-bold leading-tight">' + d.day + '</span>' +
+        '<span class="block text-[11px]">' + esc(d.month) + '</span>' +
+        '<span class="mt-1 block text-[10px] font-semibold">' +
+          (d.slots.length ? d.slots.length + ' time' + (d.slots.length > 1 ? 's' : '') : 'Closed') + '</span>';
+      b.addEventListener('click', () => pickDay(d));
+      strip.appendChild(b);
+    });
+    pickDay(days.find(d => d.slots.length));
+  }
+
+  const dayClass = 'w-[4.5rem] shrink-0 rounded-2xl border px-2 py-2 text-center transition ';
+  function pickDay(day) {
+    slotId = null;
+    $('sheet-foot').innerHTML = '<button disabled class="w-full rounded-xl bg-mist-200 py-3 text-sm font-semibold ' +
+      'text-ink-700/50">Choose a time</button>';
+    Array.from($('day-strip').children).forEach(b => {
+      const on = b.dataset.date === day.key;
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+      b.className = dayClass + (b.disabled
+        ? 'cursor-not-allowed border-dashed border-mist-200 bg-mist-50 text-ink-700/30'
+        : on ? 'border-herb-600 bg-herb-600 text-white shadow-md'
+             : 'border-mist-200 bg-white text-ink-800 hover:border-herb-600');
+      if (on) b.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+    });
+    $('times-title').textContent = 'Choose a time · ' + day.weekday + ' ' + day.day + ' ' + day.month;
+
+    const grid = $('time-grid');
+    grid.innerHTML = '';
+    day.slots.forEach(s => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = slotClass;
+      b.innerHTML = esc(s.time) + (s.remaining === 1
+        ? '<span class="mt-0.5 block text-[10px] font-semibold text-amber-700">Last one</span>' : '');
+      b.addEventListener('click', () => {
+        slotId = s.id;
+        Array.from(grid.children).forEach(x => { x.className = slotClass; });
+        b.className = pickedClass;
+        $('sheet-foot').innerHTML =
+          '<button id="go-summary" class="w-full rounded-xl bg-brand-500 py-3 text-sm font-semibold text-white">' +
+          'See the total · ' + esc(day.weekday + ' ' + day.day + ' ' + day.month + ', ' + s.time.split(' - ')[0]) + '</button>';
+        $('go-summary').addEventListener('click', showSummary);
+      });
+      grid.appendChild(b);
+    });
+  }
+
+  // No kitchen delivers to this address: a clear panel in the sheet, where
+  // the customer is choosing, with the way forward - not a passing toast.
+  function notHereYet(info) {
+    const box = $('area-note');
+    if (!box) { toast('Sorry, we do not deliver to ' + info.address + ' yet.'); return; }
+    $('slots-wrap') && $('slots-wrap').classList.add('hidden');
+    const far = info.miles != null
+      ? '<div class="mt-3 grid grid-cols-2 gap-2 text-center">' +
+          '<div class="rounded-xl bg-white/80 px-2 py-2 ring-1 ring-amber-200">' +
+            '<div class="text-lg font-bold tabular-nums text-amber-900">' + esc(fmtMiles(info.miles)) + '</div>' +
+            '<div class="text-[11px] text-amber-800/80">to our nearest kitchen</div></div>' +
+          '<div class="rounded-xl bg-white/80 px-2 py-2 ring-1 ring-amber-200">' +
+            '<div class="text-lg font-bold tabular-nums text-amber-900">' +
+              (info.range_miles != null ? esc(fmtMiles(info.range_miles)) : 'ZIP list') + '</div>' +
+            '<div class="text-[11px] text-amber-800/80">' +
+              (info.range_miles != null ? 'how far it delivers' : 'set delivery area') + '</div></div>' +
+        '</div>'
+      : '';
+    box.innerHTML =
+      '<div role="alert" class="area-note mt-4 overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-b from-amber-50 to-white">' +
+        '<div class="flex gap-3 p-4">' +
+          '<div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-100 text-2xl">📍</div>' +
+          '<div class="min-w-0">' +
+            '<h3 class="text-[15px] font-bold text-ink-900">We do not deliver here yet</h3>' +
+            '<p class="mt-0.5 text-[13px] leading-snug text-ink-700/80 [overflow-wrap:anywhere]">' +
+              '<span class="font-semibold text-ink-800">' + esc(info.address) + '</span> is outside our delivery area.</p>' +
+          '</div>' +
+        '</div>' +
+        '<div class="px-4">' + far + '</div>' +
+        '<p class="px-4 pt-3 text-[13px] leading-snug text-ink-700/80">We are growing and hope to reach your area soon. ' +
+          'Meanwhile, you can deliver to another address - a workplace, or a friend nearby.</p>' +
+        (info.notified ? '<p class="mx-4 mt-3 flex items-center gap-2 rounded-lg bg-[#25D366]/10 px-3 py-2 text-xs font-medium text-[#128C7E]">' +
+          waIcon + 'We have sent you the details on WhatsApp too.</p>' : '') +
+        '<div class="flex gap-2 p-4">' +
+          '<button type="button" id="area-new" class="flex-1 rounded-xl bg-brand-500 py-2.5 text-sm font-semibold text-white">+ Add a new address</button>' +
+          '<button type="button" id="area-pick" class="flex-1 rounded-xl border border-mist-200 bg-white py-2.5 text-sm font-semibold text-ink-800">Choose another</button>' +
+        '</div>' +
+      '</div>';
+    $('area-new').addEventListener('click', () => $('addr-new') && $('addr-new').click());
+    $('area-pick').addEventListener('click', () => {
+      box.innerHTML = '';
+      $('sheet-body').scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    box.firstChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function fmtMiles(m) {
+    const n = Number(m);
+    return (n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(n < 10 ? 1 : 0)) + ' mi';
   }
 
   async function showSummary() {

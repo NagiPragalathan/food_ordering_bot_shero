@@ -91,23 +91,83 @@ def zoho_connected() -> bool:
     return zoho_connect.is_connected()
 
 
+# Filters and sorts the Customers page offers (the keys are the URL values).
+ACTIVITY = {"ordered": "Has ordered", "paid": "Has paid", "none": "No orders yet"}
+ZOHO_FILTERS = {"linked": "In Zoho", "unlinked": "Not in Zoho"}
+SORTS = {"recent": "Last active", "newest": "Newest first", "oldest": "Oldest first",
+         "name": "Name A-Z"}
+
+
+def _filtered(stmt, query: str | None = None, *, stage: str | None = None,
+              activity: str | None = None, zoho: str | None = None):
+    """The page's search and filters as WHERE clauses (shared by list and count)."""
+    if query and query.strip():
+        term = f"%{query.strip().lstrip('+')}%"
+        stmt = stmt.where(or_(Customer.whatsapp_number.ilike(term),
+                              Customer.name.ilike(term),
+                              Customer.email.ilike(term)))
+    if stage:
+        stmt = stmt.where(Customer.lead_stage == stage)
+    has_order = select(Order.id).where(Order.customer_id == Customer.id)
+    if activity == "ordered":
+        stmt = stmt.where(has_order.exists())
+    elif activity == "paid":
+        stmt = stmt.where(has_order.where(
+            Order.payment_status == str(PaymentStatus.PAID)).exists())
+    elif activity == "none":
+        stmt = stmt.where(~has_order.exists())
+    linked = or_(Customer.zoho_contact_id.is_not(None), Customer.zoho_lead_id.is_not(None))
+    if zoho == "linked":
+        stmt = stmt.where(linked)
+    elif zoho == "unlinked":
+        stmt = stmt.where(~linked)
+    return stmt
+
+
+def _ordering(sort: str):
+    last_active = func.coalesce(Customer.last_seen_at, Customer.created_at)
+    return {
+        "newest": (Customer.created_at.desc(),),
+        "oldest": (Customer.created_at.asc(),),
+        # Nameless customers last, then alphabetical.
+        "name": (Customer.name.is_(None), func.lower(Customer.name), last_active.desc()),
+    }.get(sort, (last_active.desc(),))
+
+
+async def count_customers(session: AsyncSession, query: str | None = None, **filters) -> int:
+    """How many customers the search and filters match (for the pager)."""
+    stmt = _filtered(select(func.count()).select_from(Customer), query, **filters)
+    return int((await session.execute(stmt)).scalar_one())
+
+
+async def customer_stats(session: AsyncSession, *, since) -> dict[str, int]:
+    """The numbers above the list: everyone, paying, new since `since`, not in Zoho."""
+    count = lambda *where: select(func.count()).select_from(Customer).where(*where)  # noqa: E731
+    paying = select(Order.id).where(Order.customer_id == Customer.id,
+                                    Order.payment_status == str(PaymentStatus.PAID)).exists()
+    unlinked = (Customer.zoho_contact_id.is_(None), Customer.zoho_lead_id.is_(None))
+    results = {}
+    for key, stmt in {"total": count(), "paying": count(paying),
+                      "new": count(Customer.created_at >= since),
+                      "unlinked": count(*unlinked)}.items():
+        results[key] = int((await session.execute(stmt)).scalar_one())
+    return results
+
+
 async def list_customers(session: AsyncSession, query: str | None = None,
-                         limit: int = PAGE_SIZE, *, verify: bool = False) -> list[CustomerRow]:
-    """Newest first, with the counts the page shows.
+                         limit: int = PAGE_SIZE, *, verify: bool = False,
+                         offset: int = 0, sort: str = "recent", stage: str | None = None,
+                         activity: str | None = None, zoho: str | None = None,
+                         ) -> list[CustomerRow]:
+    """One page of customers, with the counts the page shows.
 
     Four grouped queries, not one per customer. `verify` adds one Zoho call
     per module to confirm the links (see verify_links); it runs before the
     counts, so an order whose Zoho record is gone counts as "to push".
     """
-    stmt = select(Customer)
-    if query:
-        term = f"%{query.strip()}%"
-        stmt = stmt.where(or_(Customer.whatsapp_number.ilike(term),
-                              Customer.name.ilike(term),
-                              Customer.email.ilike(term)))
+    stmt = _filtered(select(Customer), query, stage=stage, activity=activity, zoho=zoho)
     customers = list((await session.execute(
-        stmt.order_by(func.coalesce(Customer.last_seen_at, Customer.created_at).desc())
-        .limit(limit)
+        stmt.order_by(*_ordering(sort)).offset(offset).limit(limit)
     )).scalars())
     if not customers:
         return []

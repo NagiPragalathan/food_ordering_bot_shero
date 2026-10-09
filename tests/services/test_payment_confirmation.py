@@ -1,4 +1,4 @@
-"""The "payment received" message (spec step 16), with its Download Bill
+"""The "payment received" message (spec step 16), with its Download Invoice
 button. The not-approved fallback is the client's and is tested in
 tests/integrations/test_template_fallback.py."""
 
@@ -38,7 +38,7 @@ async def test_the_confirmation_carries_the_bill_button(customer, monkeypatch):
     assert await payments.send_payment_confirmation(customer, _order(customer), "Shero")
 
     (to, name, values, button), = sender.sent
-    assert (to, name) == (customer.whatsapp_number, "payment_confirmed_v2")
+    assert (to, name) == (customer.whatsapp_number, "payment_confirmed_v4")
     assert values == ("SHO-TEST-7", "33.80", "Shero", "Tue 29 Sep, 11:00 AM - 12:00 PM")
     assert payments.receipts.read_token(button) == "SHO-TEST-7"
 

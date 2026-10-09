@@ -126,6 +126,7 @@ tests/              287 tests
 - [deployment.md](docs/deployment.md) — AWS, DNS, webhooks, monitoring
 - [vercel-hosting.md](docs/vercel-hosting.md) — hosting on Vercel
 - [aws-hosting-guide.pdf](docs/aws-hosting-guide.pdf) — step-by-step AWS hosting for the server team
+- [google-maps-key-setup.pdf](docs/google-maps-key-setup.pdf) — allowing the live address on the Google Maps key
 
 ## Operational notes
 

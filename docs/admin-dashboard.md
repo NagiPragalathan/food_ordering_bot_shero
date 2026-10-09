@@ -221,6 +221,8 @@ Thirty minutes after delivery, the feedback request goes out automatically.
 
 ## Uber queue
 
+**Finding an order:** status tabs with counts (All, Waiting, Booked, Retrying, Missed, Cancelled), a search box (order number, customer name or number, delivery address or ZIP) and a delivery-day filter (Today, Upcoming, Past - in the kitchen's timezone). Filters are in the address bar, so a filtered view can be bookmarked.
+
 Every paid order joins the queue the moment it is paid, with the time it
 will be sent to Uber: **2 hours before its delivery slot starts**
 (`UBER_DISPATCH_HOURS_BEFORE`). A job checks every 5 minutes and books the
@@ -248,6 +250,8 @@ Developer before go-live.
 ---
 
 ## Customers
+
+**Finding a customer:** the numbers at the top (customers, paying, new this week, not in Zoho), then search (name, number - with or without `+` - or email) and filters for stage, orders (has ordered / has paid / no orders yet) and Zoho (in Zoho / not in Zoho), with sorting (last active, newest, oldest, name). 25 a page. A number opens the chat in WhatsApp.
 
 Everyone who has messaged the bot, newest first, with their funnel stage,
 where the chat is, orders and saved addresses, and whether they are in Zoho.
@@ -279,22 +283,22 @@ ids mean nothing there; Push to Zoho recreates the records. Code: `app/services/
 
 ## Settings
 
-Where you connect everything. Values saved here **override `.env` and take
-effect immediately** — no redeploy to rotate a key.
+Zoho and the business rules. Values saved here **override `.env` and take
+effect immediately** — no redeploy.
 
-| Group | What it connects |
+| Group | What it holds |
 |---|---|
-| WhatsApp (Gallabox) | API key, secret, channel ID, webhook token |
 | Zoho CRM | Domain dropdown and **Connect Zoho** |
-| Stripe | Secret key, publishable key, webhook secret, currency |
-| Uber Direct | Customer ID, client ID, client secret |
-| Meta Catalogue | Catalogue ID, system user token |
-| Maps | Google Maps key (optional) |
 | Business rules | Tax, payment timings, public URLs |
+
+The service keys — WhatsApp (Gallabox), Stripe, Uber Direct, Meta Catalogue
+and Google Maps — are **not** on this page: they are read from the server's
+`.env` only. A value saved for one of them in the past is ignored (log:
+`setting_not_editable_ignored`), so `.env` is the one place to change them.
 
 ### Test connection
 
-Each group has a **Test connection** button that makes one real, read-only
+The Zoho group has a **Test connection** button that makes one real, read-only
 call and reports back in plain language — "Connected to Shero USA in TEST
 mode, charges enabled", or "The refresh token is invalid or has been revoked".
 
@@ -342,6 +346,8 @@ Client ID and Secret in place, so reconnecting is one press.
 
 ## Kitchens
 
+**The list:** numbers at the top (taking orders, open right now, paused, without opening hours), search (name, street, city, ZIP) and a filter (taking orders / paused / open now). Each kitchen shows whether it is open now, today's hours, its delivery area and courier number, with **Edit**, **Pause / Resume** and **Make default**. A paused kitchen is not matched to new customers. The map draws every active kitchen's delivery circle (Google Maps; OpenStreetMap without a browser key). On the form, **Use my location** asks first when it is more than 50 miles from the current pin.
+
 **Kitchens** in the sidebar lists every kitchen, with **Add kitchen** to set up
 another. Add as many as you run.
 
@@ -364,6 +370,9 @@ and which one would get the order.
 |---|---|
 | Name, street, city, state, ZIP | The pickup address sent to Uber |
 | Latitude / longitude | Optional. Leave blank and the address is found on the map when you save. Customer distances are measured from this point; clear both after changing the address so it is found again. |
+| Pick on the map | Search an address, or click / drag the pin onto the kitchen door: the street, city, state, ZIP and coordinates fill in by themselves (satellite view available). The map uses `GOOGLE_MAPS_BROWSER_KEY`; the address lookups go through the server's Geocoding key. |
+| Timezone | Set from the kitchen's pin when you save (offline lookup, `tzfpy`), so slots, opening hours and the 24-hour notice use the kitchen's local time; the drop-down only counts where the pin has no timezone (at sea). Saving also rebuilds the kitchen's future slots: free slots that no longer fit the hours, slot length or timezone are removed and the right ones created. A slot someone holds or has ordered is never removed. |
+| Form layout | Sections for Kitchen, Location, Delivery area, Contact and Opening hours. The map draws the delivery circle and redraws it as the pin or the miles change; the radius has a slider and 5 / 10 / 15 / 20-mile quick picks (10 is the default). Each day has an open / closed switch, and **Copy Monday to all days** fills the week. A summary with the Save button stays beside the form, and leaving with unsaved changes asks first. |
 | Delivery area rule | **Within a radius** (straight-line distance), **Only these ZIP codes**, or **Radius AND ZIP list** |
 | Delivery radius (miles) | Default 10 miles |
 | Kitchen WhatsApp | Gets the new-order alert on the delivery day |
@@ -423,6 +432,46 @@ Zoho lead, and their message reaches your team in Gallabox as normal.
 Set **only** on this page: stored in the database as `BOT_REPLY_MODE`
 (`all` / `allowlist`) and `BOT_ALLOWED_NUMBERS` (`number|name,...`). They are
 not read from `.env`. With nothing saved, the bot replies to everyone.
+
+### Trigger keywords
+
+Which messages start the bot. Separate from the whitelist above; both apply.
+
+- **Reply to any message** (switch, on by default): every message gets the
+  bot, as before.
+- Switched **off**, a chat only starts the bot when the message matches a
+  **trigger keyword**. Add as many as you like (up to 50), each with a match
+  type:
+
+  | Match | Matches | Example |
+  |---|---|---|
+  | **Exact message** | The whole message is the keyword | `hi` matches "Hi!" but not "hi there" |
+  | **Contains the word** | The keyword appears anywhere, as whole words | `order` matches "I want to order", not "reorder" |
+  | **Starts with** | The message begins with the keyword | `menu` matches "menu please" |
+
+  Capitals, punctuation and emoji are ignored. A keyword can be a phrase
+  (`order food`).
+- **Always answered**, keyword or not, so ordering never breaks half-way:
+  - a customer part-way through an order who wrote in the last 24 hours (they
+    have to be able to type their address or email);
+  - taps on the bot's own buttons;
+  - the bot's own messages, such as "New menu link" from an expired page.
+- A trigger on a chat that is not mid-order (new, finished, or quiet for over
+  24 hours) starts over from the welcome. A trigger typed mid-order is just
+  part of the order.
+- Anything else gets no reply, no customer record and no Zoho lead, and
+  reaches your team in Gallabox as normal. That includes a message after an
+  order is finished ("when will it arrive?") and a chat handed to a person.
+- **Test a message** says whether a first message would start the bot, and
+  which keyword it matched.
+- While keyword mode is on, every admin page shows a **Keywords only** badge.
+- Switching **off** with no keywords will not save. Switching back **on**
+  keeps the keywords for next time.
+
+Stored in the database as `BOT_REPLY_TRIGGER` (`any` / `keywords`) and
+`BOT_TRIGGER_KEYWORDS` (JSON: `[{"keyword": "hi", "match": "exact"}]`). Not
+read from `.env`. The check is `services/reply_triggers.decide`, run by the
+WhatsApp webhook after the whitelist.
 
 ---
 

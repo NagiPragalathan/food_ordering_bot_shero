@@ -14,6 +14,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from app.db.types import json_server_default
+
 revision = "0004_zoho_catalogue_links"
 down_revision = "0003_customer_addresses"
 branch_labels = None
@@ -31,7 +33,8 @@ def upgrade() -> None:
 
     # server_default so the ALTER works on rows that already exist.
     op.add_column("orders", sa.Column("zoho_item_ids", postgresql.JSONB(), nullable=False,
-                                      server_default=sa.text("'{}'")))
+                                      server_default=json_server_default(
+                                          "{}", op.get_bind().dialect.name)))
 
 
 def downgrade() -> None:

@@ -13,7 +13,13 @@
   </section>
 </div>
 
-<p id="toast" class="fixed inset-x-4 bottom-24 z-50 hidden rounded-xl bg-red-600 px-4 py-3 text-center text-sm text-white shadow-lg"></p>
+<div id="toast" role="alert" aria-live="assertive"
+     class="fixed inset-x-4 bottom-24 z-50 mx-auto hidden max-w-md items-start gap-3 rounded-2xl bg-ink-900 px-4 py-3
+            text-sm text-white shadow-2xl ring-1 ring-white/10">
+  <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[11px] font-bold">!</span>
+  <p id="toast-text" class="flex-1 leading-snug"></p>
+  <button id="toast-close" class="-mr-1 rounded-lg px-1.5 text-white/60 hover:text-white" aria-label="Dismiss">✕</button>
+</div>
 
 <style>
   /* The sheet slides up and the page dims; a step inside an open sheet fades
@@ -28,8 +34,10 @@
   #sheet.is-closing > section { animation: sheroSheetOut .16s ease-in both }
   #sheet.is-closing > #scrim  { animation: sheroFadeOut .16s ease-in both }
   #sheet-body.is-swapping     { animation: sheroFadeIn .18s ease-out both }
+  #toast.is-toast             { animation: sheroSheetIn .22s cubic-bezier(.2,.8,.2,1) both }
+  .area-note                  { animation: sheroSheetIn .26s cubic-bezier(.2,.8,.2,1) both }
   @media (prefers-reduced-motion: reduce) {
-    #sheet > *, #sheet-body { animation: none !important }
+    #sheet > *, #sheet-body, #toast, .area-note { animation: none !important }
   }
 </style>
 
@@ -49,10 +57,15 @@ window.SheroUI = function (token) {
   function toast(msg) {
     if (expired) return;
     const t = $('toast');
-    t.textContent = msg;
+    $('toast-text').textContent = msg;
     t.classList.remove('hidden');
+    t.classList.add('flex');
+    replay(t, 'is-toast');
     clearTimeout(t._timer);
-    t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
+    // Long enough to read: about 4 s, more for a long message.
+    const hide = () => { t.classList.add('hidden'); t.classList.remove('flex'); };
+    t._timer = setTimeout(hide, Math.min(9000, 3500 + String(msg).length * 40));
+    $('toast-close').onclick = () => { clearTimeout(t._timer); hide(); };
   }
 
   // Restarts a CSS animation on `el` by re-adding its class.

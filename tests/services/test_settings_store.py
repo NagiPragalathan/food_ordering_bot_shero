@@ -67,11 +67,11 @@ def test_secrets_are_refused_without_a_key(monkeypatch):
 
 # --- storage -----------------------------------------------------------------
 async def test_secret_is_encrypted_in_the_table(session):
-    await save(session, "STRIPE_SECRET_KEY", "sk_test_abc123", updated_by="me")
+    await save(session, "ZOHO_CLIENT_SECRET", "sk_test_abc123", updated_by="me")
     await session.flush()
 
     row = await session.scalar(
-        select(AppSetting).where(AppSetting.key == "STRIPE_SECRET_KEY"))
+        select(AppSetting).where(AppSetting.key == "ZOHO_CLIENT_SECRET"))
     assert row.is_secret is True
     assert "sk_test_abc123" not in (row.value or ""), "stored in the clear"
     assert decrypt(row.value) == "sk_test_abc123"
@@ -102,12 +102,12 @@ async def test_unknown_key_is_refused(session):
 
 
 async def test_load_overrides_decrypts(session):
-    await save(session, "STRIPE_SECRET_KEY", "sk_test_xyz")
+    await save(session, "ZOHO_CLIENT_SECRET", "sk_test_xyz")
     await save(session, "ZOHO_DATA_CENTER", "eu")
     await session.flush()
 
     overrides = await load_overrides(session)
-    assert overrides["STRIPE_SECRET_KEY"] == "sk_test_xyz"
+    assert overrides["ZOHO_CLIENT_SECRET"] == "sk_test_xyz"
     assert overrides["ZOHO_DATA_CENTER"] == "eu"
 
 
@@ -136,14 +136,14 @@ async def test_numeric_settings_are_coerced(session, monkeypatch):
 
 async def test_blank_secret_in_a_form_keeps_the_existing_value(session):
     """The form never renders a secret back, so blank means 'unchanged'."""
-    await save(session, "STRIPE_SECRET_KEY", "sk_test_original")
+    await save(session, "ZOHO_CLIENT_SECRET", "sk_test_original")
     await session.flush()
 
-    changed = await save_many(session, {"STRIPE_SECRET_KEY": ""}, updated_by="me")
+    changed = await save_many(session, {"ZOHO_CLIENT_SECRET": ""}, updated_by="me")
     assert changed == []
 
     overrides = await load_overrides(session)
-    assert overrides["STRIPE_SECRET_KEY"] == "sk_test_original"
+    assert overrides["ZOHO_CLIENT_SECRET"] == "sk_test_original"
 
 
 async def test_save_many_reports_only_real_changes(session, monkeypatch):
@@ -219,7 +219,8 @@ def test_every_grouped_field_is_editable():
     grouped = {key for fields in SETTING_GROUPS.values() for key, _, _ in fields}
     others = {key for key, _, _ in OTHER_EDITABLE}
     assert grouped | others == set(EDITABLE_KEYS)
-    assert others == {"BOT_REPLY_MODE", "BOT_ALLOWED_NUMBERS"}
+    assert others == {"BOT_REPLY_MODE", "BOT_ALLOWED_NUMBERS",
+                      "BOT_REPLY_TRIGGER", "BOT_TRIGGER_KEYWORDS"}
 
 
 def test_every_editable_key_is_a_real_setting():
@@ -229,14 +230,29 @@ def test_every_editable_key_is_a_real_setting():
 
 
 def test_credentials_are_marked_secret():
-    """Anything that grants access must be encrypted, not stored readable."""
-    must_be_secret = {
-        "GALLABOX_API_SECRET", "GALLABOX_WEBHOOK_TOKEN", "ZOHO_CLIENT_SECRET",
-        "ZOHO_REFRESH_TOKEN", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
-        "UBER_CLIENT_SECRET", "META_SYSTEM_USER_TOKEN", "GOOGLE_MAPS_API_KEY",
-    }
-    for key in must_be_secret:
+    for key in ("ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN"):
         assert EDITABLE_KEYS[key][1] is True, f"{key} should be stored encrypted"
+
+
+def test_service_keys_are_read_from_env_only():
+    """Gallabox, Stripe, Uber, Meta and Maps keys are not on the Settings page."""
+    for key in ("GALLABOX_API_KEY", "GALLABOX_WEBHOOK_TOKEN", "STRIPE_SECRET_KEY",
+                "STRIPE_WEBHOOK_SECRET", "UBER_CLIENT_SECRET", "META_SYSTEM_USER_TOKEN",
+                "GOOGLE_MAPS_API_KEY", "GOOGLE_MAPS_BROWSER_KEY"):
+        assert key not in EDITABLE_KEYS
+
+
+async def test_an_old_saved_service_key_is_ignored(session, monkeypatch):
+    """A value saved before the key moved to .env must not override .env."""
+    from app.db.models import AppSetting
+    from app.services.settings_store import apply_overrides
+
+    monkeypatch.setattr(settings, "stripe_currency", "usd")
+    session.add(AppSetting(key="STRIPE_CURRENCY", value="eur", is_secret=False))
+    await session.flush()
+
+    await apply_overrides(session)
+    assert settings.stripe_currency == "usd"
 
 
 def test_database_url_is_not_editable_from_the_browser():

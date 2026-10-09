@@ -40,7 +40,7 @@ log = get_logger(__name__)
 async def send_payment_confirmation(customer: Customer, order: Order,
                                     outlet_name: str) -> bool:
     """Tell the customer their payment went through (spec step 16), with a
-    Download Bill button. If the template is not approved the client sends
+    Download Invoice button. If the template is not approved the client sends
     the same words as an ordinary message (gallabox/fallback.py). Returns
     True when a message was accepted."""
     try:

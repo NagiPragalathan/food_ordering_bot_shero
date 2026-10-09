@@ -14,6 +14,9 @@ email-validator==2.2.0
 # --- Database ----------------------------------------------------------------
 SQLAlchemy[asyncio]==2.0.37
 asyncpg==0.30.0
+# MySQL, the database on the AWS server (mysql:// URLs, see app/db/url.py).
+aiomysql==0.2.0
+PyMySQL==1.1.1
 alembic==1.14.1
 
 # --- HTTP integrations -------------------------------------------------------
@@ -44,6 +47,9 @@ aiosqlite==0.20.0
 # Downscales dish photos pulled out of the client's sheet; the originals are
 # ~850KB PNGs, far too heavy for a phone menu.
 Pillow==11.0.0
+
+# A kitchen's timezone from its map pin, offline (services/kitchen_admin.timezone_for).
+tzfpy==2.1.0
 
 # Draws the PDF bill a customer downloads after paying (services/receipts.py).
 fpdf2==2.8.3

@@ -51,12 +51,17 @@ EMAIL_REASK = (
     "That does not look like a valid email address. "
     "Please enter it again, for example asha@example.com"
 )
+# The greeting: Order Now (a link button to www.shero.us) under it, then
+# CONTINUE_PROMPT with Continue on WhatsApp. A human is still reachable by
+# typing "agent" (see AGENT_KEYWORDS), and the Talk to Us button still exists
+# on the order_cancelled template, where it is needed.
 WELCOME_BACK = "Welcome back to Shero Home Food, {name}! \U0001F44B"
-MAIN_MENU = "What would you like to do?"
-# One button is enough here: ordering is what people came for. A human is
-# still reachable by typing "agent" (see AGENT_KEYWORDS), and the Talk to Us
-# button still exists on the order_cancelled template, where it is needed.
+WELCOME_READY = "Thanks, {name}! You are all set with Shero Home Food. \U0001F44B"
+# WhatsApp needs a line of text on every message, buttons alone are refused.
+CONTINUE_PROMPT = "Or order right here on WhatsApp \U0001F447"
 BTN_ORDER_NOW = "Order Now"
+# The welcome's "Continue on WhatsApp" tap (its label comes back as the reply).
+CONTINUE_KEYWORDS = {"continue on whatsapp"}
 BTN_TALK_TO_US = "Talk to Us"
 
 HANDOVER = (

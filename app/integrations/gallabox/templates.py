@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 Category = Literal["UTILITY", "MARKETING"]
-ButtonKind = Literal["none", "dynamic_url", "quick_reply"]
+# static_url: a fixed link (the shop's website), the same for every customer.
+ButtonKind = Literal["none", "dynamic_url", "static_url", "quick_reply"]
 # Where a dynamic URL button points: the short payment redirect, the web
 # ordering page (whose suffix is the customer's signed link token), or the
 # paid bill (whose suffix is the order's signed receipt token).
@@ -42,6 +43,8 @@ class TemplateSpec:
     button_label: str | None = None
     quick_replies: tuple[str, ...] = field(default_factory=tuple)
     url_base: UrlBase = "pay"
+    # The link of a static_url button.
+    button_url: str | None = None
 
     @property
     def param_count(self) -> int:
@@ -76,9 +79,12 @@ PAYMENT_REMINDER = TemplateSpec(
 
 # Submitted as "payment_confirmed": the first "payment_success" came back in
 # error on the channel, and a template name cannot be reused until it is
-# deleted by hand in Gallabox. This one also carries the Download Bill button.
+# deleted by hand in Gallabox. This one also carries the Download Invoice button.
 PAYMENT_SUCCESS = TemplateSpec(
-    name="payment_confirmed_v2",
+    # v4: the button says Download Invoice (v2 said Download Bill; v3 went
+    # in by mistake with a test address and is never used). A button's
+    # text is fixed at approval, so the change needs a new template name.
+    name="payment_confirmed_v4",
     category="UTILITY",
     trigger="Stripe payment confirmed (step 16)",
     params=("order_number", "amount", "outlet_name", "slot_label"),
@@ -86,10 +92,10 @@ PAYMENT_SUCCESS = TemplateSpec(
     # variable, counting a trailing full stop as no ending at all.
     sample_body=(
         "Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} "
-        "for delivery at {{4}}. Thank you for ordering with Shero! Tap below for your bill."
+        "for delivery at {{4}}. Thank you for ordering with Shero! Tap below for your invoice."
     ),
     button_kind="dynamic_url",
-    button_label="Download Bill",
+    button_label="Download Invoice",
     url_base="receipt",
 )
 
@@ -185,6 +191,59 @@ WELCOME = TemplateSpec(
     quick_replies=("Order Now",),
 )
 
+# The shop's own website, behind the welcome's Order Now button.
+SHERO_WEBSITE = "https://www.shero.us/"
+# The welcome's second button: the ordering flow here in WhatsApp.
+CONTINUE_ON_WHATSAPP = "Continue on WhatsApp"
+
+# Welcome templates: Order Now opens the website, Continue on WhatsApp
+# carries on with the bot - both buttons on one message, which only a
+# template can do. NOT used by the conversation: Meta filed
+# shero_welcome_back as MARKETING, and Meta does not deliver marketing
+# templates to US numbers. The greeting is two ordinary messages instead
+# (onboarding.show_main_menu). Kept so --status knows them, and for a
+# business-initiated welcome to non-US numbers.
+WELCOME_BACK = TemplateSpec(
+    name="shero_welcome_back",
+    category="UTILITY",
+    trigger="A returning customer writes in - Order Now (website) / Continue on WhatsApp",
+    params=("customer_name",),
+    sample_body="Welcome back to Shero Home Food, {{1}}! \U0001F44B",
+    button_kind="static_url",
+    button_label="Order Now",
+    button_url=SHERO_WEBSITE,
+    quick_replies=(CONTINUE_ON_WHATSAPP,),
+)
+
+# The same choice for a new customer, once their name and email are in.
+WELCOME_NEW = TemplateSpec(
+    name="shero_welcome_ready",
+    category="UTILITY",
+    trigger="A new customer has given name and email - Order Now (website) / Continue on WhatsApp",
+    params=("customer_name",),
+    sample_body="Thanks, {{1}}! You are all set with Shero Home Food. \U0001F44B",
+    button_kind="static_url",
+    button_label="Order Now",
+    button_url=SHERO_WEBSITE,
+    quick_replies=(CONTINUE_ON_WHATSAPP,),
+)
+
+# An address no kitchen delivers to. Sent at most once a day per customer
+# (services/out_of_area.py), so trying address after address is not spam.
+# Ends on words, not the address: Meta refuses a body ending on a variable.
+OUT_OF_AREA = TemplateSpec(
+    name="shero_out_of_area",
+    category="UTILITY",
+    trigger="The address chosen for an order is outside every kitchen's delivery area",
+    params=("customer_name", "delivery_address"),
+    sample_body=(
+        "Hi {{1}}, sorry - we do not deliver to {{2}} yet. \U0001F61E\n\n"
+        "Our kitchens are not close enough to that address today, but we are "
+        "growing and hope to be in your area soon.\n\n"
+        "You can try a different delivery address any time."
+    ),
+)
+
 ORDER_SUMMARY = TemplateSpec(
     name="order_summary_v2",
     category="UTILITY",
@@ -246,9 +305,10 @@ ALL_TEMPLATES: tuple[TemplateSpec, ...] = (
 # Everything this project creates on the WABA: the spec's ten, plus the
 # welcome opener (reaching customers before they write in), the web order
 # summary (Pay Now with Change menu / Update location) and the menu link
-# (View Menu with Get new link), none of which the spec lists.
+# (View Menu with Get new link) and the in-chat welcomes (website or
+# WhatsApp), none of which the spec lists.
 MANAGED_TEMPLATES: tuple[TemplateSpec, ...] = ALL_TEMPLATES + (
-    WELCOME, ORDER_SUMMARY, MENU_LINK)
+    WELCOME, ORDER_SUMMARY, MENU_LINK, WELCOME_BACK, WELCOME_NEW, OUT_OF_AREA)
 
 BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in MANAGED_TEMPLATES}
 
@@ -257,7 +317,7 @@ RENAMED: dict[str, str] = {
     # The _v2 templates carry the hosted address (https://smo.shero.us) in their
     # link buttons; the first versions pointed at a test tunnel. A button's
     # address is fixed at approval, and Gallabox cannot edit a template.
-    "payment_success": "payment_confirmed_v2",
+    "payment_success": "payment_confirmed_v4",
     "payment_link": "shero_payment_link_v2",
     "payment_reminder": "shero_payment_reminder_v2",
     "payment_failed": "shero_payment_failed_v2",
