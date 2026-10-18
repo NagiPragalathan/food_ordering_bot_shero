@@ -272,9 +272,16 @@ def _coupon_line(order) -> str | None:
     return f"Coupon {order.promo_code or ''}{title} = -{discount:.2f}"
 
 
+# Order fields added after the CRM was first set up. A CRM where
+# setup_zoho_crm.py has not been run since may refuse them; the Order is then
+# filed without them (the coupon is still the last line of Items).
+OPTIONAL_ORDER_FIELDS = (f.O_DISCOUNT, f.O_COUPON_CODE)
+
+
 async def create_order(fields: dict) -> str | None:
-    order_id = await zoho_client.create_record(settings.zoho_orders_module,
-                                               f.compact(fields))
+    order_id = await _without_refused(
+        lambda payload: zoho_client.create_record(settings.zoho_orders_module, payload),
+        fields, OPTIONAL_ORDER_FIELDS)
     log.info("zoho_order_created", order_number=fields.get(settings.zoho_orders_name_field),
              zoho_id=order_id)
     return order_id
@@ -282,9 +289,27 @@ async def create_order(fields: dict) -> str | None:
 
 async def update_order(zoho_order_id: str, fields: dict) -> None:
     """Set more on an Order already filed; None values are left as they are."""
+    if f.compact(fields):
+        await _without_refused(
+            lambda payload: zoho_client.update_record(settings.zoho_orders_module,
+                                                      zoho_order_id, payload),
+            fields, OPTIONAL_ORDER_FIELDS)
+
+
+async def _without_refused(write, fields: dict, optional: tuple[str, ...]):
+    """Write; if Zoho refuses one of the `optional` fields, drop it and retry."""
     payload = f.compact(fields)
-    if payload:
-        await zoho_client.update_record(settings.zoho_orders_module, zoho_order_id, payload)
+    for _ in range(len(optional) + 1):
+        try:
+            return await write(payload)
+        except IntegrationError as exc:
+            refused = _rejected_field(exc)
+            if refused not in optional or refused not in payload:
+                raise
+            log.warning("zoho_optional_field_dropped", field=refused,
+                        hint="run scripts/setup_zoho_crm.py --apply to add it")
+            payload = {k: v for k, v in payload.items() if k != refused}
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 # --- Sales Orders: the order with a native product grid ------------------------

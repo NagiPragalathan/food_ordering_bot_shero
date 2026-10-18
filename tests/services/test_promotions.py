@@ -403,6 +403,39 @@ def test_zoho_order_records_the_discount():
     assert "less the coupon" in so[f.SO_DESCRIPTION]
 
 
+async def test_a_crm_without_the_coupon_fields_still_gets_the_order(monkeypatch):
+    """Before setup_zoho_crm.py adds Discount and Coupon Code, Zoho may refuse
+    them; the Order is then filed without them rather than not at all."""
+    from app.core.exceptions import IntegrationError
+    sent = []
+
+    async def create_record(module, payload):
+        sent.append(dict(payload))
+        for name in (f.O_DISCOUNT, f.O_COUPON_CODE):
+            if name in payload:
+                raise IntegrationError("zoho", "record write failed", payload={
+                    "code": "INVALID_DATA", "details": {"api_name": name}})
+        return "zorder-1"
+    monkeypatch.setattr(crm.zoho_client, "create_record", create_record)
+
+    order_id = await crm.create_order({"Name": "SHO-T-1", f.O_ORDER_TOTAL: Decimal("20"),
+                                       f.O_DISCOUNT: Decimal("5"), f.O_COUPON_CODE: "SAVE5"})
+    assert order_id == "zorder-1" and len(sent) == 3
+    assert f.O_DISCOUNT not in sent[-1] and f.O_COUPON_CODE not in sent[-1]
+    assert sent[-1][f.O_ORDER_TOTAL] == 20.0
+
+
+async def test_other_zoho_refusals_are_not_hidden(monkeypatch):
+    from app.core.exceptions import IntegrationError
+
+    async def create_record(module, payload):
+        raise IntegrationError("zoho", "record write failed", payload={
+            "code": "INVALID_DATA", "details": {"api_name": f.O_ORDER_TOTAL}})
+    monkeypatch.setattr(crm.zoho_client, "create_record", create_record)
+    with pytest.raises(IntegrationError):
+        await crm.create_order({"Name": "SHO-T-1", f.O_ORDER_TOTAL: Decimal("20")})
+
+
 def test_zoho_is_not_sent_coupon_fields_without_a_coupon():
     order = Order(order_number="SHO-T-1", stage=OrderStage.PAID_SLOT_BOOKED, items=[],
                   total=Decimal("10"), discount=Decimal("0"))
