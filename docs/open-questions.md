@@ -128,7 +128,7 @@ Say the word and we will add one.
 Called out so there is no surprise later — none of these are in the spec:
 
 - Takeaway or pickup orders (the spec says delivery only)
-- Promo codes, discounts or loyalty
+- Loyalty points (promo codes and discounts are now built: admin **Offers**)
 - Multiple addresses saved per customer
 - Pushing the menu *out* to the Meta catalogue (so the native WhatsApp cart
   works). The data is all here; it needs the Meta write API and credentials.

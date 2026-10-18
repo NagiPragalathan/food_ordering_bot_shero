@@ -1,6 +1,6 @@
-{# Delivery check -> time -> total -> confirm. Shared by the menu page and the
-   address-only page, so both place orders exactly the same way. Needs
-   _sheet.html (SheroUI) and _address_book.html (the book). #}
+{# Delivery check -> time -> total (with coupons) -> confirm. Shared by the
+   menu page and the address-only page, so both place orders exactly the same
+   way. Needs _sheet.html (SheroUI) and _address_book.html (the book). #}
 <script>
 window.SheroCheckout = function (ui, opts) {
   const { $, esc, money, toast, api, openSheet, busy } = ui;
@@ -8,11 +8,13 @@ window.SheroCheckout = function (ui, opts) {
   let addressId = null;
   let slotId = null;
   let book = null;          // set by attach(): the book needs checkDelivery first
+  let appliedCode = '';     // the coupon the total on screen includes; sent back at confirm
 
   const slotClass = 'rounded-xl border border-mist-200 bg-white px-2 py-2.5 text-[12px] leading-tight';
   const pickedClass = 'rounded-xl border-2 border-herb-600 bg-herb-500/10 px-2 py-2.5 text-[12px] ' +
                       'font-semibold leading-tight text-herb-700';
   const waIcon = '<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm5.3 14.2c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.4-.7-2.9-1.1-4.7-4.1-4.9-4.3-.1-.2-1.2-1.6-1.2-3s.7-2.1 1-2.4c.3-.3.6-.3.8-.3h.6c.2 0 .4 0 .6.5l.9 2.1c.1.2.1.4 0 .6l-.4.6-.4.5c-.1.1-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.3 2.4 1.5.3.1.5.1.6-.1l.9-1c.2-.3.4-.2.6-.1l2 .9c.3.1.5.2.5.4.1.1.1.7-.1 1.3Z"/></svg>';
+  const tagIcon = '<svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01"/></svg>';
 
   async function checkDelivery(id) {
     if (!id) { toast('Choose a delivery address.'); return; }
@@ -116,7 +118,7 @@ window.SheroCheckout = function (ui, opts) {
         $('sheet-foot').innerHTML =
           '<button id="go-summary" class="w-full rounded-xl bg-brand-500 py-3 text-sm font-semibold text-white">' +
           'See the total · ' + esc(day.weekday + ' ' + day.day + ' ' + day.month + ', ' + s.time.split(' - ')[0]) + '</button>';
-        $('go-summary').addEventListener('click', showSummary);
+        $('go-summary').addEventListener('click', () => showSummary($('go-summary')));
       });
       grid.appendChild(b);
     });
@@ -173,60 +175,230 @@ window.SheroCheckout = function (ui, opts) {
     return (n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(n < 10 ? 1 : 0)) + ' mi';
   }
 
-  async function showSummary() {
-    if (!slotId) { toast('Pick a delivery time.'); return; }
-    const done = busy($('go-summary'), 'Working out your total…');
+  // Price the order and show the summary. `button` shows the wait; `keep`
+  // keeps the scroll position when the sheet is only being refreshed (a
+  // coupon applied or removed), so the customer stays where they were.
+  async function showSummary(button, keep) {
+    if (!slotId) { toast('Pick a delivery time.'); return null; }
+    const done = busy(button, keep ? 'Updating…' : 'Working out your total…');
     try {
       const data = await api('/quote', { slot_id: slotId, address_id: addressId });
-      if (!data.ok) { toast(data.error); return; }
-
-      const rows = data.lines.map(l =>
-        '<div class="flex justify-between py-1 text-sm"><span>' + l.quantity + ' × ' +
-        esc(l.name) + '</span><span class="tabular-nums">' + money(l.line_total) + '</span></div>').join('');
-      const row = (k, v) => '<div class="flex justify-between py-0.5 text-sm text-ink-700/80"><span>' +
-        k + '</span><span class="tabular-nums">' + money(v) + '</span></div>';
-
-      const place = book && book.selectedAddress();
-      openSheet('Confirm your order',
-        rows + '<hr class="my-2 border-mist-200">' +
-        row('Subtotal', data.dish_total) + row('Delivery', data.delivery_fee) +
-        row('Taxes &amp; fees', Number(data.extra_fees) + Number(data.tax)) +
-        '<hr class="my-2 border-mist-200">' +
-        '<div class="flex justify-between text-base font-bold"><span>Total</span>' +
-        '<span class="tabular-nums">' + money(data.total) + '</span></div>' +
-        '<div class="mt-4 space-y-2 rounded-xl bg-mist-100 p-3 text-sm">' +
-          (place ? '<div class="flex gap-2"><span>📍</span><div><div class="text-xs text-ink-700/60">Deliver to · ' +
-            esc(place.label) + '</div><div class="font-medium">' + esc(place.address_line1) +
-            (place.apartment_unit ? ', ' + esc(place.apartment_unit) : '') + ' · ' + esc(place.postal_code) +
-            '</div></div></div>' : '') +
-          '<div class="flex gap-2"><span>🕒</span><div><div class="text-xs text-ink-700/60">Delivery time</div>' +
-          '<div class="font-medium">' + esc(data.slot_label) + '</div></div></div>' +
-        '</div>' +
-        '<p class="mt-3 text-xs text-ink-700/60">Next, WhatsApp opens with this summary and a Pay Now button. ' +
-        'You can still change the menu or the address there.</p>',
-        '<button id="place" class="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] py-3 ' +
-        'text-sm font-semibold text-white">' + waIcon + ' Confirm &amp; continue on WhatsApp</button>');
-
-      $('place').addEventListener('click', placeOrder);
+      if (!data.ok) { toast(data.error); return null; }
+      const scroll = $('sheet-body').scrollTop;
+      renderSummary(data);
+      if (keep) $('sheet-body').scrollTop = scroll;
+      return data;
     } catch (err) {
       toast('Could not price your order: ' + err.message);
+      return null;
     } finally {
       done();
     }
   }
 
+  function renderSummary(data) {
+    const coupon = data.coupon;
+    appliedCode = coupon && coupon.applied ? coupon.code : '';
+
+    const rows = data.lines.map(l =>
+      '<div class="flex justify-between gap-3 py-1 text-sm"><span>' + l.quantity + ' × ' +
+      esc(l.name) + '</span><span class="tabular-nums">' + money(l.line_total) + '</span></div>').join('');
+    const row = (k, v) => '<div class="flex justify-between py-0.5 text-sm text-ink-700/80"><span>' +
+      k + '</span><span class="tabular-nums">' + money(v) + '</span></div>';
+
+    const discountRow = data.discount > 0
+      ? '<div class="flex justify-between py-0.5 text-sm font-semibold text-herb-700"><span>Coupon (' +
+        esc(coupon.code) + ')</span><span class="tabular-nums">−' + money(data.discount) + '</span></div>'
+      : '';
+    const totalRow =
+      '<div class="flex items-baseline justify-between text-base font-bold"><span>Total</span><span class="tabular-nums">' +
+      (data.discount > 0 ? '<span class="mr-1.5 text-xs font-medium text-ink-700/45 line-through">' +
+        money(data.total_before_discount) + '</span>' : '') + money(data.total) + '</span></div>';
+    const savedBanner = data.discount > 0
+      ? '<div class="mt-2 flex items-center justify-center gap-1.5 rounded-xl bg-herb-500/10 px-3 py-2 text-sm font-semibold text-herb-700">' +
+        '🎉 You save ' + money(data.saving || data.discount) + ' on this order</div>'
+      : '';
+
+    const place = book && book.selectedAddress();
+    openSheet('Confirm your order',
+      rows + '<hr class="my-2 border-mist-200">' +
+      couponBlock(data) +
+      '<hr class="my-2 border-mist-200">' +
+      row('Subtotal', data.dish_total) + row('Delivery', data.delivery_fee) +
+      row('Taxes &amp; fees', Number(data.extra_fees) + Number(data.tax)) +
+      discountRow +
+      '<hr class="my-2 border-mist-200">' + totalRow + savedBanner +
+      '<div class="mt-4 space-y-2 rounded-xl bg-mist-100 p-3 text-sm">' +
+        (place ? '<div class="flex gap-2"><span>📍</span><div><div class="text-xs text-ink-700/60">Deliver to · ' +
+          esc(place.label) + '</div><div class="font-medium">' + esc(place.address_line1) +
+          (place.apartment_unit ? ', ' + esc(place.apartment_unit) : '') + ' · ' + esc(place.postal_code) +
+          '</div></div></div>' : '') +
+        '<div class="flex gap-2"><span>🕒</span><div><div class="text-xs text-ink-700/60">Delivery time</div>' +
+        '<div class="font-medium">' + esc(data.slot_label) + '</div></div></div>' +
+      '</div>' +
+      '<p class="mt-3 text-xs text-ink-700/60">Next, WhatsApp opens with this summary and a Pay Now button. ' +
+      'You can still change the menu or the address there.</p>',
+      '<button id="place" class="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] py-3 ' +
+      'text-sm font-semibold text-white">' + waIcon + ' Confirm &amp; pay ' + money(data.total) + ' on WhatsApp</button>');
+
+    $('place').addEventListener('click', placeOrder);
+    wireCoupons();
+  }
+
+  // --- coupons ----------------------------------------------------------------
+  function couponBlock(data) {
+    const c = data.coupon;
+    let html = '<div id="coupon-box" class="py-1">';
+    html += '<div class="mb-2 flex items-center gap-1.5 text-sm font-semibold">' + tagIcon + 'Offers &amp; coupons</div>';
+    if (data.coupon_notice) {
+      html += '<p class="mb-2 rounded-lg bg-accent-50 px-3 py-2 text-xs text-accent-700">' + esc(data.coupon_notice) + '</p>';
+    }
+
+    if (c) {
+      // The applied code: what it took off, or why not yet.
+      html += '<div class="flex items-center gap-3 rounded-xl border px-3 py-2.5 ' +
+        (c.applied ? 'border-herb-600/40 bg-herb-500/10' : 'border-amber-300 bg-amber-50') + '">' +
+        '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full ' +
+          (c.applied ? 'bg-herb-600 text-white' : 'bg-amber-400 text-white') + '">' +
+          (c.applied ? '✓' : '!') + '</span>' +
+        '<div class="min-w-0 flex-1">' +
+          '<div class="text-sm font-bold tracking-wide">' + esc(c.code) +
+            '<span class="ml-1.5 text-xs font-medium text-ink-700/70">' + esc(c.headline) + '</span></div>' +
+          '<div class="text-xs ' + (c.applied ? 'text-herb-700' : 'text-amber-800') + '">' +
+            (c.applied ? 'Applied · ' + money(c.saving) + ' off' : esc(c.message)) + '</div>' +
+        '</div>' +
+        '<button id="coupon-remove" class="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-accent-600 hover:bg-white/70">Remove</button>' +
+      '</div>';
+    } else {
+      html += '<form id="coupon-form" class="flex gap-2" autocomplete="off">' +
+        '<input id="coupon-input" placeholder="Enter coupon code" maxlength="32" autocapitalize="characters" spellcheck="false" ' +
+          'aria-label="Coupon code" class="min-w-0 flex-1 rounded-xl border border-mist-200 bg-white px-3 py-2.5 text-sm font-semibold ' +
+          'uppercase tracking-wide outline-none placeholder:font-normal placeholder:normal-case placeholder:tracking-normal ' +
+          'focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">' +
+        '<button id="coupon-apply" class="shrink-0 rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white hover:bg-brand-600">Apply</button>' +
+      '</form>' +
+      '<p id="coupon-error" class="mt-1.5 hidden text-xs text-accent-600" role="alert"></p>';
+    }
+
+    // Offers the customer could pick instead, best first.
+    const offers = (data.offers || []).filter(o => !c || o.code !== c.code);
+    if (offers.length) {
+      const card = (o) =>
+        '<div class="flex overflow-hidden rounded-xl border ' + (o.eligible ? 'border-brand-200' : 'border-mist-200 opacity-80') + ' bg-white">' +
+          '<div class="flex w-16 shrink-0 items-center justify-center px-1 py-2 text-center text-[10px] font-extrabold uppercase leading-tight text-white ' +
+            (o.eligible ? 'bg-brand-500' : 'bg-ink-700/35') + '">' + esc(o.tag) + '</div>' +
+          '<div class="min-w-0 flex-1 px-3 py-2">' +
+            '<div class="flex items-start justify-between gap-2">' +
+              '<div class="min-w-0"><div class="truncate text-sm font-semibold">' + esc(o.title) + '</div>' +
+              '<div class="text-xs text-ink-700/70">' + esc(o.description || o.headline) + '</div></div>' +
+              '<button class="offer-apply shrink-0 rounded-lg border border-brand-500 px-2.5 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50" ' +
+                'data-code="' + esc(o.code) + '">Apply</button>' +
+            '</div>' +
+            '<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">' +
+              '<span class="rounded border border-dashed border-brand-300 px-1.5 font-mono font-bold tracking-wider text-brand-700">' + esc(o.code) + '</span>' +
+              (o.eligible
+                ? (o.saving ? '<span class="font-semibold text-herb-700">Save ' + money(o.saving) + '</span>' : '')
+                : '<span class="text-amber-700">' + esc(o.hint) + '</span>') +
+              (terms(o).length ? '<span class="text-ink-700/50">' + esc(terms(o).join(' · ')) + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      const first = offers.slice(0, 2).map(card).join('');
+      const rest = offers.slice(2).map(card).join('');
+      html += '<div class="mt-2.5 space-y-2">' + first + '</div>';
+      if (rest) {
+        html += '<details class="mt-2"><summary class="cursor-pointer text-xs font-semibold text-brand-600">' +
+                'See ' + (offers.length - 2) + ' more offer' + (offers.length - 2 === 1 ? '' : 's') + '</summary>' +
+                '<div class="mt-2 space-y-2">' + rest + '</div></details>';
+      }
+    }
+    return html + '</div>';
+  }
+
+  // The small print; "Min order" is left out where the hint already says it.
+  const terms = (o) => o.eligible ? o.terms : o.terms.filter(t => !t.startsWith('Min order'));
+
+  function couponError(message) {
+    const el = $('coupon-error');
+    if (!el) { toast(message); return; }
+    el.textContent = message;
+    el.classList.remove('hidden');
+    const input = $('coupon-input');
+    if (input) { input.classList.add('border-accent-500'); input.focus(); }
+  }
+
+  async function applyCoupon(code, button) {
+    code = String(code || '').replace(/\s+/g, '').toUpperCase();
+    if (!code) { couponError('Enter a coupon code.'); return; }
+    const done = busy(button, 'Applying…');
+    try {
+      const res = await api('/coupon', { code: code });
+      if (!res.ok) { couponError(res.error); return; }
+      const data = await showSummary(null, true);
+      if (data && data.coupon) {
+        toast(data.coupon.applied
+          ? '🎉 ' + data.coupon.code + ' applied - you save ' + money(data.saving || data.coupon.saving)
+          : data.coupon.code + ' saved. ' + data.coupon.message, 'ok');
+      }
+    } catch (err) {
+      couponError('Could not apply that code: ' + err.message);
+    } finally {
+      done();
+    }
+  }
+
+  async function removeCoupon(button) {
+    const done = busy(button, '…');
+    try {
+      await api('/coupon/remove', {});
+      await showSummary(null, true);
+    } catch (err) {
+      toast('Could not remove the coupon: ' + err.message);
+    } finally {
+      done();
+    }
+  }
+
+  function wireCoupons() {
+    const form = $('coupon-form');
+    if (form) {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        applyCoupon($('coupon-input').value, $('coupon-apply'));
+      });
+      $('coupon-input').addEventListener('input', () => {
+        $('coupon-error').classList.add('hidden');
+        $('coupon-input').classList.remove('border-accent-500');
+      });
+    }
+    const remove = $('coupon-remove');
+    if (remove) remove.addEventListener('click', () => removeCoupon(remove));
+    document.querySelectorAll('#coupon-box .offer-apply').forEach(b =>
+      b.addEventListener('click', () => applyCoupon(b.dataset.code, b)));
+  }
+
   async function placeOrder() {
     const done = busy($('place'), 'Placing your order…');
     try {
-      const data = await api('/confirm', { slot_id: slotId, address_id: addressId });
-      if (!data.ok) { toast(data.error); return; }
+      const data = await api('/confirm', { slot_id: slotId, address_id: addressId,
+                                           coupon_code: appliedCode });
+      if (!data.ok) {
+        toast(data.error);
+        // The coupon or total changed since it was shown: show the new one.
+        if (data.requote) { done(); await showSummary(null, true); }
+        return;
+      }
 
       openSheet('Order placed',
         '<div class="py-4 text-center">' +
         '<div class="text-4xl">✅</div>' +
         '<p class="mt-3 text-sm">Order <strong>' + esc(data.order_number) + '</strong></p>' +
-        '<p class="mt-1 text-sm text-ink-700/80">Your order summary is on WhatsApp with a ' +
-        '<strong>Pay Now</strong> button. Your slot is held for 30 minutes.</p>' +
+        (data.discount > 0
+          ? '<p class="mx-auto mt-2 inline-block rounded-full bg-herb-500/10 px-3 py-1 text-xs font-semibold text-herb-700">' +
+            esc(data.coupon) + ' saved you ' + money(data.discount) + '</p>'
+          : '') +
+        '<p class="mt-2 text-sm text-ink-700/80">Your order summary is on WhatsApp with a ' +
+        '<strong>Pay Now</strong> button for ' + money(data.total) + '. Your slot is held for 30 minutes.</p>' +
         (data.whatsapp_url ? '<p class="mt-2 text-xs text-ink-700/60">Opening WhatsApp…</p>' : '') +
         '</div>',
         // WhatsApp first: that is where the summary, Pay Now, Change menu

@@ -116,8 +116,15 @@ async def create_checkout_session(
     customer_email: str | None = None,
     customer_phone: str | None = None,
     ttl_minutes: int | None = None,
+    discount: Decimal = Decimal("0"),
+    discount_label: str | None = None,
 ) -> dict:
-    """Create the Checkout Session and return {id, url, expires_at}."""
+    """Create the Checkout Session and return {id, url, expires_at}.
+
+    A coupon `discount` goes on as a one-off Stripe coupon for exactly that
+    amount, so the Stripe page shows the same lines as the bill - dishes,
+    delivery, taxes, then the discount - and charges the order's total.
+    """
     currency = (currency or settings.stripe_currency).lower()
     minutes = clamp_expiry_minutes(ttl_minutes or settings.payment_link_ttl_minutes)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
@@ -159,6 +166,10 @@ async def create_checkout_session(
         params["customer_email"] = customer_email
 
     try:
+        if discount and Decimal(discount) > 0:
+            coupon_id = await _order_coupon(order_number=order_number, amount=Decimal(discount),
+                                            currency=currency, label=discount_label)
+            params["discounts"] = [{"coupon": coupon_id}]
         session = await _create(params, order_number)
     except stripe.StripeError as exc:
         log.error("stripe_session_failed", order_number=order_number, error=str(exc))
@@ -167,6 +178,26 @@ async def create_checkout_session(
     log.info("stripe_session_created", order_number=order_number,
              session_id=session.id, expires_at=expires_at.isoformat())
     return {"id": session.id, "url": session.url, "expires_at": expires_at}
+
+
+async def _order_coupon(*, order_number: str, amount: Decimal, currency: str,
+                        label: str | None) -> str:
+    """A Stripe coupon worth exactly this order's discount, usable once.
+
+    Made per order rather than per promotion: a percentage with a cap, or
+    free delivery, is a different amount on every order, and Stripe's own
+    percent_off would also discount the delivery line.
+    """
+    coupon = await stripe.Coupon.create_async(
+        amount_off=to_minor_units(amount),
+        currency=currency,
+        duration="once",
+        max_redemptions=1,
+        # Shown to the customer on the Stripe page; Stripe allows 40 characters.
+        name=(label or "Discount")[:40],
+        metadata={"order_number": order_number},
+    )
+    return coupon.id
 
 
 async def _create(params: dict, order_number: str):

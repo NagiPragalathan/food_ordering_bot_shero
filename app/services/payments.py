@@ -31,7 +31,8 @@ from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
-from app.services import crm_sync, dispatch, kitchen_alerts, order_alerts, orders, receipts, slots
+from app.services import (crm_sync, dispatch, kitchen_alerts, order_alerts, orders,
+                          promotions, receipts, slots)
 from app.services.customers import advance, get_or_create_conversation
 
 log = get_logger(__name__)
@@ -46,13 +47,22 @@ async def send_payment_confirmation(customer: Customer, order: Order,
     try:
         await current_sender().send_template(
             customer.whatsapp_number, tpl.PAYMENT_SUCCESS, order.order_number,
-            f"{order.total:.2f}", outlet_name, order.slot_label or "your chosen slot",
+            amount_text(order), outlet_name, order.slot_label or "your chosen slot",
             button_value=receipts.build_token(order.order_number))
         return True
     except IntegrationError as exc:
         log.error("payment_success_message_failed", order_number=order.order_number,
                   error=str(exc))
         return False
+
+
+def amount_text(order: Order) -> str:
+    """The amount for a template's "$..." slot: "42.50", or with a coupon
+    "42.50 (you saved $7.50 with SHERO10)" - one line, as Meta requires."""
+    if order.discount and Decimal(order.discount) > 0 and order.promo_code:
+        return (f"{order.total:.2f} (you saved ${Decimal(order.discount):.2f} "
+                f"with {order.promo_code})")
+    return f"{order.total:.2f}"
 
 
 def payment_short_url(order_number: str) -> str:
@@ -81,6 +91,8 @@ async def create_payment_link(session: AsyncSession, order: Order,
         currency=order.currency,
         customer_email=customer.email,
         customer_phone=customer.whatsapp_number,
+        discount=Decimal(order.discount or 0),
+        discount_label=f"Coupon {order.promo_code}" if order.promo_code else None,
     )
 
     order.stripe_session_id = result["id"]
@@ -105,7 +117,7 @@ async def _send_payment_link(order: Order, customer: Customer) -> None:
         tpl.PAYMENT_LINK,
         customer.greeting_name,
         order.order_number,
-        f"{order.total:.2f}",
+        amount_text(order),
         order.slot_label or "your chosen slot",
         button_value=order.order_number,
     )
@@ -134,7 +146,7 @@ async def send_order_summary(order: Order, customer: Customer) -> None:
             summary_items(order.items or []),
             summary_address(order),
             order.slot_label or "your chosen slot",
-            f"{order.total:.2f}",
+            amount_text(order),
             button_value=order.order_number,
         )
     except IntegrationError as exc:
@@ -223,6 +235,9 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     conversation = await get_or_create_conversation(session, customer)
     if conversation.step == str(ConversationStep.AWAIT_PAYMENT):
         advance(conversation, ConversationStep.COMPLETED)
+    # The coupon has been spent on this order; the next order starts without it.
+    if order.promo_code and promotions.stored_code(conversation) == order.promo_code:
+        promotions.forget(conversation)
     await session.flush()
 
     ctx = await crm_sync.order_context(session, order)

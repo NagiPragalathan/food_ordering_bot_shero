@@ -6,7 +6,9 @@ edited to open somebody else's bill, and it never expires: a customer may
 want the bill weeks later. Only a paid order has a bill.
 
 The PDF is drawn with fpdf2 from the order snapshot, so it shows exactly what
-was charged even if menu prices change later.
+was charged even if menu prices change later. A coupon shows as its own line
+under the charges, from the code and amount copied onto the order, so the bill
+still adds up if the promotion is edited or deleted afterwards.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ SALT = "shero-receipt"
 LOGO = Path(__file__).resolve().parents[1] / "static" / "brand" / "shero-logo-192.png"
 BRAND = (15, 94, 88)        # the admin teal, as RGB
 MUTED = (110, 110, 110)
+SAVING = (31, 122, 69)      # green, for the discount line
 
 
 def _serializer() -> URLSafeSerializer:
@@ -144,10 +147,29 @@ def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
         pdf.set_x(110)
         pdf.cell(53, 6, label)
         pdf.cell(29, 6, _money(currency, amount), align="R", new_x="LMARGIN", new_y="NEXT")
+    discount = Decimal(str(order.discount or 0))
+    if discount > 0:
+        pdf.set_x(110)
+        pdf.set_text_color(*SAVING)
+        pdf.cell(53, 6, _fit(pdf, f"Coupon {order.promo_code or ''}".strip(), 51))
+        pdf.cell(29, 6, "-" + _money(currency, discount), align="R",
+                 new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(20, 20, 20)
+    pdf.line(110, pdf.get_y() + 1, 192, pdf.get_y() + 1)
+    pdf.ln(2)
     pdf.set_x(110)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(53, 9, "Total paid")
     pdf.cell(29, 9, _money(currency, order.total), align="R", new_x="LMARGIN", new_y="NEXT")
+    if discount > 0:
+        pdf.set_x(110)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*SAVING)
+        offer = f" ({order.promo_title})" if order.promo_title else ""
+        pdf.multi_cell(82, 5, _t(f"You saved {_money(currency, discount)} with "
+                                 f"{order.promo_code}{offer}."),
+                       align="R", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(20, 20, 20)
 
     # Footer.
     pdf.ln(8)

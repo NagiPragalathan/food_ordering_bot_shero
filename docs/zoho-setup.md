@@ -176,6 +176,7 @@ Fields on **Orders**:
 | Delivery Time (`Delivery_Time`) | Date/Time | Start of the delivery slot, for date filters |
 | Items | Multi-line | One dish per line: `2 x Sambar @ 9.50 = 19.00` (the Order Items records are the structured version) |
 | Dish Total, Delivery Charge, Taxes and Fees, Order Total | Currency | Amounts as charged (in `STRIPE_CURRENCY`) |
+| Discount, Coupon Code | Currency, Single line | Set only when a coupon was used; Order Total is after the discount. The coupon is also the last line of Items |
 | Stripe Payment ID | Single line | Stripe payment reference |
 | Delivery Instructions | Multi-line | What the customer typed |
 | Order Placed Time, Paid Time, Dispatched Time, Delivered Time | Date/Time | When each happened |
@@ -248,8 +249,9 @@ and the address the paid order went to.
 **Sales Orders.** Every paid order is also filed as a Zoho Sales Order,
 Zoho's own order record with a product grid like a Deal's or a Quote's:
 one row per dish (Product, quantity, the price charged), with delivery,
-Uber fees and tax as the **Adjustment**, so its Grand Total is exactly what
-the customer paid. Subject is the order number; it is linked to the Contact
+Uber fees and tax, less any coupon, as the **Adjustment**, so its Grand
+Total is exactly what the customer paid (the coupon is named in its
+Description). Subject is the order number; it is linked to the Contact
 and from the Order's Sales Order field. Its Status follows the kitchen:
 Created when paid, Approved when sent to the kitchen or out for delivery,
 Delivered, and Cancelled on a cancellation or refund. A dish with no Product

@@ -54,10 +54,16 @@ window.SheroUI = function (token) {
     return d.innerHTML;
   }
 
-  function toast(msg) {
+  // `kind` 'ok' is good news (a coupon applied); anything else is an error.
+  function toast(msg, kind) {
     if (expired) return;
     const t = $('toast');
     $('toast-text').textContent = msg;
+    // Good news gets a green tick in place of the red "!".
+    const badge = t.firstElementChild;
+    badge.textContent = kind === 'ok' ? '✓' : '!';
+    badge.classList.toggle('bg-red-500', kind !== 'ok');
+    badge.classList.toggle('bg-emerald-500', kind === 'ok');
     t.classList.remove('hidden');
     t.classList.add('flex');
     replay(t, 'is-toast');

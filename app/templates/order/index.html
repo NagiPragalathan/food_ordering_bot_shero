@@ -67,6 +67,10 @@
   <nav id="chips" class="no-bar mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 py-2.5 sm:px-6"></nav>
 </div>
 
+<!-- Offers marked "Menu banner" on the admin Offers page. Filled by
+     renderOffers; stays hidden when there are none. -->
+<section id="offers-strip" class="mx-auto hidden max-w-6xl px-4 pt-4 sm:px-6" aria-label="Offers"></section>
+
 <div class="mx-auto flex max-w-6xl gap-6 px-4 py-4 sm:px-6">
   <main id="list" class="min-w-0 flex-1">
     <div class="animate-pulse" aria-label="Loading the menu">
@@ -123,6 +127,8 @@
   let CART = {};        // retailer_id -> quantity  (mirror of the server)
   let activeCuisine = 'all';
   let activeChip = 'all';
+  let OFFERS = [];      // offers this customer can use (GET /offers)
+  let APPLIED = null;   // the coupon they have applied, if any
 
   // --- cart (server is the source of truth) -------------------------------
   const MAX_QTY = 20;           // the checkout accepts up to 20 of a dish
@@ -271,6 +277,7 @@
     foot.innerHTML =
       '<div class="mb-2 flex justify-between text-sm"><span>Subtotal</span>' +
       '<span class="font-semibold tabular-nums">' + money(data.subtotal) + '</span></div>' +
+      offerNudge(data.subtotal) +
       '<button id="side-checkout" class="w-full rounded-xl bg-brand-500 py-2.5 text-sm font-semibold text-white hover:bg-brand-600">Checkout</button>';
     $('side-checkout').addEventListener('click', showCart);
   }
@@ -583,7 +590,9 @@
       '<div class="flex justify-between py-2.5 text-base">' +
         '<span class="font-bold">Total</span>' +
         '<span class="font-bold tabular-nums">' + money(subtotal) + '</span></div>' +
-      '<p class="mb-2 text-[11px] text-ink-700/60">Delivery and taxes are added at the next step.</p>' +
+      offerNudge(subtotal) +
+      '<p class="mb-2 text-[11px] text-ink-700/60">Delivery and taxes are added at the next step.' +
+      (OFFERS.length || APPLIED ? ' Coupons are applied on the order summary.' : '') + '</p>' +
       '<button id="go-address" class="flex w-full items-center justify-center gap-2 rounded-xl ' +
       'bg-herb-600 py-3.5 text-sm font-semibold text-white hover:bg-herb-700">' +
       'Continue to delivery</button>');
@@ -598,9 +607,92 @@
       }));
   }
 
+  // --- offers -------------------------------------------------------------
+  // The page only shows offers and remembers the customer's pick; the
+  // server checks the code and works out the discount at checkout.
+  async function loadOffers() {
+    try {
+      const data = await api('/offers');
+      if (!data.ok) return;
+      OFFERS = data.offers || [];
+      APPLIED = data.applied;
+      renderOffers();
+      renderCart();
+    } catch (err) {
+      console.warn('offers failed to load', err);   // the menu works without them
+    }
+  }
+
+  function renderOffers() {
+    const box = $('offers-strip');
+    const banners = OFFERS.filter(o => o.placement === 'menu');
+    box.classList.toggle('hidden', !banners.length);
+    if (!banners.length) { box.innerHTML = ''; return; }
+    box.innerHTML =
+      '<div class="no-bar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">' +
+      banners.map(o => {
+        const on = APPLIED && APPLIED.code === o.code;
+        return '<div class="rise flex w-[18.5rem] shrink-0 snap-start overflow-hidden rounded-2xl border ' +
+            (on ? 'border-herb-600/50 bg-herb-500/10' : 'border-brand-200 bg-white') + ' shadow-card">' +
+          '<div class="relative flex w-[4.5rem] shrink-0 items-center justify-center bg-gradient-to-b from-brand-500 to-brand-700 ' +
+            'px-1.5 py-3 text-center text-[11px] font-extrabold uppercase leading-tight text-white">' + esc(o.tag) +
+            '<span class="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-mist-100"></span></div>' +
+          '<div class="min-w-0 flex-1 px-3 py-2.5">' +
+            '<div class="truncate text-sm font-semibold">' + esc(o.title) + '</div>' +
+            '<div class="line-clamp-1 text-xs text-ink-700/70">' + esc(o.description || o.headline) + '</div>' +
+            '<div class="mt-1.5 flex items-center justify-between gap-2">' +
+              '<span class="rounded border border-dashed border-brand-300 px-1.5 font-mono text-[11px] font-bold tracking-wider text-brand-700">' +
+                esc(o.code) + '</span>' +
+              (on
+                ? '<span class="text-xs font-semibold text-herb-700">✓ Applied</span>'
+                : '<button class="strip-apply rounded-lg bg-brand-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-600" ' +
+                  'data-code="' + esc(o.code) + '">Apply</button>') +
+            '</div>' +
+            (o.terms.length ? '<div class="mt-1 truncate text-[10px] text-ink-700/50">' + esc(o.terms.join(' · ')) + '</div>' : '') +
+          '</div>' +
+        '</div>';
+      }).join('') + '</div>';
+    box.querySelectorAll('.strip-apply').forEach(b => b.addEventListener('click', async () => {
+      const done = ui.busy(b, '…');
+      try {
+        const res = await api('/coupon', { code: b.dataset.code });
+        if (!res.ok) { toast(res.error); return; }
+        APPLIED = res.coupon;
+        toast('🏷️ ' + res.coupon.code + ' applied - your saving shows at checkout.', 'ok');
+        renderOffers();
+        renderCart();
+      } catch (err) {
+        toast('Could not apply that offer: ' + err.message);
+      } finally {
+        done();
+      }
+    }));
+  }
+
+  // One line under the cart subtotal: the applied coupon, or the nearest offer.
+  function offerNudge(subtotal) {
+    const line = (html, tone) => '<div class="mb-2 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] ' +
+      (tone === 'good' ? 'bg-herb-500/10 font-semibold text-herb-700' : 'bg-brand-50 text-brand-700') + '">🏷️ ' + html + '</div>';
+    if (APPLIED) {
+      const short = APPLIED.min_order - subtotal;
+      return short > 0.004
+        ? line('Add ' + money(short) + ' more to use <strong>' + esc(APPLIED.code) + '</strong>')
+        : line(esc(APPLIED.code) + ' applied · ' + esc(APPLIED.headline), 'good');
+    }
+    if (!OFFERS.length) return '';
+    const ready = OFFERS.filter(o => subtotal >= o.min_order);
+    if (ready.length) {
+      return line(ready.length === 1
+        ? '<strong>' + esc(ready[0].tag) + '</strong> available with code ' + esc(ready[0].code)
+        : ready.length + ' offers available at checkout');
+    }
+    const next = OFFERS.slice().sort((a, b) => a.min_order - b.min_order)[0];
+    return line('Add ' + money(next.min_order - subtotal) + ' more to unlock <strong>' + esc(next.tag) + '</strong>');
+  }
+
   // --- delivery address and checkout (shared with location.html) -------
   const checkout = window.SheroCheckout(ui, {
-    onPlaced: () => applyCart({ cart: [], count: 0, subtotal: 0 }),
+    onPlaced: () => { applyCart({ cart: [], count: 0, subtotal: 0 }); loadOffers(); },
   });
   const book = window.SheroAddressBook({
     api, openSheet, toast, esc, $, checkDelivery: checkout.checkDelivery,
@@ -658,6 +750,7 @@
       renderChips();
       renderList();
       if (cart.ok) applyCart(cart);
+      loadOffers();
     } catch (err) {
       $('list').innerHTML =
         '<p class="py-24 text-center text-sm text-red-600">Could not load the menu: ' +

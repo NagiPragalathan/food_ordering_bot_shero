@@ -2,7 +2,9 @@
 
     Dish price (MRP)                  -> the menu in this database
     Delivery charge + extra fees      -> Uber Direct quote
+    Coupon discount                   -> services/promotions.py
     Total                             -> dish total + Uber charges (+ our tax)
+                                         - discount
 
 Cart lines are always re-priced from the menu rather than trusting the prices
 in the inbound cart payload: the message is client-supplied, and an edited or
@@ -23,9 +25,10 @@ from app.core.config import settings
 from app.core.exceptions import (ConfigurationError, IntegrationError,
                                  ItemUnavailableError)
 from app.core.logging import get_logger
-from app.db.models import Outlet
+from app.db.models import Outlet, Promotion
 from app.integrations.uber import direct as uber
 from app.services import menu as menu_service
+from app.services import promotions
 
 log = get_logger(__name__)
 
@@ -69,6 +72,27 @@ class PricedOrder:
     uber_quote_id: str | None = None
     uber_quote_raw: dict = field(default_factory=dict)
     delivery_quote_failed: bool = False
+    # The coupon. `discount` is zero when none is applied, or when the cart
+    # does not qualify yet - `promo_problem` then says why.
+    discount: Decimal = Decimal("0.00")
+    promotion: Promotion | None = field(default=None, repr=False)
+    promo_problem: str | None = None
+
+    @property
+    def promo_code(self) -> str | None:
+        """The code that took money off this order, if one did."""
+        return self.promotion.code if self.promotion and self.discount > 0 else None
+
+    @property
+    def promo_title(self) -> str | None:
+        return self.promotion.title if self.promotion and self.discount > 0 else None
+
+    @property
+    def total_without_coupon(self) -> Decimal:
+        """What this order would cost with no coupon: a dish discount also
+        lowers the tax, so this is more than total + discount when tax is on."""
+        full_tax = money(self.dish_total * Decimal(str(settings.tax_percent)) / Decimal("100"))
+        return money(self.dish_total + self.delivery_fee + self.extra_fees + full_tax)
 
     @property
     def item_count(self) -> int:
@@ -87,12 +111,16 @@ async def price_cart(
     dropoff_longitude: float | None = None,
     dropoff_address: dict | None = None,
     slot_starts_at: datetime | None = None,
+    promotion: Promotion | None = None,
 ) -> PricedOrder:
     """Price a cart end to end.
 
     `cart_items` is [{"retailer_id": str, "quantity": int}] as parsed from the
     WhatsApp cart message. Raises ItemUnavailableError when a line is no longer
     in the catalogue or is out of stock (spec step 8).
+
+    `promotion` is a coupon already checked for this customer
+    (promotions.resolve); whether this cart qualifies is decided here.
     """
     lines = await _price_lines(session, cart_items)
     dish_total = money(sum((line.line_total for line in lines), Decimal("0.00")))
@@ -125,11 +153,36 @@ async def price_cart(
         else:
             priced.delivery_quote_failed = True
 
-    priced.tax = money(dish_total * Decimal(str(settings.tax_percent)) / Decimal("100"))
+    if promotion is not None:
+        priced.promotion = promotion
+        priced.promo_problem = promotions.amount_problem(
+            promotion, dish_total=dish_total,
+            delivery_fee=None if priced.delivery_quote_failed else priced.delivery_fee)
+        if priced.promo_problem is None:
+            priced.discount = promotions.discount_for(
+                promotion, dish_total=dish_total, delivery_fee=priced.delivery_fee)
+
+    _settle(priced)
+    # Stripe cannot charge less than its minimum, so a discount that would
+    # take the order under it gives a little less instead.
+    if priced.discount > 0 and priced.total < promotions.MIN_CHARGE:
+        priced.discount = max(Decimal("0.00"),
+                              money(priced.discount - (promotions.MIN_CHARGE - priced.total)))
+        _settle(priced)
+    return priced
+
+
+def _settle(priced: PricedOrder) -> None:
+    """Tax and total from the parts. A dish discount lowers what is taxed;
+    free delivery does not."""
+    taxable = priced.dish_total
+    if promotions.comes_off_dishes(priced.promotion):
+        taxable = max(Decimal("0.00"), priced.dish_total - priced.discount)
+    priced.tax = money(taxable * Decimal(str(settings.tax_percent)) / Decimal("100"))
     priced.total = money(
         priced.dish_total + priced.delivery_fee + priced.extra_fees + priced.tax
+        - priced.discount
     )
-    return priced
 
 
 def _fallback_fee() -> Decimal | None:
@@ -265,7 +318,11 @@ def format_summary(priced: PricedOrder, *, outlet_name: str,
         lines.append(f"Taxes and fees: {symbol}{priced.extra_fees}")
     if priced.tax > 0:
         lines.append(f"Tax: {symbol}{priced.tax}")
+    if priced.discount > 0:
+        lines.append(f"Coupon {priced.promo_code}: -{symbol}{priced.discount}")
     lines.append(f"*Total: {symbol}{priced.total}*")
+    if priced.discount > 0:
+        lines.append(f"You save {symbol}{priced.discount} on this order!")
     lines.append("")
     lines.append(f"From: {outlet_name}")
     lines.append(f"Delivery slot: {slot_label}")

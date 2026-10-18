@@ -10,7 +10,7 @@ from app.integrations.gallabox.messages import Button
 from app.integrations.uber.direct import build_address
 from app.services import kitchen as kitchen_service
 from app.services import orders as order_service
-from app.services import payments, slots
+from app.services import order_changes, payments, promotions, slots
 from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
 from app.services.pricing import format_summary, price_cart
@@ -27,6 +27,10 @@ async def build_and_show_summary(ctx: FlowContext) -> None:
 
     cart = ctx.get("cart") or []
     slot_starts_at = _parse_dt(ctx.get("slot_starts_at"))
+    # A coupon applied on the ordering page counts here too: the code is kept
+    # on the conversation, which the page and the chat share.
+    promotion, coupon_notice = await promotions.stored_promotion(
+        ctx.session, ctx.conversation, customer=ctx.customer, outlet=outlet, lock=True)
 
     priced = await price_cart(
         ctx.session,
@@ -36,6 +40,7 @@ async def build_and_show_summary(ctx: FlowContext) -> None:
         dropoff_longitude=ctx.customer.longitude,
         dropoff_address=_dropoff_address(ctx),
         slot_starts_at=slot_starts_at,
+        promotion=promotion,
     )
 
     # Without a delivery quote we would have to guess the charge, so stop here
@@ -61,11 +66,16 @@ async def build_and_show_summary(ctx: FlowContext) -> None:
     if ctx.get("slot_id"):
         await slots.hold_slot(ctx.session, slot_id=ctx.get("slot_id"),
                               order_id=order.id)
+    await order_changes.release_other_promo_holds(ctx.session, order)
 
     ctx.put(order_id=str(order.id), order_number=order.order_number)
 
     summary = format_summary(priced, outlet_name=outlet.name,
                              slot_label=ctx.get("slot_label") or "your chosen slot")
+    # Say why a coupon is not on the total, rather than silently leaving it off.
+    note = coupon_notice or priced.promo_problem
+    if note:
+        summary = f"{summary}\n\n{note}"
     await ctx.reply_buttons(
         f"{p.SUMMARY_PROMPT}\n\n{summary}",
         [

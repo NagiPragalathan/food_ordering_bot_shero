@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -58,6 +59,35 @@ async def reopen_latest(session: AsyncSession, customer: Customer,
     await crm_sync.advance_stage(customer, LeadStage.CART_CREATED)
     log.info("order_reopened", order_number=order.order_number, reason=reason)
     return Reopened(order_number=order.order_number)
+
+
+async def release_other_promo_holds(session: AsyncSession, order: Order) -> list[str]:
+    """Release this customer's other unpaid orders that carry the same coupon.
+
+    A coupon sits on one unpaid order at a time: a customer who confirms a
+    new order with it is replacing the old one, and leaving both payable
+    would let one code be redeemed twice. Returns the order numbers released.
+    """
+    if order.promotion_id is None:
+        return []
+    others = list((await session.execute(
+        select(Order).where(
+            Order.customer_id == order.customer_id,
+            Order.promotion_id == order.promotion_id,
+            Order.id != order.id,
+            Order.stage == OrderStage.PENDING_PAYMENT,
+            Order.payment_status.in_([PaymentStatus.NOT_STARTED, PaymentStatus.LINK_SENT]),
+        )
+    )).scalars())
+    released = []
+    for other in others:
+        await _release(session, other, reason="coupon_moved")
+        released.append(other.order_number)
+    if released:
+        await session.flush()
+        log.info("coupon_moved_to_new_order", order_number=order.order_number,
+                 released=released, coupon=order.promo_code)
+    return released
 
 
 def as_cart(items: list[dict]) -> list[dict]:

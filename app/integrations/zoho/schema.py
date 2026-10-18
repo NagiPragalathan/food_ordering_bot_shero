@@ -97,6 +97,8 @@ ORDER_FIELDS: tuple[tuple[str, dict], ...] = (
     (f.O_DISH_TOTAL, _money("Dish Total")),
     (f.O_DELIVERY_CHARGE, _money("Delivery Charge")),
     (f.O_TAXES_AND_FEES, _money("Taxes and Fees")),
+    (f.O_DISCOUNT, _money("Discount")),
+    (f.O_COUPON_CODE, _text("Coupon Code", 32)),
     (f.O_ORDER_TOTAL, _money("Order Total")),
     (f.O_STRIPE_PAYMENT_ID, _text("Stripe Payment ID", 255)),
     (f.O_INSTRUCTIONS, _textarea("Delivery Instructions")),

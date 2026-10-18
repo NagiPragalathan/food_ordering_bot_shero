@@ -86,6 +86,12 @@
           </td>
           <td class="px-4 py-3 text-right font-semibold tabular-nums">
             ${{ '%.2f' | format(row.order.total) }}
+            {% if row.order.discount and row.order.discount > 0 %}
+              <div class="mt-0.5 whitespace-nowrap text-[11px] font-medium text-emerald-700"
+                   title="{{ row.order.promo_title or '' }}">
+                {{ row.order.promo_code }} −${{ '%.2f' | format(row.order.discount) }}
+              </div>
+            {% endif %}
           </td>
           <td class="px-4 py-3">{{ ui.payment_badge(row.order.payment_status) }}</td>
           <td class="px-4 py-3">{{ ui.stage_badge(row.order.stage) }}</td>

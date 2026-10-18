@@ -217,6 +217,63 @@ press does nothing rather than sending a second message.
 
 Thirty minutes after delivery, the feedback request goes out automatically.
 
+An order placed with a coupon shows the code and the amount taken off under
+its total.
+
+---
+
+## Offers
+
+Coupon codes customers apply at checkout (**Offers** in the sidebar, at
+`/admin/promotions`). The top of the page shows how many offers are live, how
+many times codes have been redeemed, the discount given and the sales those
+orders brought in. Each offer is a card with its status (Live, Scheduled,
+Paused, Expired, Limit reached), its uses, and an on/off switch.
+
+### Creating an offer
+
+**Add promotion** opens the editor. On the right, a preview shows the offer
+the way customers see it, and **Try it on an order** shows what a sample cart
+would pay.
+
+| Field | What it does |
+|---|---|
+| Title, Offer description | Shown to customers, and the title on the bill |
+| Coupon code | What customers type, any case. **Generate** makes one up |
+| Offer tag | The banner label, e.g. `FLAT 20% OFF`. Blank uses one made from the discount |
+| Discount type | **Percentage** or **Flat amount** off the dishes, or **Free delivery** (the delivery charge is waived) |
+| Max discount | Caps a percentage, e.g. 20% off up to $10 |
+| Min order | Dish subtotal needed. Below it the customer is told "Add $X more" |
+| Total uses | Across everyone, e.g. the first 100 orders. Blank: unlimited |
+| Uses per customer | 1 = once each. Blank: unlimited |
+| First order only | Only customers who have never paid for an order |
+| Kitchen | Only orders cooked by one kitchen |
+| Start / End date | Whole days in the kitchen's timezone, both included |
+| Where customers see it | **Menu banner + checkout**, **Checkout only**, or **Hidden** (works only when typed, for codes you hand out) |
+| Display order, Active | Listing order; untick Active to pause |
+
+### How a use is counted
+
+A use counts when the order is **paid**. An unpaid order holds its use only
+while its 30-minute payment link is open, so the last use of a limited code
+cannot go to two people; an expired or changed order gives it back, and so
+does a refund. A customer who places a new order with the same code replaces
+their older unpaid one.
+
+### What the customer sees
+
+- Offers marked **Menu banner** appear as cards above the menu, with Apply.
+- The cart shows the applied code, or how much more unlocks the nearest offer.
+- The order summary has a coupon box, the listed offers with what each saves
+  (or why not yet), and the discount as its own line in the total.
+- The WhatsApp summary and payment messages give the total with the saving,
+  e.g. `$44.59 (you saved $8.87 with FEAST20)`.
+- Stripe shows the same discount line, and the PDF bill lists the coupon and
+  "You saved".
+
+Editing or deleting an offer never changes an order already placed: each
+order keeps its own copy of the code, title and amount.
+
 ---
 
 ## Uber queue

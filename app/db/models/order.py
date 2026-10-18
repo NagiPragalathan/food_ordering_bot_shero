@@ -49,6 +49,14 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
     # Uber's "extra taxes/fees" line, kept separate from our own sales tax.
     extra_fees: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=ZERO, nullable=False)
     tax: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=ZERO, nullable=False)
+    # Taken off by a coupon (services/promotions.py). The code and title are
+    # copied so the bill still reads right if the promotion is edited later.
+    discount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=ZERO, nullable=False)
+    promotion_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("promotions.id", ondelete="SET NULL"), index=True)
+    promo_code: Mapped[str | None] = mapped_column(String(32))
+    promo_title: Mapped[str | None] = mapped_column(String(120))
+    # dish_total + delivery_fee + extra_fees + tax - discount.
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=ZERO, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
 

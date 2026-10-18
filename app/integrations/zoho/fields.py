@@ -80,6 +80,8 @@ O_ITEMS = "Items"                     # multi-line: one "qty x dish @ price = to
 O_DISH_TOTAL = "Dish_Total"
 O_DELIVERY_CHARGE = "Delivery_Charge"
 O_TAXES_AND_FEES = "Taxes_and_Fees"
+O_DISCOUNT = "Discount"               # taken off by a coupon; only sent when there is one
+O_COUPON_CODE = "Coupon_Code"
 O_ORDER_TOTAL = "Order_Total"
 O_STRIPE_PAYMENT_ID = "Stripe_Payment_ID"
 O_INSTRUCTIONS = "Delivery_Instructions"

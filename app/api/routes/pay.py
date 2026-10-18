@@ -78,9 +78,13 @@ async def mock_checkout_page(
         "border-radius:10px;background:#2F7549;color:#fff;font-weight:600;"
         "font-size:1rem;cursor:pointer'>Simulate successful payment</button></form>"
     )
+    discount = getattr(order, "discount", None)
+    saving = (f"Coupon {html.escape(order.promo_code or '')}: "
+              f"<b>-{discount:.2f}</b> included<br>" if discount else "")
     return _page(
         "Test payment",
         f"Amount: <b>{order.total:.2f} {html.escape(order.currency.upper())}</b><br>"
+        + saving +
         "This is a demo checkout - no card is charged.<br>"
         "Real payments start once Stripe is connected." + button,
         order.order_number,

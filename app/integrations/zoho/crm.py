@@ -192,6 +192,7 @@ def order_fields(order, *, zoho_contact_id: str | None, zoho_lead_id: str | None
     """
     address = ", ".join(p for p in (order.delivery_address, order.apartment_unit,
                                     order.postal_code) if p) or None
+    discount = Decimal(str(order.discount or 0))
     return {
         settings.zoho_orders_name_field: order.order_number,
         f.O_CONTACT: {"id": zoho_contact_id} if zoho_contact_id else None,
@@ -206,11 +207,15 @@ def order_fields(order, *, zoho_contact_id: str | None, zoho_lead_id: str | None
         **order_link_fields(zoho_vendor_id=zoho_vendor_id, outlet_name=outlet_name,
                             delivery_at=delivery_at),
         f.O_DELIVERY_SLOT: order.slot_label,
-        f.O_ITEMS: item_lines(order.items or []),
+        f.O_ITEMS: item_lines(order.items or [], coupon=_coupon_line(order)),
         f.O_INSTRUCTIONS: order.delivery_instructions,
         f.O_DISH_TOTAL: order.dish_total,
         f.O_DELIVERY_CHARGE: order.delivery_fee,
         f.O_TAXES_AND_FEES: (order.extra_fees or 0) + (order.tax or 0),
+        # Left out (not zeroed) without a coupon, so a CRM that has not run
+        # setup_zoho_crm.py since these fields were added is never sent them.
+        f.O_DISCOUNT: discount if discount > 0 else None,
+        f.O_COUPON_CODE: order.promo_code if discount > 0 else None,
         f.O_ORDER_TOTAL: order.total,
         f.O_STRIPE_PAYMENT_ID: order.stripe_payment_intent_id,
         f.O_PLACED_TIME: f.zoho_datetime(order.created_at),
@@ -232,8 +237,9 @@ def order_link_fields(*, zoho_vendor_id: str | None, outlet_name: str | None,
     }
 
 
-def item_lines(items: list[dict]) -> str | None:
-    """The cart as text, one dish per line: `2 x Sambar @ 9.50 = 19.00`."""
+def item_lines(items: list[dict], *, coupon: str | None = None) -> str | None:
+    """The cart as text, one dish per line: `2 x Sambar @ 9.50 = 19.00`,
+    then the coupon line if the order had one."""
     lines = []
     for item in items:
         parsed = f.parse_line(item)
@@ -241,7 +247,18 @@ def item_lines(items: list[dict]) -> str | None:
             continue
         _, name, quantity, unit_price = parsed
         lines.append(f"{quantity} x {name} @ {unit_price:.2f} = {quantity * unit_price:.2f}")
+    if coupon and lines:
+        lines.append(coupon)
     return "\n".join(lines)[:2000] or None
+
+
+def _coupon_line(order) -> str | None:
+    """`Coupon SHERO10 (Diwali offer) = -7.50`, or None without a discount."""
+    discount = Decimal(str(order.discount or 0))
+    if discount <= 0:
+        return None
+    title = f" ({order.promo_title})" if order.promo_title else ""
+    return f"Coupon {order.promo_code or ''}{title} = -{discount:.2f}"
 
 
 async def create_order(fields: dict) -> str | None:
@@ -301,10 +318,13 @@ def sales_order_fields(order, *, product_ids: dict[str, str], zoho_contact_id: s
     # that had no Product, so the Grand Total still matches the charge).
     adjustment = Decimal(str(order.total or 0)) - grid_total
     address = ", ".join(p for p in (order.delivery_address, order.apartment_unit) if p) or None
+    coupon = _coupon_line(order)
     notes = [f"Delivery slot: {order.slot_label}" if order.slot_label else "",
              f"Instructions: {order.delivery_instructions}"
              if order.delivery_instructions else "",
-             "Adjustment = delivery charge, taxes and fees."]
+             f"{coupon} (taken off in Adjustment)." if coupon else "",
+             "Adjustment = delivery charge, taxes and fees"
+             + (", less the coupon." if coupon else ".")]
     notes_text = "\n".join(n for n in notes if n)
     return {
         f.SO_SUBJECT: order.order_number,

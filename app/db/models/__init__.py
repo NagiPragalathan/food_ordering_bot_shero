@@ -19,6 +19,7 @@ from app.db.models.enums import (
 from app.db.models.menu import Category, Cuisine, MenuItem
 from app.db.models.order import Order
 from app.db.models.outlet import Outlet
+from app.db.models.promotion import DiscountType, Placement, Promotion
 from app.db.models.setting import AdminUser, AppSetting
 from app.db.models.slot import DeliverySlot, SlotHold
 
@@ -34,6 +35,7 @@ __all__ = [
     "CustomerAddress",
     "DELIVERY_DETAIL_SEQUENCE",
     "DeliverySlot",
+    "DiscountType",
     "InboundMessage",
     "LeadStage",
     "MenuItem",
@@ -41,6 +43,8 @@ __all__ = [
     "OrderStage",
     "Outlet",
     "PaymentStatus",
+    "Placement",
+    "Promotion",
     "SlotHold",
     "SlotHoldStatus",
 ]

@@ -75,6 +75,10 @@ async def create_draft_order(
         delivery_fee=priced.delivery_fee,
         extra_fees=priced.extra_fees,
         tax=priced.tax,
+        discount=priced.discount,
+        promotion_id=priced.promotion.id if priced.discount > 0 and priced.promotion else None,
+        promo_code=priced.promo_code,
+        promo_title=priced.promo_title,
         total=priced.total,
         currency=priced.currency,
         delivery_address=customer.address_line1,
@@ -97,7 +101,8 @@ async def create_draft_order(
     session.add(order)
     await session.flush()
     log.info("order_created", order_number=order.order_number,
-             total=str(order.total), outlet=outlet.code)
+             total=str(order.total), outlet=outlet.code,
+             coupon=order.promo_code, discount=str(order.discount))
     return order
 
 

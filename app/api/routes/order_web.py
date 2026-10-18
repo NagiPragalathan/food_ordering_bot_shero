@@ -8,7 +8,9 @@ payment link is sent back to WhatsApp - the spec's step 15, unchanged.
 Every route re-reads the token, so the page holds no authority of its own, and
 every price is recalculated server-side from the menu. The browser's cart is
 a list of retailer ids and quantities; nothing it claims about money is
-trusted.
+trusted. A coupon is the same: the page sends a code, the server checks it
+(services/promotions.py), keeps it on the conversation with the cart, and
+works out the discount itself at quote and again at confirm.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ from app.services import addresses, crm_sync, media_thumbs
 from app.services import cart as cart_service
 from app.services import kitchen as kitchen_service
 from app.services import menu as menu_service
-from app.services import order_link, orders, out_of_area, payments, pricing, slots
+from app.services import (order_changes, order_link, orders, out_of_area, payments,
+                          pricing, promotions, slots)
 from app.services.kitchen import ServiceCheck
 from app.integrations.geo.geocoder import GeoPoint
 from app.templating import templates
@@ -48,6 +51,8 @@ UPSTREAM_DOWN = ("We could not work out the delivery charge just now. "
                  "Please try again shortly, or message us on WhatsApp.")
 PAYMENT_DOWN = ("We could not start the payment just now. Nothing has been "
                 "charged - please try again shortly.")
+COUPON_CHANGED = ("Your coupon changed since you saw the total. Please check "
+                  "the updated total and confirm again.")
 
 
 async def _customer(session: AsyncSession, token: str) -> Customer | None:
@@ -230,6 +235,72 @@ def _cart_response(lines: list[dict]) -> dict:
     }
 
 
+@router.get("/{token}/offers")
+async def offers(token: str, session: AsyncSession = Depends(get_session)) -> dict:
+    """Offers this customer can use, and the code they have applied.
+
+    Eligibility hints ("Add $4 more") use the cart as it stands; the real
+    discount is only ever worked out at quote and confirm.
+    """
+    customer = await _customer(session, token)
+    if customer is None:
+        return order_link.dead_link_response()
+
+    conversation, lines = await cart_service.for_customer(session, customer)
+    kitchen = await kitchen_service.kitchen_for(session, customer)
+    subtotal = cart_service.subtotal(lines)
+    promotion, notice = await promotions.stored_promotion(
+        session, conversation, customer=customer, outlet=kitchen)
+    return {
+        "ok": True,
+        "offers": await promotions.offers_for(session, customer, outlet=kitchen,
+                                              dish_total=subtotal),
+        "applied": promotions.public(promotion, dish_total=subtotal) if promotion else None,
+        "notice": notice,
+    }
+
+
+@router.post("/{token}/coupon")
+async def apply_coupon(request: Request, token: str,
+                       session: AsyncSession = Depends(get_session)) -> dict:
+    """Check a code and keep it for this customer's order.
+
+    A code the cart is not big enough for yet is still kept, with a hint: it
+    starts working as soon as the cart qualifies.
+    """
+    customer = await _customer(session, token)
+    if customer is None:
+        return order_link.dead_link_response()
+
+    body = await request.json()
+    conversation, lines = await cart_service.for_customer(session, customer)
+    kitchen = await kitchen_service.kitchen_for(session, customer)
+    try:
+        promotion = await promotions.resolve(session, body.get("code"),
+                                             customer=customer, outlet=kitchen)
+    except promotions.PromoError as exc:
+        log.info("coupon_rejected", customer_id=str(customer.id),
+                 code=promotions.normalize_code(body.get("code")), reason=str(exc))
+        return {"ok": False, "error": str(exc)}
+
+    promotions.remember(conversation, promotion.code)
+    log.info("coupon_applied", customer_id=str(customer.id), code=promotion.code)
+    return {"ok": True,
+            "coupon": promotions.public(promotion,
+                                        dish_total=cart_service.subtotal(lines))}
+
+
+@router.post("/{token}/coupon/remove")
+async def remove_coupon(token: str, session: AsyncSession = Depends(get_session)) -> dict:
+    customer = await _customer(session, token)
+    if customer is None:
+        return order_link.dead_link_response()
+
+    conversation, _ = await cart_service.for_customer(session, customer)
+    promotions.forget(conversation)
+    return {"ok": True}
+
+
 @router.post("/{token}/address")
 async def check_address(request: Request, token: str,
                         session: AsyncSession = Depends(get_session)) -> dict:
@@ -372,7 +443,7 @@ async def quote(request: Request, token: str,
     # The cart is read from the database, not from the request: the page is
     # only a view of it, and a tab left open for an hour must not price a
     # cart the customer has since changed somewhere else.
-    _, stored = await cart_service.for_customer(session, customer)
+    conversation, stored = await cart_service.for_customer(session, customer)
     cart = _clean_cart(stored)
     if not cart:
         return {"ok": False, "error": "Your cart is empty."}
@@ -394,6 +465,9 @@ async def quote(request: Request, token: str,
     if slot is None:
         return {"ok": False, "error": SLOT_GONE}
 
+    promotion, notice = await promotions.stored_promotion(
+        session, conversation, customer=customer, outlet=kitchen)
+
     try:
         priced = await pricing.price_cart(
             session, cart,
@@ -402,6 +476,7 @@ async def quote(request: Request, token: str,
             dropoff_longitude=point.longitude if point else customer.longitude,
             dropoff_address=_dropoff(address),
             slot_starts_at=slots.as_utc(slot.starts_at),
+            promotion=promotion,
         )
     except BotFlowError as exc:
         # Item unavailable, no delivery quote - all carry customer-safe copy.
@@ -421,9 +496,17 @@ async def quote(request: Request, token: str,
         "delivery_fee": float(priced.delivery_fee),
         "extra_fees": float(priced.extra_fees),
         "tax": float(priced.tax),
+        "discount": float(priced.discount),
+        # What it would have cost without the coupon, and so the real saving.
+        "total_before_discount": float(priced.total_without_coupon),
+        "saving": float(priced.total_without_coupon - priced.total),
         "total": float(priced.total),
         "currency": priced.currency,
         "slot_label": slot.label(slots.outlet_tz(kitchen)),
+        "coupon": _coupon_view(priced),
+        "coupon_notice": notice,
+        "offers": await promotions.offers_for(session, customer, outlet=kitchen,
+                                              dish_total=priced.dish_total),
     }
 
 
@@ -466,6 +549,11 @@ async def confirm(request: Request, token: str,
         customer.latitude, customer.longitude = point.latitude, point.longitude
     customer.preferred_outlet_id = kitchen.id
 
+    # The coupon is checked again, with its row locked until this order is
+    # saved, so a limited code's last use cannot go to two people at once.
+    promotion, notice = await promotions.stored_promotion(
+        session, conversation, customer=customer, outlet=kitchen, lock=True)
+
     draft = None   # set once the order exists, so cleanup knows what to undo
     try:
         priced = await pricing.price_cart(
@@ -475,7 +563,14 @@ async def confirm(request: Request, token: str,
             dropoff_longitude=customer.longitude,
             dropoff_address=_dropoff(address),
             slot_starts_at=slots.as_utc(slot.starts_at),
+            promotion=promotion,
         )
+        # The customer agreed to the total they were shown. If the coupon
+        # stopped applying since (expired, claimed, cart changed), show them
+        # the new total before anything is created.
+        if "coupon_code" in body and (promotions.normalize_code(body.get("coupon_code"))
+                                      != (priced.promo_code or "")):
+            return {"ok": False, "requote": True, "error": notice or COUPON_CHANGED}
         order = await orders.create_draft_order(
             session, customer=customer, outlet=kitchen, priced=priced,
             slot_id=slot.id, slot_starts_at=slots.as_utc(slot.starts_at),
@@ -484,6 +579,9 @@ async def confirm(request: Request, token: str,
         )
         draft = order
         await slots.hold_slot(session, slot_id=slot.id, order_id=order.id)
+        # A coupon sits on one unpaid order at a time; this one replaces any
+        # earlier unpaid order that carried it.
+        await order_changes.release_other_promo_holds(session, order)
         # The full summary, with Change menu and Update location, goes to
         # WhatsApp; the page then hands the customer over to the chat.
         pay_url = await payments.create_payment_link(session, order, customer,
@@ -510,13 +608,33 @@ async def confirm(request: Request, token: str,
     cart_service.clear(conversation)
 
     log.info("web_order_confirmed", order_number=order.order_number,
-             customer_id=str(customer.id), total=str(order.total))
+             customer_id=str(customer.id), total=str(order.total),
+             coupon=order.promo_code, discount=str(order.discount))
 
     return {"ok": True, "order_number": order.order_number, "pay_url": pay_url,
-            "whatsapp_url": order_link.whatsapp_chat_url()}
+            "whatsapp_url": order_link.whatsapp_chat_url(),
+            "total": float(order.total), "discount": float(order.discount),
+            "coupon": order.promo_code}
 
 
 # --- helpers -----------------------------------------------------------------
+def _coupon_view(priced: pricing.PricedOrder) -> dict | None:
+    """The applied coupon as the summary shows it: what it took off, or why
+    it has not yet."""
+    promotion = priced.promotion
+    if promotion is None:
+        return None
+    return {
+        "code": promotion.code,
+        "title": promotion.title,
+        "headline": promotions.headline(promotion),
+        "tag": promotion.tag or promotions.default_tag(promotion),
+        "applied": priced.discount > 0,
+        "saving": float(priced.discount),
+        "message": priced.promo_problem or "",
+    }
+
+
 async def _release(session: AsyncSession, order) -> None:
     """Give a slot back when the order that reserved it cannot be paid for."""
     if order is None:
