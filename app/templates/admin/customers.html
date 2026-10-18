@@ -125,6 +125,13 @@
                     {{ 'Push again' if row.in_zoho else 'Push to Zoho' }}
                   </button>
                 </form>
+                <form method="post" action="{{ url_for('admin_customer_forget', customer_id=c.id) }}" data-busy="Forgetting…"
+                      data-confirm="Forget {{ c.name or ('+' ~ c.whatsapp_number) }} completely? This deletes all their chats, addresses and orders here AND their Lead/Contact in Zoho (kept in Zoho's Recycle Bin for 60 days). The bot will treat their next message as a brand-new customer.">
+                  <button title="Forget completely (here and in Zoho)"
+                          class="whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-50">
+                    Forget
+                  </button>
+                </form>
                 {% endif %}
                 <form method="post" action="{{ url_for('admin_customer_delete', customer_id=c.id) }}" data-busy="Deleting…"
                       data-confirm="Delete {{ c.name or ('+' ~ c.whatsapp_number) }} and all their chats, addresses and orders here? Zoho is not changed. This cannot be undone.">
@@ -167,7 +174,11 @@
         (their Contact once they have paid), converts a paid customer still held as a Lead, and
         files any paid order Zoho does not have yet.</p>
       <p><b>Delete</b> removes the customer here only - use it to clear test data; their next
-        WhatsApp message starts from the beginning.</p>
+        WhatsApp message starts from the beginning. Zoho still knows them, so the bot greets
+        them by name ("Welcome back").</p>
+      <p><b>Forget</b> is Delete plus their Lead and Contact in Zoho (moved to Zoho's Recycle
+        Bin), so the bot treats their next message as a brand-new customer - use it to test
+        the first-time welcome on your own number. Their orders stay in Zoho.</p>
     </div>
   </details>
 </div>

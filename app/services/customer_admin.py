@@ -13,6 +13,9 @@ Three things sit on top of the list:
   rows are deleted explicitly rather than by relying on ON DELETE CASCADE,
   because SQLite (the local run) does not enforce foreign keys by default and
   orders are RESTRICT anyway. Nothing is deleted in Zoho.
+- **Forget completely** is Delete plus their Zoho Leads and Contacts
+  (forget_in_zoho), so the bot no longer knows them at all - for testing the
+  first-time welcome on a number that has used the bot before.
 - **Push to Zoho** re-sends the record's details and stage, converts a paid
   customer still held as a Lead, files any paid order Zoho does not have
   yet, and brings a filed order's kitchen link and Order Items up to date
@@ -300,6 +303,37 @@ async def delete_customer(session: AsyncSession, customer: Customer) -> dict:
     await session.flush()
     log.info("admin_customer_deleted", customer_id=str(customer.id), **removed)
     return removed
+
+
+async def forget_in_zoho(customer: Customer) -> int:
+    """Delete the customer's Leads and Contacts in Zoho; returns how many.
+
+    For Forget completely: Delete alone leaves them in Zoho, and the next
+    message finds that record by phone and greets them by name again
+    (crm_sync._link). Both the saved links and every record holding the
+    number go, so a Lead typed in by hand does not bring them back either.
+    Their Orders stay in Zoho - those are the shop's sales history and do not
+    decide how the bot greets anyone. Raises crm_sync.ZOHO_ERRORS; the caller
+    then deletes nothing here, so the admin can simply try again.
+    """
+    targets: set[tuple[str, str]] = set()
+    if customer.zoho_contact_id:
+        targets.add((f.CONTACTS, customer.zoho_contact_id))
+    if customer.zoho_lead_id:
+        targets.add((f.LEADS, customer.zoho_lead_id))
+    for module in (f.CONTACTS, f.LEADS):
+        for record in await crm.find_all_by_phone(module, customer.whatsapp_number):
+            targets.add((module, str(record["id"])))
+
+    linked = await crm.existing_ids(f.CONTACTS, [i for m, i in targets if m == f.CONTACTS])
+    linked |= await crm.existing_ids(f.LEADS, [i for m, i in targets if m == f.LEADS])
+    deleted = 0
+    for module, record_id in sorted(targets):
+        if record_id in linked:     # a saved link Zoho had already lost is skipped
+            await crm.delete_record(module, record_id)
+            deleted += 1
+    log.info("admin_customer_forgotten_in_zoho", customer_id=str(customer.id), records=deleted)
+    return deleted
 
 
 async def push_to_zoho(session: AsyncSession, customer: Customer) -> list[str]:

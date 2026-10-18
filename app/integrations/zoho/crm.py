@@ -40,11 +40,22 @@ async def find_by_phone(module: str, whatsapp_number: str) -> dict | None:
     Matches Phone or Mobile, with or without the plus, so a record typed in
     by hand is found too.
     """
+    records = await find_all_by_phone(module, whatsapp_number)
+    return records[0] if records else None
+
+
+async def find_all_by_phone(module: str, whatsapp_number: str) -> list[dict]:
+    """Every record in the module holding this number (see find_by_phone)."""
     digits = phone(whatsapp_number)[1:]
     by_phone = f"(({f.PHONE}:equals:+{digits})or({f.PHONE}:equals:{digits}))"
     by_mobile = f"(({f.MOBILE}:equals:+{digits})or({f.MOBILE}:equals:{digits}))"
-    records = await zoho_client.search(module, f"({by_phone}or{by_mobile})")
-    return records[0] if records else None
+    return await zoho_client.search(module, f"({by_phone}or{by_mobile})")
+
+
+async def delete_record(module: str, record_id: str) -> None:
+    """Delete one record; Zoho keeps it in its Recycle Bin for 60 days."""
+    await zoho_client.delete_record(module, record_id)
+    log.info("zoho_record_deleted", module=module, zoho_id=record_id)
 
 
 async def get_record(module: str, record_id: str) -> dict | None:

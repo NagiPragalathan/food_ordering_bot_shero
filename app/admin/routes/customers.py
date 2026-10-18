@@ -1,4 +1,5 @@
-"""Customers: everyone who has messaged the bot, with Delete and Push to Zoho.
+"""Customers: everyone who has messaged the bot, with Delete, Forget completely
+and Push to Zoho.
 
 See services/customer_admin.py for what each action touches.
 """
@@ -16,7 +17,7 @@ from app.admin.deps import redirect, render, require_admin
 from app.core.logging import get_logger
 from app.db.models import AdminUser, LeadStage
 from app.db.session import get_session
-from app.services import customer_admin
+from app.services import crm_sync, customer_admin
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/customers", tags=["admin"])
@@ -140,4 +141,37 @@ async def delete_one(
         f"Deleted {who} with {removed['orders']} order(s) and "
         f"{removed['addresses']} address(es). Their next message starts fresh. "
         "Zoho was not changed.",
+    ))
+
+
+@router.post("/{customer_id}/forget", name="admin_customer_forget")
+async def forget_one(
+    request: Request,
+    customer_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: AdminUser = Depends(require_admin),
+):
+    """Delete, plus their Zoho Lead/Contact: the bot greets them as new."""
+    url = str(request.url_for("admin_customers"))
+    if not customer_admin.zoho_connected():
+        return redirect(url, flash=("error", "Connect Zoho in Settings first, or use Delete."))
+    customer = await customer_admin.get(session, customer_id)
+    if customer is None:
+        return redirect(url, flash=("error", "That customer no longer exists."))
+
+    who = customer.name or customer.whatsapp_number
+    try:
+        zoho_records = await customer_admin.forget_in_zoho(customer)
+    except crm_sync.ZOHO_ERRORS as exc:
+        log.error("admin_customer_forget_failed", customer_id=customer_id, error=str(exc))
+        return redirect(url, flash=(
+            "error", f"Zoho could not be updated, so nothing was deleted for {who}. "
+                     "Try again in a minute."))
+    removed = await customer_admin.delete_customer(session, customer)
+    log.info("admin_customer_forget", by=current_user.email)
+    return redirect(url, flash=(
+        "success",
+        f"Forgot {who}: deleted here with {removed['orders']} order(s), and "
+        f"{zoho_records} Lead/Contact record(s) in Zoho (in Zoho's Recycle Bin for 60 days). "
+        "Their next message is treated as a brand-new customer.",
     ))
