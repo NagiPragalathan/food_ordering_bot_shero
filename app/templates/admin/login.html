@@ -21,7 +21,11 @@
     @media (prefers-reduced-motion: reduce) { .rise { animation: none } }
   </style>
 </head>
-<body class="min-h-full bg-mist-100 text-ink-900 lg:grid lg:grid-cols-[1.05fr_1fr]">
+<body class="min-h-full bg-mist-100 text-ink-900">
+<!-- The two-column grid lives on this wrapper, not on <body>: browser
+     extensions append their own elements to <body>, and each one would
+     become an extra grid row that steals height from the brand panel. -->
+<div class="min-h-screen lg:grid lg:grid-cols-[1.05fr_1fr]">
 
   <!-- Brand panel: a full column on desktop, a band above the form on phones. -->
   <aside class="relative overflow-hidden bg-gradient-to-br from-brand-500 via-brand-600 to-brand-800
@@ -124,6 +128,7 @@
       </p>
     </div>
   </main>
+</div>
 
   <script>
     const form = document.getElementById('login');
