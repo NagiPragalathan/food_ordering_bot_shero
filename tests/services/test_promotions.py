@@ -349,6 +349,45 @@ async def test_stripe_gets_a_one_off_coupon_for_the_exact_discount(monkeypatch):
     assert made["session"]["discounts"] == [{"coupon": "co_1"}]
 
 
+async def test_a_key_that_cannot_make_coupons_still_charges_the_discounted_total(monkeypatch):
+    # The live restricted key lacked "Coupons: write"; every coupon order then
+    # failed with "We could not start the payment".
+    monkeypatch.setattr(settings, "stripe_secret_key", "rk_live_123")
+    made: dict = {}
+
+    class Coupon:
+        @staticmethod
+        async def create_async(**params):
+            raise checkout.stripe.PermissionError(
+                "Enabling Coupons Write ('coupon_write') permissions on this key...")
+
+    class Session:
+        @staticmethod
+        async def create_async(**params):
+            made["session"] = params
+            return type("S", (), {"id": "cs_1", "url": "https://stripe/cs_1"})
+
+    monkeypatch.setattr(checkout.stripe, "Coupon", Coupon)
+    monkeypatch.setattr(checkout.stripe.checkout, "Session", Session)
+
+    result = await checkout.create_checkout_session(
+        order_id="o-1", order_number="SHO-261020-0SP8H",
+        items=[{"name": "Murungaikai ( Drumstick ) Sambar", "quantity": 1, "unit_price": "16.53"},
+               {"name": "Rasam", "quantity": 2, "unit_price": "4.00"}],
+        delivery_fee=Decimal("7.99"), taxes_and_fees=Decimal("0.69"), currency="usd",
+        discount=Decimal("4.96"), discount_label="Coupon SHERO30")
+
+    assert result["url"] == "https://stripe/cs_1"
+    assert "discounts" not in made["session"]
+    [line] = made["session"]["line_items"]
+    assert line["quantity"] == 1
+    assert line["price_data"]["unit_amount"] == 1653 + 800 + 799 + 69 - 496
+    assert line["price_data"]["product_data"]["name"] == "Order SHO-261020-0SP8H"
+    assert line["price_data"]["product_data"]["description"] == (
+        "Murungaikai ( Drumstick ) Sambar $16.53 · 2 × Rasam $8.00 · Delivery charge $7.99"
+        " · Taxes and fees $0.69 · Coupon SHERO30 -$4.96")
+
+
 async def test_no_discount_means_no_stripe_coupon(monkeypatch):
     monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_123")
     made: dict = {}

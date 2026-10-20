@@ -98,6 +98,26 @@ async def test_a_too_short_search_does_not_call_google(google):
     assert calls == []
 
 
+async def test_a_zip_code_gives_the_state_and_its_short_form(google):
+    # This lookup used to raise NameError on every Google answer.
+    answers, _ = google
+    answers.append({"status": "OK", "results": [{
+        "formatted_address": "Ellicott City, MD 21043, USA",
+        "geometry": {"location": {"lat": 39.27, "lng": -76.83}},
+        "address_components": [
+            {"long_name": "21043", "short_name": "21043", "types": ["postal_code"]},
+            {"long_name": "Ellicott City", "short_name": "Ellicott City", "types": ["locality"]},
+            {"long_name": "Maryland", "short_name": "MD",
+             "types": ["administrative_area_level_1", "political"]},
+        ],
+    }]})
+
+    point = await geocoder.geocode_postal_code("21043")
+
+    assert (point.postal_code, point.city, point.state_code) == ("21043", "Ellicott City", "MD")
+    assert point.source == "google"
+
+
 async def test_a_google_outage_is_none_not_a_crash(monkeypatch):
     monkeypatch.setattr(settings, "google_maps_api_key", "test-key")
     geocoder.clear_cache()

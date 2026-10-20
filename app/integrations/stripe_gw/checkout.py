@@ -121,9 +121,8 @@ async def create_checkout_session(
 ) -> dict:
     """Create the Checkout Session and return {id, url, expires_at}.
 
-    A coupon `discount` goes on as a one-off Stripe coupon for exactly that
-    amount, so the Stripe page shows the same lines as the bill - dishes,
-    delivery, taxes, then the discount - and charges the order's total.
+    A coupon `discount` is taken off what Stripe charges; see
+    `_apply_discount` for how.
     """
     currency = (currency or settings.stripe_currency).lower()
     minutes = clamp_expiry_minutes(ttl_minutes or settings.payment_link_ttl_minutes)
@@ -167,9 +166,8 @@ async def create_checkout_session(
 
     try:
         if discount and Decimal(discount) > 0:
-            coupon_id = await _order_coupon(order_number=order_number, amount=Decimal(discount),
-                                            currency=currency, label=discount_label)
-            params["discounts"] = [{"coupon": coupon_id}]
+            await _apply_discount(params, order_number=order_number, amount=Decimal(discount),
+                                  currency=currency, label=discount_label)
         session = await _create(params, order_number)
     except stripe.StripeError as exc:
         log.error("stripe_session_failed", order_number=order_number, error=str(exc))
@@ -178,6 +176,64 @@ async def create_checkout_session(
     log.info("stripe_session_created", order_number=order_number,
              session_id=session.id, expires_at=expires_at.isoformat())
     return {"id": session.id, "url": session.url, "expires_at": expires_at}
+
+
+async def _apply_discount(params: dict, *, order_number: str, amount: Decimal,
+                          currency: str, label: str | None) -> None:
+    """Take the coupon off what the session charges.
+
+    Preferably as a one-off Stripe coupon, so the Stripe page shows the same
+    lines as the bill - dishes, delivery, taxes, then the discount. A
+    restricted API key without the "Coupons: write" permission cannot make
+    one, so the order is then charged as one line for its discounted total,
+    with the breakdown written under it: the customer still pays exactly
+    the order's total, just without Stripe itemising it.
+    """
+    try:
+        coupon_id = await _order_coupon(order_number=order_number, amount=amount,
+                                        currency=currency, label=label)
+    except stripe.StripeError as exc:
+        log.warning("stripe_coupon_refused", order_number=order_number, error=str(exc),
+                    hint="give the Stripe key the Coupons write permission to itemise discounts")
+        params["line_items"] = summary_line_items(
+            params["line_items"], order_number=order_number, discount=amount,
+            label=label, currency=currency)
+        return
+    params["discounts"] = [{"coupon": coupon_id}]
+
+
+def summary_line_items(lines: list[dict], *, order_number: str, discount: Decimal,
+                       label: str | None, currency: str) -> list[dict]:
+    """The whole order as one line at its discounted total.
+
+    Checkout has no negative lines, so without a Stripe coupon this is the
+    only exact way to charge less than the sum of the lines.
+    """
+    before = sum(line["price_data"]["unit_amount"] * line["quantity"] for line in lines)
+    total = before - to_minor_units(discount)
+    if total <= 0:
+        raise PaymentError(f"the discounted total of {order_number} is not above zero")
+
+    def money(cents: int) -> str:
+        return f"${Decimal(cents) / 100:.2f}"
+
+    parts = []
+    for line in lines:
+        name = line["price_data"]["product_data"]["name"]
+        quantity = line["quantity"]
+        shown = f"{quantity} × {name}" if quantity > 1 else name
+        parts.append(f"{shown} {money(line['price_data']['unit_amount'] * quantity)}")
+    parts.append(f"{label or 'Discount'} -{money(to_minor_units(discount))}")
+
+    return [{
+        "price_data": {
+            "currency": currency,
+            "unit_amount": total,
+            "product_data": {"name": f"Order {order_number}",
+                             "description": " · ".join(parts)[:500]},
+        },
+        "quantity": 1,
+    }]
 
 
 async def _order_coupon(*, order_number: str, amount: Decimal, currency: str,

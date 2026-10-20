@@ -114,7 +114,8 @@ async def _google_geocode(code: str, country: str) -> GeoPoint | None:
         postal_code=components.get("postal_code", code),
         city=components.get("locality", "") or components.get("sublocality", ""),
         state=components.get("administrative_area_level_1", ""),
-        state_code=short.get("administrative_area_level_1", ""),
+        # `components` already holds Google's short names here ("MD").
+        state_code=components.get("administrative_area_level_1", ""),
         source="google",
     )
 
