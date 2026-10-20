@@ -1,34 +1,18 @@
-"""Telling the kitchen about a paid order (spec step 17), on its delivery day.
-
-Orders are placed at least a day ahead (slots.earliest_bookable), so a
-kitchen alerted at payment would get tomorrow's orders mixed with today's.
-Instead each paid order is assigned to the kitchen chosen for its address
-(services/kitchen.check_service) and queued. A job sends the alert at
-KITCHEN_ALERT_HOUR, kitchen local time, on the delivery day:
-
-    paid Mon 15:00, slot Tue 18:00  ->  alert Tue 07:00
-
-The alert is never later than the Uber booking (dispatch.due_time), so the
-kitchen always hears before the courier is sent. An order paid after its
-alert time is alerted on the next run.
-
-OPEN QUESTION: no approved template exists for the kitchen alert, and a
-message to a kitchen that has not messaged us in 24 hours falls outside
-WhatsApp's window, so the text send lands only while the kitchen's chat is
-open. The order is marked Sent to Kitchen and visible in the admin either way.
-"""
+"""Notify the assigned kitchen immediately after payment; retry failed sends."""
 
 from __future__ import annotations
 
 from datetime import datetime, time, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import Customer, DeliverySlot, Order, OrderStage, Outlet, PaymentStatus
 from app.integrations.gallabox.sender import current_sender
+from app.integrations.gallabox import templates as tpl
+from app.services import order_alerts
 from app.services import crm_sync, dispatch, orders
 from app.services.slots import as_utc, outlet_tz
 
@@ -36,7 +20,7 @@ log = get_logger(__name__)
 
 
 def notify_time(slot_starts_at: datetime | None, outlet: Outlet | None) -> datetime | None:
-    """When the kitchen hears about an order delivered at `slot_starts_at`."""
+    """Legacy delivery-day schedule, retained for existing queued orders."""
     if slot_starts_at is None:
         return None
     start = as_utc(slot_starts_at)
@@ -54,12 +38,13 @@ async def due_alerts(session: AsyncSession, now: datetime | None = None) -> list
     now = now or datetime.now(timezone.utc)
     rows = await session.execute(
         select(Order)
-        .join(DeliverySlot, DeliverySlot.id == Order.slot_id)
+        .outerjoin(DeliverySlot, DeliverySlot.id == Order.slot_id)
         .where(Order.payment_status == str(PaymentStatus.PAID),
                Order.stage == str(OrderStage.PAID_SLOT_BOOKED),
                Order.kitchen_notified_at.is_(None),
                Order.kitchen_notify_at <= now,
-               DeliverySlot.ends_at > now)
+               or_(DeliverySlot.ends_at > now,
+                   (DeliverySlot.id.is_(None) & (Order.slot_ends_at.is_(None) | (Order.slot_ends_at > now)))))
         .order_by(DeliverySlot.starts_at)
     )
     return list(rows.scalars())
@@ -67,19 +52,24 @@ async def due_alerts(session: AsyncSession, now: datetime | None = None) -> list
 
 async def send_alert(session: AsyncSession, order: Order, *,
                      now: datetime | None = None) -> bool:
-    """Mark the order Sent to Kitchen and message that kitchen.
+    """Send once; only record success after the provider accepts the message.
 
-    True when the WhatsApp message went out. The stage moves either way, so
-    one kitchen with no number set does not keep the order in the queue.
+    Failures stay pending for the worker or an admin retry. Acceptance by the
+    provider is not a delivery/read receipt from the kitchen member.
     """
+    # Serialize the payment callback, worker and manual retry on PostgreSQL.
+    # A crash after provider acceptance can still require an at-least-once retry.
+    locked = (await session.execute(select(Order).where(Order.id == order.id)
+              .with_for_update().execution_options(populate_existing=True))).scalar_one()
+    order = locked
+    if order.kitchen_notified_at:
+        return True
+    if (order.payment_status != PaymentStatus.PAID
+            or order.stage != OrderStage.PAID_SLOT_BOOKED):
+        return False
     now = now or datetime.now(timezone.utc)
     outlet = await session.get(Outlet, order.outlet_id) if order.outlet_id else None
     customer = await session.get(Customer, order.customer_id)
-
-    orders.set_stage(order, OrderStage.SENT_TO_KITCHEN)
-    order.kitchen_notified_at = now
-    await session.flush()
-    await crm_sync.push_order_stage(order, OrderStage.SENT_TO_KITCHEN)
 
     if not (outlet and outlet.kitchen_whatsapp):
         log.warning("kitchen_alert_skipped", order_number=order.order_number,
@@ -88,11 +78,23 @@ async def send_alert(session: AsyncSession, order: Order, *,
         return False
 
     try:
-        await current_sender().send_text(outlet.kitchen_whatsapp, message(order, customer))
+        params = order_alerts.values(order, customer, outlet.name)
+        # Send every item, splitting large carts into template-sized sections.
+        raw = " ".join(order_alerts._items(order).split()) or "-"
+        chunks = [raw[i:i + order_alerts.MAX_VALUE]
+                  for i in range(0, len(raw), order_alerts.MAX_VALUE)]
+        for chunk in chunks:
+            await current_sender().send_template(
+                outlet.kitchen_whatsapp, tpl.ORDER_ALERT, *params[:-1], chunk)
+
     except Exception as exc:  # noqa: BLE001 - the order is paid; never fail it on this
         log.error("kitchen_alert_failed", order_number=order.order_number,
                   outlet=outlet.code, error=str(exc))
         return False
+    orders.set_stage(order, OrderStage.SENT_TO_KITCHEN)
+    order.kitchen_notified_at = now
+    await session.flush()
+    await crm_sync.push_order_stage(order, OrderStage.SENT_TO_KITCHEN)
     log.info("kitchen_alerted", order_number=order.order_number, outlet=outlet.code)
     return True
 

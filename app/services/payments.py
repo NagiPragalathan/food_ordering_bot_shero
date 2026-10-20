@@ -244,8 +244,8 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     outlet, outlet_name = ctx.outlet, ctx.outlet_name or "Shero"
     # Into the Uber queue: sent UBER_DISPATCH_HOURS_BEFORE the slot starts.
     order.uber_dispatch_due_at = dispatch.due_time(ctx.delivery_at)
-    # The kitchen picked for the address hears on the delivery day.
-    order.kitchen_notify_at = kitchen_alerts.notify_time(ctx.delivery_at, outlet)
+    # Queue immediately; failed sends remain due for the retry worker.
+    order.kitchen_notify_at = datetime.now(timezone.utc)
 
     # 2. Confirmation to the customer. The money is taken by now, so a
     # WhatsApp failure must not stop the CRM record and the kitchen alert.
@@ -257,11 +257,16 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     except Exception as exc:  # noqa: BLE001 - the order is paid and on the dashboard
         log.error("order_alerts_failed", order_number=order.order_number, error=str(exc))
 
+    # Notify the assigned partner independently from team-wide alert numbers.
+    try:
+        await kitchen_alerts.send_alert(session, order)
+    except Exception as exc:  # a notification must never undo a paid order
+        log.error("kitchen_alert_failed", order_number=order.order_number, error=str(exc))
+
     # 3. Lead -> Contact, the Order record and its Order Items (spec step 16).
     await crm_sync.convert_and_record_order(customer, order, ctx)
 
-    # 4. The kitchen alert (spec step 17) is queued, not sent now: the job in
-    # workers/jobs.send_kitchen_alerts sends it on the delivery day.
+    # The kitchen alert worker retries any send that did not succeed.
 
     log.info("payment_success", order_number=order.order_number,
              total=str(order.total))

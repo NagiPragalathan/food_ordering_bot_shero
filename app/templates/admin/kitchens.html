@@ -95,6 +95,7 @@
           </div>
 
           <div class="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end">
+            <a href="{{ url_for('admin_orders') }}?kitchen_id={{ k.id }}" class="text-xs font-semibold text-brand-700 underline">View orders ({{ order_counts.get(k.id, 0) }} active)</a>
             <a href="{{ url_for('admin_kitchen_edit', kitchen_id=k.id) }}"
                class="rounded-lg bg-stone-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-stone-800">Edit</a>
             <form method="post" action="{{ url_for('admin_kitchen_active', kitchen_id=k.id) }}"

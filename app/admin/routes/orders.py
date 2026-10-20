@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,10 +55,17 @@ async def orders_index(
     request: Request,
     stage: str | None = None,
     q: str | None = None,
+    kitchen_id: str | None = None,
     session: AsyncSession = Depends(get_session),
     current_user: AdminUser = Depends(require_admin),
 ):
+    try:
+        kitchen_id = uuid.UUID(kitchen_id) if kitchen_id else None
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid kitchen partner")
     query = select(Order)
+    if kitchen_id:
+        query = query.where(Order.outlet_id == kitchen_id)
     if stage:
         query = query.where(Order.stage == stage)
     if q:
@@ -83,7 +92,8 @@ async def orders_index(
     counts = {}
     for value in OrderStage:
         counts[str(value)] = int(await session.scalar(
-            select(func.count(Order.id)).where(Order.stage == str(value))
+            select(func.count(Order.id)).where(Order.stage == str(value),
+                *([Order.outlet_id == kitchen_id] if kitchen_id else []))
         ) or 0)
 
     return render(request, "admin/orders.html", {
@@ -93,6 +103,8 @@ async def orders_index(
         "stages": [str(s) for s in OrderStage],
         "selected_stage": stage or "",
         "query": q or "",
+        "kitchens": list((await session.execute(select(Outlet).order_by(Outlet.name))).scalars()),
+        "selected_kitchen": str(kitchen_id) if kitchen_id else "",
     })
 
 
@@ -129,7 +141,7 @@ async def advance_order(
                  stage=str(target), kitchen_messaged=messaged, by=current_user.email)
         return redirect(url, flash=(
             ("success", f"{order.order_number} sent to the kitchen on WhatsApp.") if messaged
-            else ("warning", f"{order.order_number} is now {target}, but the kitchen was not "
+            else ("warning", f"{order.order_number} is awaiting its kitchen alert; the kitchen was not "
                              "messaged - check its WhatsApp number on the Kitchens page.")))
     if not order_service.set_stage(order, target):
         return redirect(url, flash=("success", "Already at that stage."))
@@ -159,6 +171,17 @@ async def advance_order(
     return redirect(url, flash=(
         "success", f"{order.order_number} is now {target}."
     ))
+
+
+@router.post("/{order_number}/notify-kitchen", name="admin_order_notify_kitchen")
+async def notify_kitchen(request: Request, order_number: str,
+                         session: AsyncSession = Depends(get_session),
+                         current_user: AdminUser = Depends(require_admin)):
+    order = await order_service.get_by_number(session, order_number.upper())
+    sent = await kitchen_alerts.send_alert(session, order) if order else False
+    return redirect(str(request.url_for("admin_orders")), flash=(
+        ("success", "Kitchen alert accepted by WhatsApp provider.") if sent else
+        ("warning", "Kitchen alert could not be sent. Check payment status, kitchen WhatsApp number and Gallabox setup.")))
 
 
 def _is_known(order: Order) -> bool:

@@ -110,8 +110,13 @@ async def resolve_location(
 
 
 async def check_service(session: AsyncSession, point: GeoPoint | None, *,
-                        postal_code: str | None = None) -> ServiceCheck:
-    """Do we deliver here, and from which kitchen? (spec step 10)."""
+                        postal_code: str | None = None,
+                        require_capacity: bool = False) -> ServiceCheck:
+    """Find a covering kitchen, optionally requiring a bookable delivery slot.
+
+    Geographic-only callers retain the coverage check. Customer ordering and
+    the admin address checker pass require_capacity=True for live allocation.
+    """
     kitchens = await active_kitchens(session)
     if not kitchens:
         log.error("no_kitchen_configured")
@@ -123,6 +128,21 @@ async def check_service(session: AsyncSession, point: GeoPoint | None, *,
     serving = [c for c in checks if c.is_serviceable]
     # Nearest first; a kitchen with no distance (ZIP-only match) goes last.
     # sorted() is stable, so equal distances keep the primary kitchen first.
+    if require_capacity and serving:
+        from app.services.slots import list_available_slots
+
+        # Rank before probing slots; keep stable primary/oldest tie breaking.
+        for candidate in sorted(serving, key=lambda c: (c.distance_km is None,
+                                                        c.distance_km or 0)):
+            if await list_available_slots(session, candidate.kitchen, limit=1):
+                log.info("kitchen_auto_allocated", outlet=candidate.kitchen.code,
+                         distance_km=candidate.distance_km)
+                return candidate
+        # Coverage is distinct from temporary unavailability. Leave the kitchen
+        # name empty so callers do not send an out-of-area notification.
+        return ServiceCheck(False, None,
+                            "Kitchens serving your address have no available delivery slots. "
+                            "Please try again later.")
     pool = serving or checks
     best = sorted(pool, key=lambda c: (c.distance_km is None, c.distance_km or 0))[0]
 

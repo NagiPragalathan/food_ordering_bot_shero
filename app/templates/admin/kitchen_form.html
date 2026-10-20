@@ -217,7 +217,8 @@
         <input id="f-wa" name="kitchen_whatsapp" inputmode="tel" placeholder="14438011011"
                value="{{ k.kitchen_whatsapp if k and k.kitchen_whatsapp else '' }}" class="{{ input_cls }}">
         <p class="mt-1 text-[11px] text-stone-500">Gets each paid order on its delivery day.</p>
-      </div>
+      <p class="mt-1 text-xs text-stone-500">New paid orders are sent here automatically with items, quantities and delivery slot. Include the country code. Approve the shero_new_order_alert template in Gallabox for messages outside an active chat.</p>
+          </div>
       <div>
         <label class="{{ label_cls }}" for="f-phone">Phone for the courier</label>
         <input id="f-phone" name="kitchen_phone" inputmode="tel" placeholder="14438011011"
@@ -305,7 +306,7 @@
           <label class="{{ label_cls }}" for="f-cap">Orders per slot</label>
           <input id="f-cap" name="slot_capacity" inputmode="numeric"
                  value="{{ k.slot_capacity if k else 4 }}" class="{{ input_cls }}">
-          <p class="mt-1 text-[11px] text-stone-500">How many deliveries the kitchen can handle at once.</p>
+          <p class="mt-1 text-[11px] text-stone-500">Maximum orders per delivery slot. Automatic allocation skips this kitchen when all bookable slots are full.</p>
         </div>
       </div>
     </div>

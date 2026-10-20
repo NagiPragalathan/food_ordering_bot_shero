@@ -59,13 +59,14 @@ async def confirm_service(ctx: FlowContext) -> None:
         latitude=ctx.customer.latitude, longitude=ctx.customer.longitude
     )
     check = await kitchen_service.check_service(
-        ctx.session, point, postal_code=ctx.customer.postal_code
+        ctx.session, point, require_capacity=True, postal_code=ctx.customer.postal_code
     )
 
     if not check.is_serviceable:
         log.info("not_serviceable", reason=check.reason)
-        await ctx.reply_text(p.NOT_SERVICEABLE)
-        await ctx.set_stage(LeadStage.NOT_SERVICEABLE)
+        await ctx.reply_text(check.reason if not check.kitchen_name else p.NOT_SERVICEABLE)
+        if check.kitchen_name:
+            await ctx.set_stage(LeadStage.NOT_SERVICEABLE)
         ctx.goto(ConversationStep.COMPLETED)
         return
 

@@ -131,11 +131,18 @@ async def hold_slot(
     slot_uuid = uuid.UUID(str(slot_id))
     ttl = ttl_minutes or settings.slot_hold_minutes
 
+    # Check partner availability again at the reservation boundary. The UPDATE
+    # below remains the authority for the last unit of slot capacity.
+    partner_active = select(Outlet.id).join(
+        DeliverySlot, DeliverySlot.outlet_id == Outlet.id
+    ).where(DeliverySlot.id == slot_uuid, Outlet.is_active.is_(True)).exists()
+
     # Atomic claim: only succeeds while spare capacity remains.
     claimed = await session.execute(
         update(DeliverySlot)
         .where(
             DeliverySlot.id == slot_uuid,
+            partner_active,
             DeliverySlot.is_active.is_(True),
             DeliverySlot.reserved_count < DeliverySlot.capacity,
         )

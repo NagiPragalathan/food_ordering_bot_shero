@@ -136,3 +136,7 @@ tests/              287 tests
   for the Pay Now short link (Stripe URLs are too long for a WhatsApp button).
 - **Zoho failures never block an order.** The local database is the system of
   record; CRM sync is best-effort and logged.
+
+### Automatic kitchen allocation
+
+Incoming orders select the nearest active, serviceable kitchen with bookable slot capacity. See the [setup and usage guide](docs/automatic-kitchen-allocation.md).

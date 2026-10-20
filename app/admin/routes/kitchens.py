@@ -14,13 +14,13 @@ from functools import partial
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import listing
 from app.admin.deps import redirect, render, require_admin
 from app.core.logging import get_logger
-from app.db.models import AdminUser, Outlet
+from app.db.models import AdminUser, Order, OrderStage, Outlet, PaymentStatus
 from app.db.session import get_session
 from app.core.config import settings
 from app.integrations.geo.geocoder import GeoPoint, geocode_address, reverse_geocode
@@ -63,6 +63,12 @@ async def kitchens_page(
     return render(request, "admin/kitchens.html", {
         "current_user": current_user,
         "kitchens": kitchens,
+        "order_counts": dict((await session.execute(
+            select(Order.outlet_id, func.count(Order.id)).where(
+                Order.payment_status == PaymentStatus.PAID,
+                Order.stage.in_([OrderStage.PAID_SLOT_BOOKED, OrderStage.SENT_TO_KITCHEN,
+                                 OrderStage.OUT_FOR_DELIVERY])
+            ).group_by(Order.outlet_id))).all()),
         "shown": [k for k in kitchens if shown(k)],
         "states": states,
         "stats": {
@@ -256,7 +262,7 @@ async def _address_check(session: AsyncSession, query: str) -> dict:
     if point is None:
         return {"error": "Could not find that address on the map."}
     kitchens = await kitchen_service.active_kitchens(session)
-    result = await kitchen_service.check_service(session, point,
+    result = await kitchen_service.check_service(session, point, require_capacity=True,
                                                  postal_code=point.postal_code)
     rows = sorted(kitchen_service.coverage(kitchens, point, point.postal_code or ""),
                   key=lambda c: (c.distance_km is None, c.distance_km or 0))

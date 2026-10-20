@@ -64,6 +64,25 @@ async def create_draft_order(
     distance_km: float | None = None,
 ) -> Order:
     """Create the unpaid order behind the summary message."""
+    # Never silently move a priced order to another kitchen: its pickup quote,
+    # coupon and chosen window belong to this partner. Re-selection must reprice.
+    from app.core.exceptions import NoSlotsAvailableError
+    from app.integrations.geo.geocoder import GeoPoint
+    from app.services.kitchen import coverage
+    from app.services import slots
+
+    point = (GeoPoint(latitude=customer.latitude, longitude=customer.longitude)
+             if customer.latitude is not None and customer.longitude is not None else None)
+    if not outlet.is_active or not coverage([outlet], point, customer.postal_code or "")[0].is_serviceable:
+        raise NoSlotsAvailableError("kitchen no longer eligible", customer_message=(
+            "This kitchen is no longer available for your address. Please update your location and choose a new slot."))
+    if slot_id:
+        slot = await slots.get_slot(session, slot_id)
+        if (slot is None or slot.outlet_id != outlet.id or not slot.is_available
+                or slots.as_utc(slot.starts_at) < slots.earliest_bookable()):
+            raise NoSlotsAvailableError("kitchen slot unavailable", customer_message=(
+                "That kitchen's delivery slot is no longer available. Please choose another slot."))
+
     order = Order(
         order_number=await allocate_order_number(session),
         customer_id=customer.id,

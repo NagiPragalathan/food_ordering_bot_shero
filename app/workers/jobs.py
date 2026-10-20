@@ -127,8 +127,7 @@ async def dispatch_couriers() -> int:
 
 
 async def send_kitchen_alerts() -> int:
-    """Tell each kitchen about its orders on the delivery day
-    (services/kitchen_alerts.py)."""
+    """Retry pending kitchen notifications (services/kitchen_alerts.py)."""
     sent = 0
     async with session_scope() as session:
         for order in await kitchen_alerts.due_alerts(session):

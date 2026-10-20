@@ -465,7 +465,7 @@ and which one would get the order.
 | Form layout | Sections for Kitchen, Location, Delivery area, Contact and Opening hours. The map draws the delivery circle and redraws it as the pin or the miles change; the radius has a slider and 5 / 10 / 15 / 20-mile quick picks (10 is the default). Each day has an open / closed switch, and **Copy Monday to all days** fills the week. A summary with the Save button stays beside the form, and leaving with unsaved changes asks first. |
 | Delivery area rule | **Within a radius** (straight-line distance), **Only these ZIP codes**, or **Radius AND ZIP list** |
 | Delivery radius (miles) | Default 10 miles |
-| Kitchen WhatsApp | Gets the new-order alert on the delivery day |
+| Kitchen WhatsApp | Gets the new-order alert immediately after payment |
 | Kitchen phone (for the courier) | Uber gives this to the courier; empty means the WhatsApp number is used |
 | Timezone | Slots and the alert time are in this zone |
 | Opening hours | Delivery slots exist only inside these windows, per weekday. Leave a day blank to close it. |
@@ -482,16 +482,11 @@ kitchen also updates its Zoho Vendor when Zoho is connected.
 
 ### When the kitchen hears about an order
 
-Orders are placed at least a day ahead, so the kitchen is **not** messaged at
-payment. Each paid order waits, and on the **delivery day** at
-`KITCHEN_ALERT_HOUR` (7 AM kitchen time by default, set in `.env`) the
-kitchen's WhatsApp gets the order: number, slot, dishes, address and contact.
-The order then moves to **Sent to Kitchen**. The alert is never later than the
-Uber booking, so for a 9 AM slot the kitchen hears at 7 AM, when Uber is
-booked. The Orders page shows each order's kitchen and its alert time.
-**Send to kitchen** on the Orders page sends the alert straight away.
+New paid orders notify the assigned kitchen immediately using its **Kitchen WhatsApp** number and the existing `shero_new_order_alert` template. The message includes the order number, customer, slot, kitchen, address, total and item quantities. Approve this template in Gallabox so notifications can reach partners outside an active chat window.
 
----
+**Kitchens > View orders** shows each partner's order queue and active order count. **Orders** can be filtered by partner and shows dishes, quantities, delivery notes, the kitchen's number and notification status. **WhatsApp alert accepted** means the provider accepted the send; it is not a delivery or read receipt. Failed sends stay pending for the kitchen-alert worker, and **Retry kitchen alert** sends them again after the number or integration is fixed. Existing queued orders keep their previously saved alert time; **Send to kitchen** can send them earlier.
+
+See [automatic kitchen allocation](automatic-kitchen-allocation.md) for setup and a testing walkthrough.
 
 ## Bot replies
 

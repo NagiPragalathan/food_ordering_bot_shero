@@ -120,9 +120,19 @@ def missing_details(ctx: FlowContext) -> list[str]:
 # --- slots (step 13) ---------------------------------------------------------
 async def show_slots(ctx: FlowContext) -> None:
     """Offer the available delivery slots for the chosen outlet."""
-    outlet = await _current_outlet(ctx)
+    from app.services import kitchen as kitchen_service
+    from app.integrations.geo.geocoder import GeoPoint
+
+    point = (GeoPoint(latitude=ctx.customer.latitude, longitude=ctx.customer.longitude)
+             if ctx.customer.latitude is not None and ctx.customer.longitude is not None else None)
+    check = await kitchen_service.check_service(
+        ctx.session, point, postal_code=ctx.customer.postal_code, require_capacity=True)
+    outlet = check.kitchen
+    if outlet is not None:
+        ctx.customer.preferred_outlet_id = outlet.id
+        ctx.put(outlet_id=str(outlet.id), distance_km=check.distance_km)
     if outlet is None:
-        await ctx.reply_text(p.GENERIC_ERROR)
+        await ctx.reply_text(check.reason or p.NO_SLOTS)
         return
 
     slots = await list_available_slots(ctx.session, outlet, limit=MAX_SLOT_ROWS)

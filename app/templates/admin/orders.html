@@ -6,7 +6,7 @@
 {% block content %}
 
 <div class="mb-5 flex flex-wrap items-center gap-2">
-  <a href="{{ url_for('admin_orders') }}"
+  <a href="{{ url_for('admin_orders') }}?kitchen_id={{ selected_kitchen }}"
      class="rounded-lg border px-3 py-1.5 text-sm
        {% if not selected_stage %}border-brand-600 bg-brand-50 font-semibold text-brand-700
        {% else %}border-stone-200 bg-white text-stone-600 hover:border-stone-300{% endif %}">
@@ -14,7 +14,7 @@
   </a>
   {% for stage in stages %}
     {% if counts[stage] %}
-    <a href="{{ url_for('admin_orders') }}?stage={{ stage | urlencode }}"
+    <a href="{{ url_for('admin_orders') }}?stage={{ stage | urlencode }}{% if selected_kitchen %}&amp;kitchen_id={{ selected_kitchen }}{% endif %}"
        class="rounded-lg border px-3 py-1.5 text-sm
          {% if selected_stage == stage %}border-brand-600 bg-brand-50 font-semibold text-brand-700
          {% else %}border-stone-200 bg-white text-stone-600 hover:border-stone-300{% endif %}">
@@ -25,6 +25,11 @@
   {% endfor %}
 
   <form method="get" action="{{ url_for('admin_orders') }}" class="ml-auto flex gap-2">
+    {% if selected_stage %}<input type="hidden" name="stage" value="{{ selected_stage }}">{% endif %}
+    <select name="kitchen_id" aria-label="Kitchen partner" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm">
+      <option value="">All kitchen partners</option>
+      {% for kitchen in kitchens %}<option value="{{ kitchen.id }}" {% if selected_kitchen == kitchen.id|string %}selected{% endif %}>{{ kitchen.name }}</option>{% endfor %}
+    </select>
     <input name="q" value="{{ query }}" placeholder="Order number..."
            class="w-44 rounded-lg border border-stone-300 px-3 py-1.5 text-sm outline-none
                   focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
@@ -41,6 +46,7 @@
       <thead class="border-b border-stone-200 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
         <tr>
           <th class="px-4 py-2.5 font-medium">Order</th>
+          <th class="px-4 py-2.5 font-medium">Items</th>
           <th class="px-4 py-2.5 font-medium">Customer</th>
           <th class="px-4 py-2.5 font-medium">Slot</th>
           <th class="px-4 py-2.5 text-right font-medium">Total</th>
@@ -60,6 +66,10 @@
             </div>
           </td>
           <td class="px-4 py-3">
+            {% for item in row.order.items or [] %}<div>{{ item.quantity }} x {{ item.name }}</div>{% endfor %}
+            {% if row.order.delivery_instructions %}<p class="mt-1 text-xs text-stone-500">Notes: {{ row.order.delivery_instructions }}</p>{% endif %}
+          </td>
+          <td class="px-4 py-3">
             <div>{{ row.customer.name or '—' if row.customer else '—' }}</div>
             <div class="text-xs text-stone-500">
               {{ row.order.contact_number or (row.customer.whatsapp_number if row.customer else '') }}
@@ -68,11 +78,19 @@
           <td class="px-4 py-3 text-xs text-stone-600">
             {{ row.order.slot_label or '—' }}
             {% if row.outlet %}<div class="text-stone-500">{{ row.outlet.name }}</div>{% endif %}
-            {# Kitchen alert: sent on the delivery day (services/kitchen_alerts.py). #}
+            {# Kitchen notification: provider acceptance is not a read receipt. #}
             {% if row.order.kitchen_notified_at %}
-              <div class="mt-1 text-stone-500">Kitchen told {{ row.order.kitchen_notified_at.strftime('%d %b %H:%M') }} UTC</div>
+              <div class="mt-1 text-stone-500">WhatsApp alert accepted {{ row.order.kitchen_notified_at.strftime('%d %b %H:%M') }} UTC</div>
             {% elif row.order.kitchen_notify_at and row.order.stage == 'Paid & Slot Booked' %}
-              <div class="mt-1 text-stone-500">Kitchen alert {{ row.order.kitchen_notify_at.strftime('%d %b %H:%M') }} UTC</div>
+              <div class="mt-1 text-stone-500">Alert pending / retrying since {{ row.order.kitchen_notify_at.strftime('%d %b %H:%M') }} UTC</div>
+            {% endif %}
+            {% if row.outlet %}
+              <div class="mt-1 text-stone-500">Kitchen WhatsApp: {{ row.outlet.kitchen_whatsapp or 'Not configured' }}</div>
+            {% endif %}
+            {% if row.order.payment_status == 'paid' and row.order.stage == 'Paid & Slot Booked' and not row.order.kitchen_notified_at %}
+              <form method="post" action="{{ url_for('admin_order_notify_kitchen', order_number=row.order.order_number) }}">
+                <button class="mt-1 text-brand-700 underline">Retry kitchen alert</button>
+              </form>
             {% endif %}
             {# Courier: booked 2 hours before the slot (services/dispatch.py). #}
             {% if row.order.uber_delivery_id %}

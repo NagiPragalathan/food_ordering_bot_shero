@@ -21,10 +21,10 @@ class Sender:
     def __init__(self, error: Exception | None = None):
         self.sent, self.error = [], error
 
-    async def send_text(self, to, body):
+    async def send_template(self, to, spec, *values):
         if self.error:
             raise self.error
-        self.sent.append((to, body))
+        self.sent.append((to, spec.name, values))
 
 
 @pytest.fixture(autouse=True)
@@ -76,14 +76,15 @@ async def test_it_waits_until_the_delivery_day_then_goes_once(
     (due,) = await kitchen_alerts.due_alerts(session, that_morning)
     assert await kitchen_alerts.send_alert(session, due, now=that_morning)
 
-    (to, body), = sender.sent
-    assert to == "14438011011" and "SHO-K-1" in body and "2 x Carrot Sambar" in body
+    (to, template, values), = sender.sent
+    assert to == "14438011011" and template == "shero_new_order_alert"
+    assert "SHO-K-1" in values and "2 x Carrot Sambar" in values[-1]
     assert order.stage == OrderStage.SENT_TO_KITCHEN
     assert order.kitchen_notified_at == that_morning
     assert await kitchen_alerts.due_alerts(session, that_morning) == []
 
 
-async def test_a_kitchen_without_whatsapp_still_moves_the_order_on(
+async def test_a_kitchen_without_whatsapp_stays_pending(
         session, customer, outlet, monkeypatch):
     outlet.kitchen_whatsapp = None
     order = await _paid_order(session, customer, outlet)
@@ -91,7 +92,8 @@ async def test_a_kitchen_without_whatsapp_still_moves_the_order_on(
     monkeypatch.setattr(kitchen_alerts, "current_sender", lambda: sender)
 
     assert await kitchen_alerts.send_alert(session, order) is False
-    assert sender.sent == [] and order.stage == OrderStage.SENT_TO_KITCHEN
+    assert sender.sent == [] and order.stage == OrderStage.PAID_SLOT_BOOKED
+    assert order.kitchen_notified_at is None
 
 
 async def test_a_whatsapp_failure_is_logged_not_raised(session, customer, outlet, monkeypatch):
@@ -101,4 +103,62 @@ async def test_a_whatsapp_failure_is_logged_not_raised(session, customer, outlet
                         lambda: Sender(error=RuntimeError("gallabox down")))
 
     assert await kitchen_alerts.send_alert(session, order) is False
+    assert order.kitchen_notified_at is None
+    assert order.stage == OrderStage.PAID_SLOT_BOOKED
+
+
+async def test_failed_alert_retries_and_success_is_not_sent_twice(session, customer, outlet, monkeypatch):
+    outlet.kitchen_whatsapp = "14438011011"
+    order = await _paid_order(session, customer, outlet)
+    now = datetime.now(timezone.utc)
+    order.kitchen_notify_at = now
+    # Keep the delivery window in the future for the retry worker.
+    slot = await session.get(DeliverySlot, order.slot_id)
+    slot.ends_at = now + timedelta(days=2)
+    sender = Sender(error=RuntimeError("down"))
+    monkeypatch.setattr(kitchen_alerts, "current_sender", lambda: sender)
+    assert not await kitchen_alerts.send_alert(session, order)
+    assert order in await kitchen_alerts.due_alerts(session, now)
+    sender.error = None
+    assert await kitchen_alerts.send_alert(session, order)
+    assert await kitchen_alerts.send_alert(session, order)
+    assert len(sender.sent) == 1
+    assert order not in await kitchen_alerts.due_alerts(session, now)
+
+
+async def test_large_cart_sends_every_item(session, customer, outlet, monkeypatch):
+    outlet.kitchen_whatsapp = "14438011011"
+    order = await _paid_order(session, customer, outlet)
+    order.items = [{"name": f"Dish {i} with extra vegetables", "quantity": i + 1} for i in range(30)]
+    sender = Sender()
+    monkeypatch.setattr(kitchen_alerts, "current_sender", lambda: sender)
+    assert await kitchen_alerts.send_alert(session, order)
+    combined = "".join(values[-1] for _, _, values in sender.sent)
+    for item in order.items:
+        assert f"{item['quantity']} x {item['name']}" in combined
+
+
+async def test_payment_immediately_notifies_only_assigned_partner(session, customer, outlet, far_outlet, monkeypatch):
+    from app.services import payments
+    from app.integrations.gallabox.sender import use_sender
+    outlet.kitchen_whatsapp = "14438011011"
+    far_outlet.kitchen_whatsapp = "14438011022"
+    order = await _paid_order(session, customer, outlet,
+                              start=datetime.now(timezone.utc) + timedelta(days=2))
+    order.payment_status = PaymentStatus.LINK_SENT
+    order.stage = OrderStage.PENDING_PAYMENT
+    sender = Sender()
+
+    async def nothing(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(payments, "send_payment_confirmation", nothing)
+    monkeypatch.setattr(payments.crm_sync, "convert_and_record_order", nothing)
+    monkeypatch.setattr(payments.order_alerts, "notify_new_order", nothing)
+    with use_sender(sender):
+        assert await payments.handle_payment_success(session, order, customer)
+        assert not await payments.handle_payment_success(session, order, customer)
+    assert len(sender.sent) == 1
+    assert sender.sent[0][0] == outlet.kitchen_whatsapp
     assert order.kitchen_notified_at is not None
+    assert order.stage == OrderStage.SENT_TO_KITCHEN

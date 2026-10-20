@@ -396,7 +396,7 @@ async def _serving(session: AsyncSession, address) -> tuple[ServiceCheck, GeoPoi
         longitude=address.longitude,
         postal_code=address.postal_code,
     )
-    check = await kitchen_service.check_service(session, point,
+    check = await kitchen_service.check_service(session, point, require_capacity=True,
                                                postal_code=address.postal_code)
     return check, point
 
