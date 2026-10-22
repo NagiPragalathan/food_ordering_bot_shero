@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.core.logging import get_logger
+from app.core.exceptions import PaymentError
 from app.db.models import ConversationStep, Order, OrderStage, Outlet, PaymentStatus
 from app.integrations.gallabox.messages import Button
 from app.integrations.uber.direct import build_address
@@ -41,6 +42,8 @@ async def build_and_show_summary(ctx: FlowContext) -> None:
         dropoff_address=_dropoff_address(ctx),
         slot_starts_at=slot_starts_at,
         promotion=promotion,
+        customer_id=ctx.customer.id,
+        loyalty_points=ctx.get("loyalty_points") or 0,
     )
 
     # Without a delivery quote we would have to guess the charge, so stop here
@@ -64,11 +67,18 @@ async def build_and_show_summary(ctx: FlowContext) -> None:
 
     # Hold the slot now: the spec keeps it reserved while payment is pending.
     if ctx.get("slot_id"):
-        await slots.hold_slot(ctx.session, slot_id=ctx.get("slot_id"),
-                              order_id=order.id)
+        try:
+            await slots.hold_slot(ctx.session, slot_id=ctx.get("slot_id"), order_id=order.id)
+        except Exception:
+            from app.services import loyalty
+            await loyalty.release(ctx.session, order, reason="Delivery slot could not be reserved")
+            order_service.set_stage(order, OrderStage.CANCELLED)
+            await ctx.session.flush()
+            raise
     await order_changes.release_other_promo_holds(ctx.session, order)
 
     ctx.put(order_id=str(order.id), order_number=order.order_number)
+    ctx.conversation.clear("loyalty_points")
 
     summary = format_summary(priced, outlet_name=outlet.name,
                              slot_label=ctx.get("slot_label") or "your chosen slot")
@@ -129,7 +139,14 @@ async def _send_payment(ctx: FlowContext, order: Order | None) -> None:
         return
 
     await ctx.reply_text(p.PAYMENT_SENDING)
-    await payments.create_payment_link(ctx.session, order, ctx.customer)
+    try:
+        await payments.create_payment_link(ctx.session, order, ctx.customer)
+    except PaymentError:
+        # Creation failed before a payable Stripe session existed. Do not
+        # strand the points on a draft that has no expiry job to release it.
+        if not order.stripe_session_id:
+            await _abandon_draft(ctx, order, reason="payment_link_failed")
+        raise
     ctx.goto(ConversationStep.AWAIT_PAYMENT)
 
 
@@ -142,6 +159,8 @@ async def _abandon_draft(ctx: FlowContext, order: Order | None, *,
         log.warning("abandon_skipped_paid_order", order_number=order.order_number)
         return
 
+    from app.services import loyalty
+    await loyalty.release(ctx.session, order, reason=reason)
     await slots.release_holds_for_order(ctx.session, order.id, reason=reason)
     # set_stage stamps cancelled_at as part of the transition.
     order_service.set_stage(order, OrderStage.CANCELLED)

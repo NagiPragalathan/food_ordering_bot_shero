@@ -140,3 +140,7 @@ tests/              287 tests
 ### Automatic kitchen allocation
 
 Incoming orders select the nearest active, serviceable kitchen with bookable slot capacity. See the [setup and usage guide](docs/automatic-kitchen-allocation.md).
+
+### Loyalty rewards
+
+Configurable points, repeat-purchase bonuses, tiers and checkout redemption are available in **Admin > Loyalty**. Apply migration `0011_loyalty`, review the rules and enable the program. See the [loyalty setup and customization guide](docs/loyalty-program.md).

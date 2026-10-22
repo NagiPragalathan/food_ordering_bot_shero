@@ -1,0 +1,29 @@
+{% extends "admin/base.html" %}
+{% block title %}Loyalty{% endblock %}{% block heading %}Loyalty rewards{% endblock %}
+{% block content %}
+<p class="mb-5 text-sm text-stone-600">Customers earn on eligible paid food purchases and choose points at checkout. Delivery, fees and tax do not earn points. Points do not expire. Existing payment links keep the rules shown when created.</p>
+<form method="post" action="{{ url_for('admin_loyalty_save') }}" class="rounded-xl border bg-white p-5">
+  <h2 class="mb-4 text-lg font-semibold">Program rules</h2>
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  {% for f in fields %}<label class="block text-sm">
+    {% if f.kind == 'checkbox' %}<input type="checkbox" name="{{ f.key }}" value="1" {% if f.value %}checked{% endif %}> {{ f.label }}
+    {% else %}<span class="mb-1 block text-stone-600">{{ f.label }}</span><input required name="{{ f.key }}" type="{{ f.kind }}" {% if f.kind == 'number' %}step="any" min="0"{% endif %} value="{{ f.value }}" class="w-full rounded-lg border px-3 py-2">{% endif %}
+  </label>{% endfor %}
+  </div>
+  <div class="mt-5 grid gap-4 lg:grid-cols-2">
+    <label class="block text-sm">Eligible kitchens (select none for all)<select multiple name="kitchen_ids" class="mt-1 block h-40 w-full rounded-lg border p-2">{% for k in kitchens %}<option value="{{ k.id }}" {% if k.id in rules.kitchen_ids %}selected{% endif %}>{{ k.name }}</option>{% endfor %}</select></label>
+    <label class="block text-sm">Excluded dish retailer IDs (one per line)<textarea name="excluded_items" rows="7" class="mt-1 w-full rounded-lg border p-2">{{ rules.excluded_items | join('
+') }}</textarea></label>
+    <label class="block text-sm lg:col-span-2">Membership tiers (JSON)<textarea name="tiers" rows="9" class="mt-1 w-full rounded-lg border p-3 font-mono text-xs" spellcheck="false">{{ tiers_json }}</textarea><span class="text-xs text-stone-500">Example: [{"name":"Silver","orders":5,"multiplier":1.5}]. Use [] for no tiers. Multipliers apply to spend points; fixed bonuses are added afterward. Threshold includes the order being paid.</span></label>
+  </div>
+  <button class="mt-4 rounded-lg bg-brand-600 px-5 py-2 font-semibold text-white">Save loyalty rules</button>
+</form>
+<section class="mt-6 rounded-xl border bg-white p-5">
+<h2 class="mb-3 text-lg font-semibold">Customer wallets</h2>
+<form method="get" class="mb-3 flex gap-2"><input name="q" value="{{ query }}" placeholder="Name or WhatsApp number" class="rounded-lg border px-3 py-2"><button class="rounded-lg border px-4">Search</button></form>
+<p class="mb-2 text-xs text-stone-500">Showing up to 50 customers. Search to find a specific wallet.</p>
+<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr><th class="py-2">Customer</th><th>Available points</th><th>Eligible orders</th><th></th></tr></thead><tbody>
+{% for c,w in rows %}<tr class="border-t"><td class="py-3">{{ c.name or c.whatsapp_number }}<div class="text-xs text-stone-500">{{ c.whatsapp_number }}</div></td><td>{{ w.balance if w else 0 }}</td><td>{{ w.eligible_orders if w else 0 }}</td><td><a href="{{ url_for('admin_loyalty_wallet', customer_id=c.id) }}" class="text-brand-700 underline">History / adjust</a></td></tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endblock %}

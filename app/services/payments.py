@@ -32,7 +32,7 @@ from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
 from app.services import (crm_sync, dispatch, kitchen_alerts, order_alerts, orders,
-                          promotions, receipts, slots)
+                          loyalty, promotions, receipts, slots)
 from app.services.customers import advance, get_or_create_conversation
 
 log = get_logger(__name__)
@@ -59,10 +59,17 @@ async def send_payment_confirmation(customer: Customer, order: Order,
 def amount_text(order: Order) -> str:
     """The amount for a template's "$..." slot: "42.50", or with a coupon
     "42.50 (you saved $7.50 with SHERO10)" - one line, as Meta requires."""
-    if order.discount and Decimal(order.discount) > 0 and order.promo_code:
-        return (f"{order.total:.2f} (you saved ${Decimal(order.discount):.2f} "
-                f"with {order.promo_code})")
-    return f"{order.total:.2f}"
+    details = []
+    loyalty_amount = Decimal(order.loyalty_discount or 0)
+    coupon_amount = Decimal(order.discount or 0) - loyalty_amount
+    if coupon_amount > 0 and order.promo_code:
+        details.append(f"you saved ${coupon_amount:.2f} with {order.promo_code}")
+    if loyalty_amount > 0:
+        details.append(f"{order.loyalty_points} points saved ${loyalty_amount:.2f}")
+    if order.loyalty_earned:
+        details.append(f"earned {order.loyalty_earned} points")
+    return f"{order.total:.2f}" + (f" ({'; '.join(details)})" if details else "")
+
 
 
 def payment_short_url(order_number: str) -> str:
@@ -92,7 +99,7 @@ async def create_payment_link(session: AsyncSession, order: Order,
         customer_email=customer.email,
         customer_phone=customer.whatsapp_number,
         discount=Decimal(order.discount or 0),
-        discount_label=f"Coupon {order.promo_code}" if order.promo_code else None,
+        discount_label=("Coupon + loyalty" if order.promo_code else "Loyalty rewards") if order.loyalty_discount else (f"Coupon {order.promo_code}" if order.promo_code else None),
     )
 
     order.stripe_session_id = result["id"]
@@ -223,6 +230,7 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     if payment_intent_id:
         order.stripe_payment_intent_id = payment_intent_id
     order.payment_status = PaymentStatus.PAID
+    await loyalty.paid(session, order)
     order.paid_at = datetime.now(timezone.utc)
 
     # 1. Convert the held slot into a booking (spec step 16). A payment that
@@ -334,6 +342,7 @@ async def handle_payment_expired(session: AsyncSession, order: Order,
         return False
 
     order.payment_status = PaymentStatus.EXPIRED
+    await loyalty.release(session, order, reason="Payment link expired")
     # The whole point of the 30-minute expiry: give the window back.
     await slots.release_holds_for_order(session, order.id, reason="payment_expired")
     await _restore_cart(session, order, customer)
@@ -377,7 +386,8 @@ async def refund_order(session: AsyncSession, order: Order, customer: Customer,
 
     order.payment_status = PaymentStatus.REFUNDED
     order.stripe_refund_id = refund["id"]
-    order.refund_amount = Decimal(refund["amount"])
+    order.refund_amount = Decimal(order.refund_amount or 0) + Decimal(refund["amount"])
+    await loyalty.refund(session, order)
     orders.set_stage(order, OrderStage.REFUNDED)
     await slots.release_holds_for_order(session, order.id, reason="refunded")
     await session.flush()

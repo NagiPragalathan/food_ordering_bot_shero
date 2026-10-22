@@ -555,7 +555,8 @@ async def web(session, customer, outlet, menu, monkeypatch):
     cart_service.set_quantity(conversation, retailer_id=SAMBAR, name="Drumstick Sambar",
                               price="12.50", quantity=2)
     address = await addresses.save(session, customer, {
-        "label": "Home", "address_line1": "12 Maple Street", "postal_code": "08820"})
+        "label": "Home", "address_line1": "12 Maple Street", "postal_code": "08820",
+        "latitude": customer.latitude, "longitude": customer.longitude})
     start = datetime.now(timezone.utc) + timedelta(days=2)
     slot = DeliverySlot(outlet_id=outlet.id, starts_at=start,
                         ends_at=start + timedelta(hours=1), capacity=5)

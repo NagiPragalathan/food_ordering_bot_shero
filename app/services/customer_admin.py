@@ -292,6 +292,9 @@ async def delete_customer(session: AsyncSession, customer: Customer) -> dict:
         await slots.release_holds_for_order(session, order_id, reason="deleted",
                                             include_booked=True)
     removed = {"orders": len(order_ids)}
+    from app.db.models import LoyaltyAccount, LoyaltyEntry
+    await session.execute(delete(LoyaltyEntry).where(LoyaltyEntry.customer_id == customer.id))
+    await session.execute(delete(LoyaltyAccount).where(LoyaltyAccount.customer_id == customer.id))
     if order_ids:
         await session.execute(delete(SlotHold).where(SlotHold.order_id.in_(order_ids)))
         await session.execute(delete(Order).where(Order.id.in_(order_ids)))

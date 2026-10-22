@@ -107,6 +107,8 @@ def as_cart(items: list[dict]) -> list[dict]:
 
 
 async def _release(session: AsyncSession, order: Order, *, reason: str) -> None:
+    from app.services import loyalty
+    await loyalty.release(session, order, reason=reason)
     await slots.release_holds_for_order(session, order.id, reason=reason)
     orders.set_stage(order, OrderStage.CANCELLED)
     # Its Pay Now link is dead from here on. Left as "link sent", the reminder

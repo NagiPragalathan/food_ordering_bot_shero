@@ -94,7 +94,10 @@ async def create_draft_order(
         delivery_fee=priced.delivery_fee,
         extra_fees=priced.extra_fees,
         tax=priced.tax,
-        discount=priced.discount,
+        discount=priced.discount + priced.loyalty_discount,
+        loyalty_discount=priced.loyalty_discount,
+        loyalty_points=priced.loyalty_points,
+        loyalty_policy=priced.loyalty_policy,
         promotion_id=priced.promotion.id if priced.discount > 0 and priced.promotion else None,
         promo_code=priced.promo_code,
         promo_title=priced.promo_title,
@@ -117,8 +120,11 @@ async def create_draft_order(
         uber_quote_id=priced.uber_quote_id,
         uber_quote_raw=priced.uber_quote_raw,
     )
-    session.add(order)
-    await session.flush()
+    from app.services import loyalty
+    async with session.begin_nested():
+        session.add(order)
+        await session.flush()
+        await loyalty.reserve(session, order)
     log.info("order_created", order_number=order.order_number,
              total=str(order.total), outlet=outlet.code,
              coupon=order.promo_code, discount=str(order.discount))

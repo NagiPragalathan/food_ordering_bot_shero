@@ -111,7 +111,10 @@
               </div>
             {% endif %}
           </td>
-          <td class="px-4 py-3">{{ ui.payment_badge(row.order.payment_status) }}</td>
+          <td class="px-4 py-3">{{ ui.payment_badge(row.order.payment_status) }}
+            {% if row.order.loyalty_points %}<div class="text-xs text-stone-500">{{ row.order.loyalty_points }} points / {{ row.order.loyalty_state }}</div>{% endif %}
+            {% if row.order.loyalty_earned %}<div class="text-xs text-emerald-700">Earned {{ row.order.loyalty_earned }} points</div>{% endif %}
+          </td>
           <td class="px-4 py-3">{{ ui.stage_badge(row.order.stage) }}</td>
           <td class="px-4 py-3 text-right">
             {% if row.next_label %}

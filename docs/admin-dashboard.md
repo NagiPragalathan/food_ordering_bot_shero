@@ -612,3 +612,7 @@ extra work. Shared stat tiles, cards, badges and empty states live in
 
 A setting saved on one instance reaches other instances within a minute
 (the refresh job), not instantly. With a single instance this never comes up.
+
+## Loyalty rewards
+
+**Loyalty** in the sidebar manages earning rules, repeat-order bonuses, membership tiers, redemption limits, coupon stacking and eligible kitchens/dishes. Search customer wallets to inspect history or grant/remove points with an audited reason. The program starts disabled. See the [full loyalty guide](loyalty-program.md) for activation, examples and all controls.

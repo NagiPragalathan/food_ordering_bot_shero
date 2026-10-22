@@ -317,3 +317,9 @@ async def test_the_welcome_follows_the_triggers_reply(session, monkeypatch, repl
         assert first.payload["buttons"] == [("Continue on WhatsApp", "Continue on WhatsApp")]
     else:
         assert first.payload["url"] == "https://www.shero.us/"
+
+
+@pytest.mark.parametrize("command", ["points", "rewards", "loyalty"])
+async def test_loyalty_balance_commands_work_in_keyword_mode(session, keywords, command):
+    decision = await rt.decide(session, text(command), NOW)
+    assert decision.answer and not decision.fresh_start

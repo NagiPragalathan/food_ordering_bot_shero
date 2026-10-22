@@ -70,7 +70,7 @@ IDLE_STEPS = {ConversationStep.START, ConversationStep.COMPLETED}
 
 # Messages the bot itself puts in the customer's mouth (a wa.me link's text,
 # a button's label), so they must work whatever triggers are set.
-BUILT_IN = p.NEW_LINK_KEYWORDS | p.CONTINUE_KEYWORDS
+BUILT_IN = p.NEW_LINK_KEYWORDS | p.CONTINUE_KEYWORDS | {"points", "rewards", "loyalty"}
 
 
 @dataclass(frozen=True)

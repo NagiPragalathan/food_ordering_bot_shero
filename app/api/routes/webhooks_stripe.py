@@ -127,12 +127,14 @@ async def _record_dashboard_refund(session: AsyncSession, order: Order,
 
     from app.db.models import OrderStage, PaymentStatus
 
-    if order.payment_status == PaymentStatus.REFUNDED:
-        return
-
     refunded_minor = charge.get("amount_refunded") or 0
+    cumulative = Decimal(refunded_minor) / 100
+    if cumulative <= Decimal(order.refund_amount or 0):
+        return
     order.payment_status = PaymentStatus.REFUNDED
-    order.refund_amount = Decimal(refunded_minor) / 100
+    order.refund_amount = cumulative
+    from app.services import loyalty
+    await loyalty.refund(session, order)
     order_service.set_stage(order, OrderStage.REFUNDED)
     await session.flush()
     log.info("refund_recorded_from_stripe", order_number=order.order_number,

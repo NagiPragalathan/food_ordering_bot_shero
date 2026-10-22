@@ -265,11 +265,16 @@ def item_lines(items: list[dict], *, coupon: str | None = None) -> str | None:
 
 def _coupon_line(order) -> str | None:
     """`Coupon SHERO10 (Diwali offer) = -7.50`, or None without a discount."""
-    discount = Decimal(str(order.discount or 0))
-    if discount <= 0:
-        return None
-    title = f" ({order.promo_title})" if order.promo_title else ""
-    return f"Coupon {order.promo_code or ''}{title} = -{discount:.2f}"
+    reward = Decimal(str(order.loyalty_discount or 0))
+    discount = Decimal(str(order.discount or 0)) - reward
+    lines = []
+    if discount > 0:
+        title = f" ({order.promo_title})" if order.promo_title else ""
+        lines.append(f"Coupon {order.promo_code or ''}{title} = -{discount:.2f}")
+    if reward > 0:
+        lines.append(f"Loyalty {order.loyalty_points} points = -{reward:.2f}")
+    return "; ".join(lines) or None
+
 
 
 # Order fields added after the CRM was first set up. A CRM where

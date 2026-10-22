@@ -7,6 +7,7 @@ Start here.
 | Document | What it covers |
 |---|---|
 | [credentials-checklist.md](credentials-checklist.md) | **Everything we need from you**, grouped by system, with where to find each value |
+| [loyalty-program.md](loyalty-program.md) | Earning points, repeat bonuses, tiers, redemption and every admin control |
 | [admin-dashboard.md](admin-dashboard.md) | Running the bot day to day: menu, import, orders, settings |
 | [zoho-setup.md](zoho-setup.md) | What the Zoho admin needs to create — fields, picklists, the Orders module |
 | [whatsapp-templates.md](whatsapp-templates.md) | The 10 templates to submit for Meta approval |

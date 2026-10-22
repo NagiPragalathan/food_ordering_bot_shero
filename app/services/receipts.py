@@ -147,13 +147,20 @@ def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
         pdf.set_x(110)
         pdf.cell(53, 6, label)
         pdf.cell(29, 6, _money(currency, amount), align="R", new_x="LMARGIN", new_y="NEXT")
-    discount = Decimal(str(order.discount or 0))
+    loyalty_discount = Decimal(str(order.loyalty_discount or 0))
+    discount = Decimal(str(order.discount or 0)) - loyalty_discount
     if discount > 0:
         pdf.set_x(110)
         pdf.set_text_color(*SAVING)
         pdf.cell(53, 6, _fit(pdf, f"Coupon {order.promo_code or ''}".strip(), 51))
         pdf.cell(29, 6, "-" + _money(currency, discount), align="R",
                  new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(20, 20, 20)
+    if loyalty_discount > 0:
+        pdf.set_x(110)
+        pdf.set_text_color(*SAVING)
+        pdf.cell(53, 6, f"Loyalty ({order.loyalty_points} points)")
+        pdf.cell(29, 6, "-" + _money(currency, loyalty_discount), align="R", new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(20, 20, 20)
     pdf.line(110, pdf.get_y() + 1, 192, pdf.get_y() + 1)
     pdf.ln(2)

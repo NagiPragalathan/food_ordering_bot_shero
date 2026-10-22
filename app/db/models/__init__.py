@@ -17,6 +17,7 @@ from app.db.models.enums import (
     SlotHoldStatus,
 )
 from app.db.models.menu import Category, Cuisine, MenuItem
+from app.db.models.loyalty import LoyaltyAccount, LoyaltyEntry
 from app.db.models.order import Order
 from app.db.models.outlet import Outlet
 from app.db.models.promotion import DiscountType, Placement, Promotion
@@ -39,6 +40,8 @@ __all__ = [
     "InboundMessage",
     "LeadStage",
     "MenuItem",
+    "LoyaltyAccount",
+    "LoyaltyEntry",
     "Order",
     "OrderStage",
     "Outlet",

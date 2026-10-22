@@ -195,6 +195,28 @@ async def _handle_global_intent(ctx: FlowContext) -> bool:
     if not text:
         return False
 
+    if text in {"points", "rewards", "loyalty"}:
+        from app.services import loyalty
+        info = await loyalty.overview(ctx.session, ctx.customer.id)
+        if not info["enabled"]:
+            await ctx.reply_text("The loyalty program is currently paused.")
+        else:
+            await ctx.reply_text(f"{info['name']}: {info['balance']} available points. "
+                                 f"{info['tier']}, {info['eligible_orders']} eligible orders. "
+                                 f"One point is worth {info['currency']} {info['point_value']}. "
+                                 "Use points on the ordering page, or type redeem 100 before choosing your delivery slot. Type redeem 0 to remove points.")
+        return True
+    if text.startswith("redeem "):
+        value = text[7:].strip()
+        if not value.isdigit() or int(value) > 1000000:
+            await ctx.reply_text("Type redeem followed by a whole number of points, for example redeem 100.")
+        elif ctx.step not in {str(ConversationStep.CART_REVIEW), str(ConversationStep.AWAIT_SLOT_CHOICE), str(ConversationStep.CUISINE_MENU), str(ConversationStep.BROWSING_CATEGORIES), str(ConversationStep.BROWSING_ITEMS)}:
+            await ctx.reply_text("Choose points before selecting your delivery slot. For an existing payment link, use Change menu to release it first.")
+        else:
+            ctx.put(loyalty_points=int(value))
+            await ctx.reply_text(f"Requested {int(value)} loyalty points. Your balance and the reward rules will be checked in the order summary.")
+        return True
+
     if text in p.AGENT_KEYWORDS:
         await onboarding.hand_over(ctx)
         return True

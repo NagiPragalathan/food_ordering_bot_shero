@@ -77,6 +77,10 @@ class PricedOrder:
     discount: Decimal = Decimal("0.00")
     promotion: Promotion | None = field(default=None, repr=False)
     promo_problem: str | None = None
+    loyalty_discount: Decimal = Decimal("0.00")
+    loyalty_points: int = 0
+    loyalty_policy: dict = field(default_factory=dict)
+    loyalty_view: dict = field(default_factory=dict)
 
     @property
     def promo_code(self) -> str | None:
@@ -112,6 +116,8 @@ async def price_cart(
     dropoff_address: dict | None = None,
     slot_starts_at: datetime | None = None,
     promotion: Promotion | None = None,
+    customer_id=None,
+    loyalty_points: int = 0,
 ) -> PricedOrder:
     """Price a cart end to end.
 
@@ -169,6 +175,11 @@ async def price_cart(
         priced.discount = max(Decimal("0.00"),
                               money(priced.discount - (promotions.MIN_CHARGE - priced.total)))
         _settle(priced)
+    if customer_id is not None:
+        from app.services import loyalty
+        priced.loyalty_view = await loyalty.apply_to_quote(
+            session, priced, customer_id=customer_id,
+            outlet_id=outlet.id if outlet else None, requested=loyalty_points)
     return priced
 
 
@@ -178,10 +189,11 @@ def _settle(priced: PricedOrder) -> None:
     taxable = priced.dish_total
     if promotions.comes_off_dishes(priced.promotion):
         taxable = max(Decimal("0.00"), priced.dish_total - priced.discount)
+    taxable = max(Decimal("0.00"), taxable - priced.loyalty_discount)
     priced.tax = money(taxable * Decimal(str(settings.tax_percent)) / Decimal("100"))
     priced.total = money(
         priced.dish_total + priced.delivery_fee + priced.extra_fees + priced.tax
-        - priced.discount
+        - priced.discount - priced.loyalty_discount
     )
 
 
@@ -320,6 +332,8 @@ def format_summary(priced: PricedOrder, *, outlet_name: str,
         lines.append(f"Tax: {symbol}{priced.tax}")
     if priced.discount > 0:
         lines.append(f"Coupon {priced.promo_code}: -{symbol}{priced.discount}")
+    if priced.loyalty_discount > 0:
+        lines.append(f"Loyalty ({priced.loyalty_points} points): -{symbol}{priced.loyalty_discount}")
     lines.append(f"*Total: {symbol}{priced.total}*")
     if priced.discount > 0:
         lines.append(f"You save {symbol}{priced.discount} on this order!")

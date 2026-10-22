@@ -1,0 +1,13 @@
+{% extends "admin/base.html" %}
+{% block title %}Loyalty wallet{% endblock %}{% block heading %}Loyalty wallet{% endblock %}
+{% block content %}
+<a href="{{ url_for('admin_loyalty') }}" class="text-brand-700 underline">All wallets and program rules</a>
+<div class="my-5 rounded-xl border bg-white p-5"><h2 class="text-lg font-semibold">{{ customer.name or customer.whatsapp_number }}</h2><p>{{ customer.whatsapp_number }}</p><p class="mt-2 text-xl font-bold">{{ info.balance }} available points</p><p>{{ info.tier }} / {{ info.eligible_orders }} eligible orders</p>
+<p class="mt-2 text-xs text-stone-500">Held points are already deducted from available balance. A negative balance means rewards were reversed after their points had been spent; future earnings repay it.</p></div>
+<form method="post" action="{{ url_for('admin_loyalty_adjust', customer_id=customer.id) }}" class="mb-5 flex flex-wrap gap-3 rounded-xl border bg-white p-5">
+<input type="hidden" name="request_id" value="{{ request_id }}"><label>Points (+ grant / - remove)<input required type="number" step="1" min="-1000000" max="1000000" name="points" class="ml-2 rounded-lg border px-3 py-2"></label><label>Reason<input required maxlength="500" name="note" class="ml-2 rounded-lg border px-3 py-2"></label><button class="rounded-lg bg-brand-600 px-4 py-2 text-white">Record adjustment</button>
+</form>
+<h2 class="mb-3 text-lg font-semibold">Latest 30 transactions</h2><div class="overflow-x-auto rounded-xl border bg-white"><table class="w-full text-left text-sm"><thead><tr><th class="p-3">Date (UTC)</th><th>Type</th><th>Points</th><th>Balance after</th><th>Reason / administrator</th></tr></thead><tbody>
+{% for entry in info.entries %}<tr class="border-t"><td class="p-3">{{ entry.created_at.strftime('%d %b %Y %H:%M') }}</td><td>{{ entry.kind }}</td><td>{{ '%+d' | format(entry.points) }}</td><td>{{ entry.balance_after }}</td><td>{{ entry.note }}{% if entry.actor %}<div class="text-xs text-stone-500">{{ entry.actor }}</div>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

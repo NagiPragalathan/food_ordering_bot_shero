@@ -30,7 +30,7 @@ from app.services import cart as cart_service
 from app.services import kitchen as kitchen_service
 from app.services import menu as menu_service
 from app.services import (order_changes, order_link, orders, out_of_area, payments,
-                          pricing, promotions, slots)
+                          loyalty, pricing, promotions, slots)
 from app.services.kitchen import ServiceCheck
 from app.integrations.geo.geocoder import GeoPoint
 from app.templating import templates
@@ -99,6 +99,17 @@ async def _page(request: Request, token: str, session: AsyncSession,
         # Public by design; see google_maps_browser_key in config.
         "maps_browser_key": settings.google_maps_browser_key,
     })
+
+
+@router.get("/{token}/loyalty")
+async def loyalty_json(token: str, session: AsyncSession = Depends(get_session)):
+    customer = await _customer(session, token)
+    if customer is None:
+        return order_link.dead_link_response()
+    info = await loyalty.overview(session, customer.id)
+    info["entries"] = [{"kind": e.kind, "points": e.points,
+                         "date": e.created_at.isoformat()} for e in info["entries"]]
+    return {"ok": True, **info}
 
 
 @router.get("/{token}/menu")
@@ -477,6 +488,8 @@ async def quote(request: Request, token: str,
             dropoff_address=_dropoff(address),
             slot_starts_at=slots.as_utc(slot.starts_at),
             promotion=promotion,
+            customer_id=customer.id,
+            loyalty_points=body.get("loyalty_points", 0),
         )
     except BotFlowError as exc:
         # Item unavailable, no delivery quote - all carry customer-safe copy.
@@ -497,6 +510,7 @@ async def quote(request: Request, token: str,
         "extra_fees": float(priced.extra_fees),
         "tax": float(priced.tax),
         "discount": float(priced.discount),
+        "loyalty": priced.loyalty_view,
         # What it would have cost without the coupon, and so the real saving.
         "total_before_discount": float(priced.total_without_coupon),
         "saving": float(priced.total_without_coupon - priced.total),
@@ -564,6 +578,8 @@ async def confirm(request: Request, token: str,
             dropoff_address=_dropoff(address),
             slot_starts_at=slots.as_utc(slot.starts_at),
             promotion=promotion,
+            customer_id=customer.id,
+            loyalty_points=body.get("loyalty_points", 0),
         )
         # The customer agreed to the total they were shown. If the coupon
         # stopped applying since (expired, claimed, cart changed), show them
@@ -571,6 +587,9 @@ async def confirm(request: Request, token: str,
         if "coupon_code" in body and (promotions.normalize_code(body.get("coupon_code"))
                                       != (priced.promo_code or "")):
             return {"ok": False, "requote": True, "error": notice or COUPON_CHANGED}
+        if priced.loyalty_points and (str(body.get("loyalty_discount", "")) != str(priced.loyalty_discount)
+                                      or str(body.get("expected_total", "")) != str(priced.total)):
+            return {"ok": False, "requote": True, "error": "Your loyalty total changed. Please review it and confirm again."}
         order = await orders.create_draft_order(
             session, customer=customer, outlet=kitchen, priced=priced,
             slot_id=slot.id, slot_starts_at=slots.as_utc(slot.starts_at),
@@ -586,6 +605,9 @@ async def confirm(request: Request, token: str,
         # WhatsApp; the page then hands the customer over to the chat.
         pay_url = await payments.create_payment_link(session, order, customer,
                                                      with_summary=True)
+    except loyalty.LoyaltyError as exc:
+        await _release(session, draft)
+        return {"ok": False, "requote": True, "error": exc.customer_message}
     except BotFlowError as exc:
         await _release(session, draft)
         return {"ok": False, "error": exc.customer_message}
@@ -640,6 +662,7 @@ async def _release(session: AsyncSession, order) -> None:
     if order is None:
         return
     try:
+        await loyalty.release(session, order, reason="Payment link failed")
         await slots.release_holds_for_order(session, order.id,
                                             reason="payment_link_failed")
         orders.set_stage(order, OrderStage.CANCELLED)

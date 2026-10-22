@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -56,6 +56,12 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
         ForeignKey("promotions.id", ondelete="SET NULL"), index=True)
     promo_code: Mapped[str | None] = mapped_column(String(32))
     promo_title: Mapped[str | None] = mapped_column(String(120))
+    loyalty_discount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=ZERO, nullable=False)
+    loyalty_points: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    loyalty_earned: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    loyalty_state: Mapped[str] = mapped_column(String(16), default="none", nullable=False)
+    loyalty_policy: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # discount includes the coupon plus loyalty; loyalty_discount is its breakdown.
     # dish_total + delivery_fee + extra_fees + tax - discount.
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=ZERO, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
