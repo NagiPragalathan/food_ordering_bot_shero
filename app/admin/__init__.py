@@ -3,8 +3,8 @@
 from fastapi import APIRouter
 
 from app.admin.routes import (auth, bot_replies, customers, dashboard, deliveries, imports,
-                               kitchens, loyalty, menu, order_alerts, orders, promotions,
-                               settings)
+                               kitchens, loyalty, menu, nudges, order_alerts, orders,
+                               promotions, settings)
 
 router = APIRouter(prefix="/admin")
 router.include_router(auth.router)
@@ -20,5 +20,7 @@ router.include_router(customers.router)
 router.include_router(bot_replies.router)
 router.include_router(settings.router)
 router.include_router(order_alerts.router)
+# Not in the sidebar yet: reached at /admin/nudges.
+router.include_router(nudges.router)
 
 __all__ = ["router"]

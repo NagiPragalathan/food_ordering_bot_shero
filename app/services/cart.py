@@ -11,6 +11,7 @@ stale value here can never become what a customer is charged.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,8 +28,13 @@ def read(conversation: Conversation) -> list[dict]:
 
 
 def write(conversation: Conversation, lines: list[dict]) -> None:
-    """Replace the cart. Empty lines are dropped rather than stored as zeroes."""
-    conversation.set(cart=[line for line in lines if line.get("quantity", 0) > 0])
+    """Replace the cart. Empty lines are dropped rather than stored as zeroes.
+
+    The time is kept with it: an abandoned-cart nudge (services/nudges) goes
+    a set time after the cart last changed, not after any chat message.
+    """
+    conversation.set(cart=[line for line in lines if line.get("quantity", 0) > 0],
+                     cart_updated_at=datetime.now(timezone.utc).isoformat())
 
 
 def add(conversation: Conversation, *, retailer_id: str, name: str,

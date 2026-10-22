@@ -103,6 +103,16 @@ class GallaboxClient(ApiClient):
             log.info("template_not_approved_using_text", template=spec.name)
         return await self._send(to, fallback.message(spec, tuple(values), button_value))
 
+    async def send_template_only(self, to: str, spec: TemplateSpec, *values: object,
+                                 button_value: str | None = None) -> dict:
+        """Send the template and nothing else: no text fallback.
+
+        For messages that go outside the 24-hour window (services/nudges),
+        where WhatsApp drops ordinary text, so a fallback would only look
+        like it worked. The caller checks approval first; a refusal raises.
+        """
+        return await self._send(to, render(spec, *values, button_value=button_value))
+
     # -- agent handover (spec step 5, "Talk to Us") ---------------------------
     async def handover_to_agent(self, to: str, *, note: str | None = None) -> dict:
         """Take the bot out of the loop so a human agent can take over.

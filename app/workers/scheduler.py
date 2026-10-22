@@ -62,6 +62,13 @@ def start_scheduler() -> AsyncIOScheduler:
         id="kitchen_alerts", max_instances=1, coalesce=True,
         misfire_grace_time=300,
     )
+    # Retargeting nudges. Off unless switched on (services/nudges); a cart
+    # reminder five minutes late is still on time.
+    scheduler.add_job(
+        jobs.send_nudges, IntervalTrigger(minutes=5),
+        id="nudges", max_instances=1, coalesce=True,
+        misfire_grace_time=300,
+    )
     # Slots only need topping up occasionally; 03:00 UTC is outside service
     # hours for the US east-coast outlets in the spec.
     scheduler.add_job(

@@ -1,0 +1,1334 @@
+{% extends "admin/base.html" %}
+{% block title %}Nudges{% endblock %}
+{% block heading %}Nudges{% endblock %}
+{% block subheading %}<p class="text-sm text-stone-500">Automatic WhatsApp reminders and offers that bring customers back</p>{% endblock %}
+{% block actions %}
+  <button type="button" id="refresh" title="Reload everything"
+          class="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 shadow-sm hover:bg-stone-50">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7L21 8M21 3v5h-5"/></svg>
+    Refresh
+  </button>
+{% endblock %}
+
+{% block content %}
+<style>
+  .field{display:block;width:100%;border-radius:.75rem;border:1px solid #DCE8E7;background:#fff;padding:.55rem .75rem;font-size:.875rem;outline:none;transition:border-color .15s, box-shadow .15s}
+  .field:focus{border-color:#029B99;box-shadow:0 0 0 4px rgba(2,155,153,.12)}
+  .field:disabled{background:#F6FAFA;color:#8BA3A1}
+  .lbl{display:block;margin-bottom:.35rem;font-size:.8rem;font-weight:600;color:#324846}
+  .help{margin-top:.3rem;font-size:.72rem;line-height:1.35;color:#627B79}
+  .chip{display:inline-flex;align-items:center;gap:.3rem;border-radius:999px;padding:.15rem .6rem;font-size:.72rem;font-weight:600}
+  .tab{border-bottom:2px solid transparent;padding:.7rem .2rem;font-size:.875rem;font-weight:500;color:#627B79;white-space:nowrap}
+  .tab[aria-selected=true]{border-color:#029B99;color:#026B69;font-weight:600}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:.75rem;padding:.5rem .9rem;font-size:.85rem;font-weight:600;transition:all .15s;white-space:nowrap}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-primary{background:#028582;color:#fff;box-shadow:0 6px 16px -8px rgba(2,133,130,.6)}
+  .btn-primary:hover:not(:disabled){background:#026B69}
+  .btn-ghost{border:1px solid #DCE8E7;background:#fff;color:#324846}
+  .btn-ghost:hover:not(:disabled){background:#F6FAFA}
+  .btn-danger{border:1px solid #fecaca;background:#fff;color:#b91c1c}
+  .btn-danger:hover:not(:disabled){background:#fef2f2}
+  .switch{position:relative;display:inline-flex;height:1.5rem;width:2.75rem;flex-shrink:0;cursor:pointer;border-radius:999px;background:#C2D4D3;transition:background .2s}
+  .switch[aria-checked=true]{background:#029B99}
+  .switch span{position:absolute;top:.125rem;left:.125rem;height:1.25rem;width:1.25rem;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+  .switch[aria-checked=true] span{transform:translateX(1.25rem)}
+  .switch-lg{height:2rem;width:3.75rem}
+  .switch-lg span{height:1.6rem;width:1.6rem;top:.2rem;left:.2rem}
+  .switch-lg[aria-checked=true] span{transform:translateX(1.75rem)}
+  .tagbox{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;min-height:2.6rem;border-radius:.75rem;border:1px solid #DCE8E7;background:#fff;padding:.35rem .5rem}
+  .tagbox:focus-within{border-color:#029B99;box-shadow:0 0 0 4px rgba(2,155,153,.12)}
+  .tagbox input{flex:1;min-width:7rem;border:0;outline:none;font-size:.85rem;padding:.2rem}
+  .tag{display:inline-flex;align-items:center;gap:.25rem;border-radius:.5rem;background:#E6F5F5;color:#026B69;padding:.15rem .25rem .15rem .5rem;font-size:.78rem;font-weight:600}
+  .tag button{display:inline-flex;height:1.1rem;width:1.1rem;align-items:center;justify-content:center;border-radius:.35rem;color:#026B69}
+  .tag button:hover{background:#C4E9E8}
+  .sec{border:1px solid #DCE8E7;border-radius:1rem;background:#fff}
+  .sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.75rem;padding:1rem 1.1rem}
+  .sec>summary::-webkit-details-marker{display:none}
+  .sec>summary .chev{transition:transform .2s}
+  .sec[open]>summary .chev{transform:rotate(90deg)}
+  .sec-body{border-top:1px solid #EDF4F3;padding:1.1rem}
+  .wa-bg{background-color:#EFE7DD;background-image:radial-gradient(rgba(0,0,0,.035) 1px,transparent 1px);background-size:14px 14px}
+  .daybtn[aria-pressed=true]{background:#028582;color:#fff;border-color:#028582}
+  .seg button[aria-pressed=true]{background:#fff;color:#026B69;box-shadow:0 1px 3px rgba(13,31,30,.12)}
+  table.tbl th{font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:#627B79;font-weight:600;text-align:left;padding:.6rem .75rem;background:#F6FAFA;white-space:nowrap}
+  table.tbl td{padding:.65rem .75rem;border-top:1px solid #EDF4F3;font-size:.85rem;vertical-align:top}
+  .skeleton{background:linear-gradient(90deg,#EDF4F3 25%,#F6FAFA 50%,#EDF4F3 75%);background-size:200% 100%;animation:sk 1.2s infinite}
+  @keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
+</style>
+
+<!-- Master switch -->
+<section id="switch-card" class="mb-6 overflow-hidden rounded-2xl border bg-white shadow-card">
+  <div class="skeleton h-24"></div>
+</section>
+
+<!-- Numbers at a glance -->
+<section id="kpis" class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5"></section>
+
+<!-- Tabs -->
+<div class="mb-5 flex gap-6 overflow-x-auto border-b border-stone-200" role="tablist">
+  <button class="tab" role="tab" data-tab="campaigns">Campaigns</button>
+  <button class="tab" role="tab" data-tab="activity">Activity</button>
+  <button class="tab" role="tab" data-tab="results">Results</button>
+  <button class="tab" role="tab" data-tab="customer">Customer lookup</button>
+  <button class="tab" role="tab" data-tab="settings">Settings</button>
+</div>
+
+<section data-panel="campaigns"></section>
+<section data-panel="activity" hidden></section>
+<section data-panel="results" hidden></section>
+<section data-panel="customer" hidden></section>
+<section data-panel="settings" hidden></section>
+
+<!-- Campaign editor (slide-over) -->
+<div id="editor" class="fixed inset-0 z-40 hidden" aria-modal="true" role="dialog">
+  <div class="absolute inset-0 bg-stone-900/40 backdrop-blur-[2px]" data-close-editor></div>
+  <div class="absolute inset-y-0 right-0 flex w-full max-w-6xl flex-col bg-stone-100 shadow-2xl">
+    <div class="flex items-center justify-between gap-3 border-b border-stone-200 bg-white px-5 py-4">
+      <div class="min-w-0">
+        <div id="ed-kicker" class="text-xs font-semibold uppercase tracking-wider text-brand-600"></div>
+        <h2 id="ed-title" class="truncate text-lg font-semibold text-stone-900"></h2>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-ghost" data-close-editor>Cancel</button>
+        <button type="button" class="btn btn-ghost hidden sm:inline-flex" id="ed-save-preview">Save &amp; preview</button>
+        <button type="button" class="btn btn-primary" id="ed-save">Save</button>
+      </div>
+    </div>
+    <div id="ed-error" class="hidden border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-800"></div>
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      <div class="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div id="ed-form" class="min-w-0 space-y-4"></div>
+        <aside class="lg:sticky lg:top-0 lg:self-start">
+          <div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card">
+            <div class="mb-3 flex items-center justify-between">
+              <div class="text-sm font-semibold text-stone-800">What the customer sees</div>
+              <span class="chip bg-stone-100 text-stone-600">sample data</span>
+            </div>
+            <div id="ed-preview"></div>
+          </div>
+          <div id="ed-checks" class="mt-4"></div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4" role="dialog" aria-modal="true">
+  <div class="absolute inset-0 bg-stone-900/40 backdrop-blur-[2px]" data-close-modal></div>
+  <div class="relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" id="modal-box">
+    <div class="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+      <h3 id="modal-title" class="text-base font-semibold text-stone-900"></h3>
+      <button type="button" class="rounded-lg p-1.5 text-stone-500 hover:bg-stone-100" data-close-modal aria-label="Close">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div id="modal-body" class="min-h-0 flex-1 overflow-y-auto px-5 py-4"></div>
+    <div id="modal-actions" class="flex flex-wrap justify-end gap-2 border-t border-stone-200 bg-stone-50 px-5 py-3"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="pointer-events-none fixed bottom-20 left-1/2 z-[60] -translate-x-1/2 lg:bottom-6"></div>
+
+<datalist id="dl-timezones">
+  <option value="America/New_York"><option value="America/Chicago"><option value="America/Denver">
+  <option value="America/Phoenix"><option value="America/Los_Angeles"><option value="America/Anchorage">
+  <option value="Pacific/Honolulu"><option value="America/Toronto"><option value="Europe/London">
+  <option value="Asia/Kolkata"><option value="UTC">
+</datalist>
+{% endblock %}
+
+{% block scripts %}
+<script>window.NUDGE_BOT_RESTRICTED = {{ 'true' if bot_restricted else 'false' }};</script>
+{# Raw: the script is full of WhatsApp's {{1}} and literal braces. #}
+{% raw %}
+<script>
+(() => {
+'use strict';
+
+// The editor, dialogs and toast cover the whole window. <main> runs a
+// transform animation, which would make it their containing block instead,
+// so they move up to <body>.
+['editor', 'modal', 'toast'].forEach((id) => document.body.appendChild(document.getElementById(id)));
+
+const API = '/api/nudges';
+const S = {enabled: false, settings: null, reference: null, options: null, campaigns: [],
+           last24: {}, stats30: null, tab: 'campaigns', sends: {offset: 0, limit: 25},
+           resultsDays: 30};
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g,
+  (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const clone = (o) => JSON.parse(JSON.stringify(o));
+// A message as WhatsApp shows it: *bold* and _italic_, everything else escaped.
+const wa = (s) => esc(s).replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/(^|\s)_([^_\n]+)_/g, '$1<i>$2</i>');
+const icon = (d, cls = 'h-4 w-4') => `<svg class="${cls}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="${d}"/></svg>`;
+const I = {
+  plus: 'M12 5v14M5 12h14', edit: 'M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4', eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 100-6 3 3 0 000 6z',
+  send: 'M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z', play: 'M6 4l14 8-14 8V4z', copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+  trash: 'M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3', phone: 'M7 2h10v20H7zM11 18h2',
+  check: 'M20 6L9 17l-5-5', x: 'M6 6l12 12M18 6L6 18', info: 'M12 8h.01M11 12h1v5h1M12 22a10 10 0 100-20 10 10 0 000 20z',
+  chev: 'M9 6l6 6-6 6', search: 'M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.3-4.3', link: 'M10 14a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 10a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1',
+  tag: 'M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01',
+};
+
+// --- words ------------------------------------------------------------------------------
+const KINDS = {
+  abandoned_cart: {label: 'Abandoned cart', short: 'Cart', cls: 'bg-amber-100 text-amber-800', dot: 'bg-amber-500',
+    icon: 'M3 3h2l2 12h11l2-8H6M9 20a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z',
+    blurb: 'Dishes left in the cart, no order placed. Usually inside WhatsApp\'s free 24-hour window.'},
+  abandoned_checkout: {label: 'Unpaid order', short: 'Unpaid', cls: 'bg-rose-100 text-rose-800', dot: 'bg-rose-500',
+    icon: 'M3 7h18v12H3zM3 11h18M7 15h3',
+    blurb: 'An order was placed but the payment link expired or failed. Their dishes go back in the cart.'},
+  repeat_purchase: {label: 'Repeat purchase', short: 'Repeat', cls: 'bg-sky-100 text-sky-800', dot: 'bg-sky-500',
+    icon: 'M4 12a8 8 0 0113.7-5.7L20 9M20 4v5h-5M20 12a8 8 0 01-13.7 5.7L4 15M4 20v-5h5',
+    blurb: 'Ordered before, nothing for a while. A reminder at 14 days, or a win-back with a coupon at 45.'},
+  never_ordered: {label: 'First order', short: 'First', cls: 'bg-violet-100 text-violet-800', dot: 'bg-violet-500',
+    icon: 'M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z',
+    blurb: 'Wrote in but never paid for an order.'},
+  targeted_offer: {label: 'Targeted offer', short: 'Offer', cls: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500',
+    icon: I.tag, blurb: 'Everyone your audience filters pick, once - an offer for a segment.'},
+};
+
+const STARTERS = [
+  {kind: 'abandoned_cart', name: 'Cart reminder', note: '1 hour after a cart is left'},
+  {kind: 'abandoned_checkout', name: 'Unpaid order follow-up', note: '3 hours after a link lapses'},
+  {kind: 'repeat_purchase', name: '14-day reminder', note: 'Two weeks after the last order'},
+  {kind: 'repeat_purchase', name: '45-day win-back', note: 'Lapsed customers, add a coupon',
+   config: {trigger: {days_since_last_order: 45}, message: {text: "Hi {first_name}, we miss you at {shop_name}! It's been {days_since_last_order} days - here's something to welcome you back."}}},
+  {kind: 'never_ordered', name: 'First order nudge', note: 'New contacts who never ordered'},
+  {kind: 'targeted_offer', name: 'Offer for a segment', note: 'Needs a coupon'},
+];
+
+const REASONS = {
+  trigger_not_met: 'Not in this trigger (no cart, not lapsed...)', opted_out: 'Replied STOP',
+  no_whatsapp_number: 'No WhatsApp number', bot_test_mode: 'Bot is in test mode (whitelist only)',
+  not_a_test_number: 'Not one of the test numbers', with_an_agent: 'Talking to one of your team',
+  order_in_progress: 'Has an order in progress', already_sent: 'Already nudged about this',
+  already_logged: 'Already logged in dry-run mode', gave_up_after_failures: 'Three sends failed - stopped trying',
+  campaign_limit: "Reached this campaign's limit", campaign_cooldown: 'In the campaign cooldown',
+  too_soon: 'Nudged too recently', daily_limit: 'Daily limit reached', weekly_limit: 'Weekly limit reached',
+  quiet_hours: 'Outside sending hours (their time)', not_a_send_day: 'Not a sending day',
+  outside_24h_window: 'No message from them in 24 h, and no template set',
+  us_marketing_blocked: 'US number - Meta blocks marketing templates', template_not_approved: 'Template not approved yet',
+  no_order_link: 'Ordering link unavailable',
+};
+const STATUS = {
+  sent: ['Sent', 'bg-emerald-100 text-emerald-800'], would_send: ['Would send', 'bg-emerald-100 text-emerald-800'],
+  failed: ['Failed', 'bg-red-100 text-red-700'], dry_run: ['Dry run', 'bg-sky-100 text-sky-800'],
+  test: ['Test', 'bg-violet-100 text-violet-800'], skipped: ['Skipped', 'bg-stone-100 text-stone-600'],
+  sending: ['Sending', 'bg-amber-100 text-amber-800'],
+};
+const statusChip = (s) => { const [t, c] = STATUS[s] || [s, 'bg-stone-100 text-stone-600']; return `<span class="chip ${c}">${esc(t)}</span>`; };
+
+const AUDIENCE_LABELS = {
+  min_paid_orders: 'At least … paid orders', max_paid_orders: 'At most … paid orders',
+  min_total_spent: 'Spent at least ($)', max_total_spent: 'Spent at most ($)',
+  last_order_within_days: 'Ordered within the last … days', last_order_older_than_days: 'Last order more than … days ago',
+  signed_up_within_days: 'Joined within the last … days', signed_up_older_than_days: 'Joined more than … days ago',
+  cuisines: 'Cuisine', kitchens: 'Kitchen', postal_codes: 'ZIP codes (prefixes, e.g. 088)',
+  lead_stages: 'Zoho lead stage', lead_sources: 'Lead source', has_email: 'Has an email address',
+  ordered_dishes: 'Has ordered any of these dishes', country_codes: 'Only these country codes',
+  exclude_country_codes: 'Never these country codes', whatsapp_numbers: 'Only these WhatsApp numbers',
+  exclude_whatsapp_numbers: 'Never these WhatsApp numbers',
+};
+function reasonText(r) {
+  if (!r) return '';
+  const i = r.indexOf(':');
+  const key = i < 0 ? r : r.slice(0, i), extra = i < 0 ? '' : r.slice(i + 1).trim();
+  if (key === 'audience') return `Audience: ${AUDIENCE_LABELS[extra] || extra}`;
+  if (key === 'coupon') return `Coupon: ${extra}`;
+  return REASONS[key] || r;
+}
+
+const TRIGGER = {
+  after_minutes: {label: 'Wait after it was left', type: 'int', unit: 'minutes', help: 'How long the cart or order sits untouched before the nudge.'},
+  within_hours: {label: 'Only if left within', type: 'int', unit: 'hours', help: 'Older ones are not worth chasing. Under 24 keeps carts inside the free message window.'},
+  min_value: {label: 'Minimum value', type: 'money', unit: '$', optional: true, help: 'Smallest cart or order total. Empty: any.'},
+  min_items: {label: 'Minimum dishes in the cart', type: 'int', unit: 'dishes'},
+  payment_statuses: {label: 'Which unpaid orders', type: 'checks', choices: [['expired', 'Payment link expired'], ['failed', 'Payment failed']]},
+  restore_cart: {label: 'Put the dishes back in their cart', type: 'bool', help: 'The link in the message opens with the unpaid order ready to go.'},
+  days_since_last_order: {label: 'Days since their last order', type: 'int', unit: 'days'},
+  max_days_since_last_order: {label: '…but not more than', type: 'int', unit: 'days', optional: true, help: 'Empty: no limit. Set it to separate a reminder (14-30) from a win-back (45+).'},
+  days_since_signup: {label: 'Days since they first wrote in', type: 'int', unit: 'days'},
+  max_days_since_signup: {label: '…but not more than', type: 'int', unit: 'days', optional: true},
+  require_details: {label: 'Only people who gave their name and email', type: 'bool'},
+};
+
+const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
+
+// --- helpers ------------------------------------------------------------------------------
+class ApiError extends Error { constructor(m, s) { super(m); this.status = s; } }
+async function api(path, {method = 'GET', body} = {}) {
+  const init = {method, credentials: 'same-origin', headers: {Accept: 'application/json'}};
+  if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
+  const res = await fetch(API + path, init);
+  let data = null;
+  try { data = await res.json(); } catch (_) { /* empty body */ }
+  if (res.status === 401) { signedOut(); throw new ApiError('Your sign-in has expired.', 401); }
+  if (!res.ok) {
+    const d = data && data.detail;
+    throw new ApiError(typeof d === 'string' ? d : Array.isArray(d) ? d.map(x => x.msg).join('; ') : `Request failed (${res.status})`, res.status);
+  }
+  return data;
+}
+function signedOut() {
+  toast('Your sign-in has expired. Sign in again to continue.', 'error');
+  setTimeout(() => { location.href = '/admin/login'; }, 1800);
+}
+let toastTimer;
+function toast(message, kind = 'ok') {
+  const tone = kind === 'error' ? 'bg-red-600' : kind === 'warn' ? 'bg-amber-600' : 'bg-stone-900';
+  $('toast').innerHTML = `<div class="pointer-events-auto flex max-w-md items-center gap-2 rounded-xl ${tone} px-4 py-3 text-sm font-medium text-white shadow-2xl">${icon(kind === 'error' ? I.info : I.check)}<span>${esc(message)}</span></div>`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').innerHTML = ''; }, kind === 'error' ? 6000 : 3200);
+}
+function store(key, value) { try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (_) { return null; } }
+const money = (v) => `$${Number(v || 0).toFixed(2)}`;
+const pct = (v) => `${Math.round((v || 0) * 1000) / 10}%`;
+function when(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+}
+function localInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso), p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function getPath(obj, path) { return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
+function setPath(obj, path, value) {
+  const keys = path.split('.'); let o = obj;
+  keys.slice(0, -1).forEach((k) => { if (o[k] == null || typeof o[k] !== 'object') o[k] = {}; o = o[k]; });
+  o[keys[keys.length - 1]] = value;
+}
+function readInput(el) {
+  const t = el.dataset.type || 'text';
+  if (t === 'bool') return el.checked;
+  if (t === 'tri') return el.value === '' ? null : el.value === 'true';
+  const raw = el.value.trim();
+  if (t === 'int') return raw === '' ? null : parseInt(raw, 10);
+  if (t === 'float') return raw === '' ? null : parseFloat(raw);
+  if (t === 'money') return raw === '' ? null : raw.replace(/[$,\s]/g, '');
+  if (t === 'opt') return raw === '' ? null : el.value;
+  return el.value;
+}
+function busy(button, on, label) {
+  if (!button) return;
+  if (on) { button.dataset.label = button.innerHTML; button.disabled = true; button.innerHTML = `<span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>${label ? esc(label) : ''}`; }
+  else { button.disabled = false; if (button.dataset.label) button.innerHTML = button.dataset.label; }
+}
+
+// --- modal --------------------------------------------------------------------------------
+function openModal({title, body, actions = [], wide = false}) {
+  $('modal-title').textContent = title;
+  $('modal-body').innerHTML = body;
+  $('modal-box').className = `relative flex max-h-[90vh] w-full ${wide ? 'max-w-5xl' : 'max-w-lg'} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`;
+  const bar = $('modal-actions');
+  bar.innerHTML = '';
+  (actions.length ? actions : [{label: 'Close', kind: 'ghost'}]).forEach((a) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = `btn btn-${a.kind || 'ghost'}`; b.innerHTML = a.html || esc(a.label);
+    b.addEventListener('click', async () => { if (a.onClick) { await a.onClick(b); } else { closeModal(); } });
+    bar.appendChild(b);
+  });
+  bar.classList.toggle('hidden', actions === null);
+  $('modal').classList.remove('hidden'); $('modal').classList.add('flex');
+}
+function closeModal() { $('modal').classList.add('hidden'); $('modal').classList.remove('flex'); }
+document.addEventListener('click', (e) => { if (e.target.closest('[data-close-modal]')) closeModal(); });
+function confirmBox(title, html, label, kind = 'primary') {
+  return new Promise((resolve) => {
+    openModal({title, body: `<div class="text-sm leading-relaxed text-stone-700">${html}</div>`, actions: [
+      {label: 'Cancel', kind: 'ghost', onClick: () => { closeModal(); resolve(false); }},
+      {label, kind, onClick: () => { closeModal(); resolve(true); }},
+    ]});
+  });
+}
+
+// --- loading ------------------------------------------------------------------------------
+async function loadAll() {
+  const [overview, reference, options, stats] = await Promise.all([
+    api(''), S.reference ? Promise.resolve(S.reference) : api('/reference'), api('/options'), api('/stats?days=30')]);
+  S.enabled = overview.enabled; S.settings = overview.settings; S.campaigns = overview.campaigns;
+  S.last24 = overview.last_24_hours || {}; S.reference = reference; S.options = options; S.stats30 = stats;
+  renderSwitch(); renderKpis(); renderCampaigns();
+  if (S.tab !== 'campaigns') showTab(S.tab);
+}
+async function refreshCampaigns() {
+  const [overview, stats] = await Promise.all([api(''), api('/stats?days=30')]);
+  S.enabled = overview.enabled; S.campaigns = overview.campaigns; S.last24 = overview.last_24_hours || {};
+  S.settings = overview.settings; S.stats30 = stats;
+  renderSwitch(); renderKpis(); renderCampaigns();
+}
+
+// --- master switch ------------------------------------------------------------------------
+function renderSwitch() {
+  const on = S.enabled, st = S.settings;
+  const chips = [];
+  if (st.dry_run) chips.push('<span class="chip bg-sky-100 text-sky-800">Dry run - nothing is really sent</span>');
+  if (st.test_numbers.length) chips.push(`<span class="chip bg-violet-100 text-violet-800">Test numbers only (${st.test_numbers.length})</span>`);
+  if (window.NUDGE_BOT_RESTRICTED) chips.push('<span class="chip bg-amber-100 text-amber-800">Bot test mode: whitelisted numbers only</span>');
+  const active = S.campaigns.filter((c) => c.is_active).length;
+  $('switch-card').className = `mb-6 overflow-hidden rounded-2xl border shadow-card ${on ? 'border-emerald-200 bg-gradient-to-r from-emerald-50 to-white' : 'border-stone-200 bg-white'}`;
+  $('switch-card').innerHTML = `
+    <div class="flex flex-wrap items-center gap-5 p-5">
+      <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${on ? 'bg-emerald-500 text-white' : 'bg-stone-200 text-stone-500'}">
+        ${icon('M12 2v10M18.4 6.6a9 9 0 11-12.8 0', 'h-6 w-6')}
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-base font-semibold text-stone-900">${on ? 'Nudges are ON' : 'Nudges are OFF'}</div>
+        <div class="text-sm text-stone-600">${on
+          ? `Active campaigns are checked every 5 minutes and sent within your rules. ${active ? `${active} active campaign${active === 1 ? '' : 's'}.` : '<b>No campaign is active yet</b>, so nothing goes out.'}`
+          : 'Nothing is sent to anyone - not by the schedule, not by Run now. Previews and test sends still work.'}</div>
+        ${chips.length ? `<div class="mt-2 flex flex-wrap gap-1.5">${chips.join('')}</div>` : ''}
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-sm font-semibold ${on ? 'text-emerald-700' : 'text-stone-500'}">${on ? 'On' : 'Off'}</span>
+        <button type="button" class="switch switch-lg" role="switch" aria-checked="${on}" id="master" aria-label="Turn nudges on or off"><span></span></button>
+      </div>
+    </div>`;
+  $('master').addEventListener('click', toggleMaster);
+}
+async function toggleMaster() {
+  const turningOn = !S.enabled;
+  if (turningOn) {
+    const active = S.campaigns.filter((c) => c.is_active).length;
+    const ok = await confirmBox('Turn nudges on?',
+      `Active campaigns (${active}) will start sending within 5 minutes, following every rule and limit you set.${S.settings.dry_run ? '<br><br><b>Dry run is on</b>, so nothing is really sent yet.' : ''}`,
+      'Turn on');
+    if (!ok) return;
+  }
+  try {
+    await api(turningOn ? '/enable' : '/disable', {method: 'POST'});
+    S.enabled = turningOn; renderSwitch();
+    toast(turningOn ? 'Nudges are on.' : 'Nudges are off - nothing will be sent.');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// --- numbers ------------------------------------------------------------------------------
+function renderKpis() {
+  const t = S.stats30.totals;
+  const tiles = [
+    ['Active campaigns', `${S.campaigns.filter((c) => c.is_active).length}<span class="text-sm font-medium text-stone-400"> / ${S.campaigns.length}</span>`],
+    ['Sent, last 24 h', `${S.last24.sent || 0}${S.last24.failed ? `<span class="text-sm font-medium text-red-500"> · ${S.last24.failed} failed</span>` : ''}`],
+    ['Orders after a nudge, 30 d', `${t.conversions}<span class="text-sm font-medium text-stone-400"> · ${pct(t.conversion_rate)}</span>`],
+    ['Revenue from them, 30 d', money(t.revenue)],
+    ['Opted out (STOP)', `${S.stats30.customers_opted_out}`],
+  ];
+  $('kpis').innerHTML = tiles.map(([label, value]) => `
+    <div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card">
+      <div class="text-xs font-medium text-stone-500">${label}</div>
+      <div class="mt-1 text-2xl font-semibold tracking-tight text-stone-900">${value}</div>
+    </div>`).join('');
+}
+
+// --- tabs ---------------------------------------------------------------------------------
+function showTab(name) {
+  S.tab = name; store('nudges.tab', name);
+  document.querySelectorAll('[role=tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
+  document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+  if (name === 'campaigns') renderCampaigns();
+  if (name === 'activity') renderActivity();
+  if (name === 'results') renderResults();
+  if (name === 'customer') renderCustomerTab();
+  if (name === 'settings') renderSettings();
+}
+document.querySelectorAll('[role=tab]').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+// --- campaigns ----------------------------------------------------------------------------
+const panel = (name) => document.querySelector(`[data-panel="${name}"]`);
+function triggerSummary(c) {
+  const t = c.config.trigger || {};
+  switch (c.kind) {
+    case 'abandoned_cart': return `${t.after_minutes} min after a cart is left · carts up to ${t.within_hours} h old${t.min_value ? ` · over ${money(t.min_value)}` : ''}`;
+    case 'abandoned_checkout': return `${t.after_minutes} min after the link ${(t.payment_statuses || []).join(' or ')} · up to ${t.within_hours} h`;
+    case 'repeat_purchase': return `${t.days_since_last_order}${t.max_days_since_last_order ? `-${t.max_days_since_last_order}` : '+'} days after their last order`;
+    case 'never_ordered': return `${t.days_since_signup}${t.max_days_since_signup ? `-${t.max_days_since_signup}` : '+'} days after they first wrote, no order yet`;
+    default: return 'Everyone the audience matches, once';
+  }
+}
+function audienceCount(c) {
+  const a = c.config.audience || {};
+  return Object.values(a).filter((v) => v !== null && !(Array.isArray(v) && !v.length)).length;
+}
+function scheduleSummary(c) {
+  const s = c.config.schedule || {}, w = s.send_window || S.settings.send_window;
+  const days = (s.days && s.days.length) ? s.days.map((d) => d[0].toUpperCase() + d.slice(1)).join(', ') : 'every day';
+  return `${w.start}-${w.end} · ${days}`;
+}
+function renderCampaigns() {
+  const box = panel('campaigns');
+  const stats = Object.fromEntries((S.stats30.campaigns || []).filter((e) => e.campaign_id).map((e) => [e.campaign_id, e]));
+  const head = `
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div class="text-sm text-stone-600">${S.campaigns.length ? 'Highest priority goes first when a customer matches more than one.' : ''}</div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-ghost" id="preview-all">${icon(I.eye)}Preview all</button>
+        <button type="button" class="btn btn-ghost" id="run-all" ${S.enabled ? '' : 'disabled title="Turn nudges on first"'}>${icon(I.play)}Run now</button>
+        <button type="button" class="btn btn-primary" id="new-campaign">${icon(I.plus)}New campaign</button>
+      </div>
+    </div>`;
+  if (!S.campaigns.length) {
+    box.innerHTML = head + `
+      <div class="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center">
+        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">${icon(I.send, 'h-6 w-6')}</div>
+        <h3 class="mt-3 text-base font-semibold text-stone-900">No campaigns yet</h3>
+        <p class="mx-auto mt-1 max-w-md text-sm text-stone-600">Start from one of these. Every campaign starts paused, so creating one never messages anybody.</p>
+        <div class="mx-auto mt-5 grid max-w-3xl gap-3 text-left sm:grid-cols-2 lg:grid-cols-3">
+          ${STARTERS.map((s, i) => `
+            <button type="button" data-starter="${i}" class="group rounded-xl border border-stone-200 p-4 text-left transition hover:border-brand-300 hover:bg-brand-50/40">
+              <span class="chip ${KINDS[s.kind].cls}">${esc(KINDS[s.kind].label)}</span>
+              <div class="mt-2 font-semibold text-stone-900">${esc(s.name)}</div>
+              <div class="text-xs text-stone-500">${esc(s.note)}</div>
+            </button>`).join('')}
+        </div>
+      </div>`;
+  } else {
+    box.innerHTML = head + `<div class="grid gap-4 xl:grid-cols-2">${S.campaigns.map((c) => campaignCard(c, stats[c.id])).join('')}</div>`;
+  }
+  $('new-campaign').addEventListener('click', pickKind);
+  $('preview-all').addEventListener('click', (e) => runPreview(null, e.currentTarget));
+  $('run-all').addEventListener('click', (e) => runNow(null, e.currentTarget));
+  box.querySelectorAll('[data-starter]').forEach((b) => b.addEventListener('click', () => {
+    const s = STARTERS[+b.dataset.starter]; openEditor(null, s.kind, s.name, s.config);
+  }));
+  box.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', (e) => campaignAction(b.dataset.act, b.dataset.id, e.currentTarget)));
+}
+function campaignCard(c, st) {
+  const k = KINDS[c.kind] || {label: c.kind, cls: 'bg-stone-100 text-stone-700', icon: I.send};
+  const text = (c.config.message || {}).text || '';
+  const tmpl = ((c.config.message || {}).template || {}).name;
+  const filters = audienceCount(c);
+  return `
+  <article class="flex flex-col rounded-2xl border ${c.is_active ? 'border-stone-200' : 'border-stone-200/70'} bg-white shadow-card">
+    <div class="flex items-start gap-3 p-4">
+      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${k.cls}">${icon(k.icon, 'h-5 w-5')}</div>
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="chip ${k.cls}">${esc(k.label)}</span>
+          ${c.is_active ? '<span class="chip bg-emerald-100 text-emerald-800">Active</span>' : '<span class="chip bg-stone-100 text-stone-600">Paused</span>'}
+          ${c.priority ? `<span class="chip bg-stone-100 text-stone-600">Priority ${c.priority}</span>` : ''}
+          ${c.promotion_code ? `<span class="chip bg-brand-50 text-brand-700">${icon(I.tag, 'h-3 w-3')}${esc(c.promotion_code)}</span>` : ''}
+        </div>
+        <h3 class="mt-1.5 truncate text-base font-semibold text-stone-900">${esc(c.name)}</h3>
+        <div class="mt-0.5 text-xs text-stone-500">${esc(triggerSummary(c))}</div>
+      </div>
+      <button type="button" class="switch" role="switch" aria-checked="${c.is_active}" data-act="toggle" data-id="${c.id}" title="${c.is_active ? 'Pause' : 'Activate'}"><span></span></button>
+    </div>
+    <div class="mx-4 rounded-xl bg-stone-50 px-3 py-2.5 text-sm text-stone-700">
+      <div class="line-clamp-3 whitespace-pre-line">${esc(text)}</div>
+    </div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3 text-xs text-stone-500">
+      <span>${icon('M12 8v4l3 2M12 22a10 10 0 100-20 10 10 0 000 20z', 'inline h-3.5 w-3.5 -mt-0.5')} ${esc(scheduleSummary(c))}</span>
+      <span>${filters ? `${filters} audience filter${filters === 1 ? '' : 's'}` : 'No audience filters'}</span>
+      <span>${tmpl ? `Template: ${esc(tmpl)}` : 'No template (24 h window only)'}</span>
+    </div>
+    <div class="mt-3 grid grid-cols-3 border-t border-stone-100 text-center">
+      <div class="py-2.5"><div class="text-lg font-semibold text-stone-900">${st ? st.sent : 0}</div><div class="text-[11px] text-stone-500">sent · 30 d</div></div>
+      <div class="border-x border-stone-100 py-2.5"><div class="text-lg font-semibold text-stone-900">${st ? st.conversions : 0}</div><div class="text-[11px] text-stone-500">orders after</div></div>
+      <div class="py-2.5"><div class="text-lg font-semibold text-stone-900">${money(st ? st.revenue : 0)}</div><div class="text-[11px] text-stone-500">revenue</div></div>
+    </div>
+    <div class="flex flex-wrap gap-1.5 border-t border-stone-100 p-3">
+      <button type="button" class="btn btn-ghost !px-2.5 !py-1.5 text-xs" data-act="edit" data-id="${c.id}">${icon(I.edit)}Edit</button>
+      <button type="button" class="btn btn-ghost !px-2.5 !py-1.5 text-xs" data-act="preview" data-id="${c.id}">${icon(I.eye)}Preview</button>
+      <button type="button" class="btn btn-ghost !px-2.5 !py-1.5 text-xs" data-act="test" data-id="${c.id}">${icon(I.phone)}Test send</button>
+      <button type="button" class="btn btn-ghost !px-2.5 !py-1.5 text-xs" data-act="run" data-id="${c.id}" ${S.enabled && c.is_active ? '' : 'disabled title="Needs nudges on and the campaign active"'}>${icon(I.play)}Run now</button>
+      <button type="button" class="btn btn-ghost !px-2.5 !py-1.5 text-xs" data-act="activity" data-id="${c.id}">${icon('M4 6h16M4 12h16M4 18h10')}Activity</button>
+      <span class="flex-1"></span>
+      <button type="button" class="btn btn-ghost !px-2.5 !py-1.5 text-xs" data-act="duplicate" data-id="${c.id}" title="Duplicate">${icon(I.copy)}</button>
+      <button type="button" class="btn btn-danger !px-2.5 !py-1.5 text-xs" data-act="delete" data-id="${c.id}" title="Delete">${icon(I.trash)}</button>
+    </div>
+  </article>`;
+}
+async function campaignAction(act, id, button) {
+  const c = S.campaigns.find((x) => x.id === id);
+  try {
+    if (act === 'edit') return openEditor(c);
+    if (act === 'preview') return runPreview(c, button);
+    if (act === 'test') return testSend(c);
+    if (act === 'run') return runNow(c, button);
+    if (act === 'activity') { S.sends = {offset: 0, limit: 25, campaign_id: id}; return showTab('activity'); }
+    if (act === 'toggle') {
+      await api(`/campaigns/${id}/${c.is_active ? 'pause' : 'activate'}`, {method: 'POST'});
+      toast(c.is_active ? `Paused "${c.name}".` : `"${c.name}" is active${S.enabled ? '' : ' - it sends once nudges are on'}.`);
+      return refreshCampaigns();
+    }
+    if (act === 'duplicate') {
+      const copy = await api(`/campaigns/${id}/duplicate`, {method: 'POST'});
+      toast(`Made "${copy.name}" (paused).`); await refreshCampaigns(); return openEditor(copy);
+    }
+    if (act === 'delete') {
+      if (!await confirmBox('Delete this campaign?', `<b>${esc(c.name)}</b> will be deleted. Messages it already sent stay in the activity log.`, 'Delete', 'danger')) return;
+      await api(`/campaigns/${id}`, {method: 'DELETE'}); toast('Deleted.'); return refreshCampaigns();
+    }
+  } catch (e) { toast(e.message, 'error'); }
+}
+function pickKind() {
+  openModal({title: 'What should this campaign do?', wide: true, actions: [{label: 'Cancel', kind: 'ghost'}], body: `
+    <div class="grid gap-3 sm:grid-cols-2">
+      ${Object.entries(KINDS).map(([kind, k]) => `
+        <button type="button" data-kind="${kind}" class="flex gap-3 rounded-xl border border-stone-200 p-4 text-left transition hover:border-brand-300 hover:bg-brand-50/40">
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${k.cls}">${icon(k.icon, 'h-5 w-5')}</span>
+          <span><span class="block font-semibold text-stone-900">${esc(k.label)}</span><span class="mt-0.5 block text-xs leading-snug text-stone-600">${esc(k.blurb)}</span></span>
+        </button>`).join('')}
+    </div>`});
+  $('modal-body').querySelectorAll('[data-kind]').forEach((b) => b.addEventListener('click', () => {
+    closeModal(); openEditor(null, b.dataset.kind, `${KINDS[b.dataset.kind].label} campaign`);
+  }));
+}
+
+// --- preview, test, run -------------------------------------------------------------------
+function outcomesTable(report, {showSkipped = true} = {}) {
+  const rows = report.outcomes.filter((o) => showSkipped || o.status !== 'skipped');
+  if (!rows.length) return '<div class="rounded-xl bg-stone-50 p-6 text-center text-sm text-stone-500">Nobody right now.</div>';
+  return `<div class="overflow-x-auto rounded-xl border border-stone-200"><table class="tbl w-full">
+    <thead><tr><th>Customer</th><th>Campaign</th><th>Result</th><th>Message / reason</th></tr></thead>
+    <tbody>${rows.map((o) => `<tr>
+      <td><div class="font-medium text-stone-900">${esc(o.name || 'No name')}</div><div class="text-xs text-stone-500">+${esc(o.whatsapp_number)}</div></td>
+      <td class="text-xs text-stone-600">${esc(o.campaign)}</td>
+      <td>${statusChip(o.status)}${o.channel ? `<div class="mt-1 text-[11px] text-stone-500">${esc(o.channel === 'template' ? 'template' : o.channel === 'button' ? 'message + button' : 'message')}</div>` : ''}</td>
+      <td class="max-w-md text-sm">${o.status === 'skipped' ? `<span class="text-stone-600">${esc(reasonText(o.reason))}</span>` : `<div class="whitespace-pre-line text-stone-800">${wa(o.message || '')}</div>`}</td>
+    </tr>`).join('')}</tbody></table></div>
+    ${report.outcomes_truncated ? `<p class="mt-2 text-xs text-stone-500">${report.outcomes_truncated} more not shown.</p>` : ''}`;
+}
+function reportSummary(report) {
+  const t = report.totals;
+  const reasons = Object.entries(t.skipped_by_reason || {}).sort((a, b) => b[1] - a[1]);
+  const camp = report.campaigns.filter((c) => c.status !== 'ran').map((c) =>
+    `<li><b>${esc(c.name)}</b>: ${esc(c.status === 'paused' ? 'paused' : c.status === 'invalid' ? `needs fixing - ${c.reason}` : c.status.replace('_', ' '))}</li>`).join('');
+  return `
+    <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      ${[['Would send / sent', (t.would_send || 0) + (t.sent || 0)], ['Dry run', t.dry_run || 0], ['Failed', t.failed || 0], ['Skipped', t.skipped || 0]].map(([l, v]) =>
+        `<div class="rounded-xl border border-stone-200 p-3"><div class="text-xs text-stone-500">${l}</div><div class="text-xl font-semibold text-stone-900">${v}</div></div>`).join('')}
+    </div>
+    ${reasons.length ? `<div class="mb-4 flex flex-wrap gap-1.5">${reasons.map(([r, n]) => `<span class="chip bg-stone-100 text-stone-700">${esc(reasonText(r))}: ${n}</span>`).join('')}</div>` : ''}
+    ${camp ? `<ul class="mb-4 list-disc space-y-1 rounded-xl bg-amber-50 py-2 pl-8 pr-3 text-sm text-amber-900">${camp}</ul>` : ''}
+    ${report.stopped === 'run_cap' ? '<p class="mb-4 text-sm text-amber-800">Stopped at the per-run limit; the rest go on the next run.</p>' : ''}`;
+}
+async function runPreview(c, button) {
+  busy(button, true, 'Checking');
+  try {
+    const report = await api(c ? `/campaigns/${c.id}/preview?limit=300` : '/preview?limit=300', {method: 'POST'});
+    let showSkipped = false;
+    const draw = () => {
+      $('modal-body').innerHTML = `
+        <p class="mb-4 text-sm text-stone-600">Who would get ${c ? `<b>${esc(c.name)}</b>` : 'the active campaigns'} if it ran right now, with each person's real message. <b>Nothing has been sent.</b></p>
+        ${reportSummary(report)}
+        <label class="mb-3 inline-flex items-center gap-2 text-sm text-stone-700"><input type="checkbox" id="show-skipped" ${showSkipped ? 'checked' : ''} class="h-4 w-4 rounded border-stone-300 text-brand-600"> Show the people left out, and why</label>
+        ${outcomesTable(report, {showSkipped})}`;
+      $('show-skipped').addEventListener('change', (e) => { showSkipped = e.target.checked; draw(); });
+    };
+    openModal({title: c ? `Preview: ${c.name}` : 'Preview: all active campaigns', wide: true, body: '', actions: [{label: 'Close', kind: 'ghost'}]});
+    draw();
+  } catch (e) { toast(e.message, 'error'); } finally { busy(button, false); }
+}
+function testSend(c) {
+  const last = store('nudges.testNumber') || '';
+  openModal({title: `Test send: ${c.name}`, body: `
+    <p class="text-sm text-stone-600">Sends this campaign's message to one phone now, with that customer's real cart and orders - or sample ones if the number is not a customer. It ignores every rule and limit, and works with nudges off.</p>
+    <label class="lbl mt-4" for="test-number">WhatsApp number, with country code</label>
+    <input id="test-number" class="field" inputmode="tel" placeholder="17325550142" value="${esc(last)}">
+    <p class="help">WhatsApp only delivers a normal message within 24 hours of that phone's last message to the bot - send the bot "hi" from it first.</p>
+    <div id="test-result" class="mt-4"></div>`,
+    actions: [{label: 'Close', kind: 'ghost'}, {html: `${icon(I.send)}Send test`, kind: 'primary', onClick: async (b) => {
+      const number = $('test-number').value.trim();
+      if (!number) { $('test-number').focus(); return; }
+      store('nudges.testNumber', number);
+      busy(b, true, 'Sending');
+      try {
+        const r = await api(`/campaigns/${c.id}/test`, {method: 'POST', body: {whatsapp_number: number}});
+        $('test-result').innerHTML = r.sent
+          ? `<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900"><b>Sent</b> as ${esc(r.channel === 'template' ? 'a template' : r.channel === 'button' ? 'a message with a button' : 'a message')}${r.used_sample_data ? ', with sample data' : ''}.<div class="mt-2 whitespace-pre-line rounded-lg bg-white p-2.5 text-stone-800">${wa(r.message)}</div></div>`
+          : `<div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><b>Not sent:</b> ${esc(reasonText(r.reason))}.<div class="mt-1">${esc(r.hint || '')}</div></div>`;
+      } catch (e) {
+        $('test-result').innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">${esc(e.message)}</div>`;
+      } finally { busy(b, false); }
+    }}]});
+  setTimeout(() => $('test-number').focus(), 50);
+}
+async function runNow(c, button) {
+  busy(button, true, 'Checking');
+  let report;
+  try { report = await api(c ? `/campaigns/${c.id}/preview?limit=1` : '/preview?limit=1', {method: 'POST'}); }
+  catch (e) { toast(e.message, 'error'); return; } finally { busy(button, false); }
+  const n = report.totals.would_send;
+  if (!n) { toast('Nobody qualifies right now - nothing to send.', 'warn'); return; }
+  const capped = Math.min(n, S.settings.max_sends_per_run);
+  const ok = await confirmBox(c ? `Run "${c.name}" now?` : 'Run all active campaigns now?',
+    `${S.settings.dry_run ? '<b>Dry run is on</b>: these are logged, not sent. ' : ''}<b>${capped}</b> customer${capped === 1 ? '' : 's'} ${S.settings.dry_run ? 'would get' : 'will get'} a WhatsApp message now${n > capped ? ` (the per-run limit holds back ${n - capped} for the next run)` : ''}.`,
+    S.settings.dry_run ? 'Log them' : 'Send now');
+  if (!ok) return;
+  busy(button, true, 'Sending');
+  try {
+    const r = await api(c ? `/campaigns/${c.id}/run?limit=300` : '/run?limit=300', {method: 'POST'});
+    const t = r.totals;
+    toast(`${t.sent} sent${t.dry_run ? `, ${t.dry_run} logged (dry run)` : ''}${t.failed ? `, ${t.failed} failed` : ''}.`, t.failed ? 'warn' : 'ok');
+    await refreshCampaigns();
+  } catch (e) { toast(e.message, 'error'); } finally { busy(button, false); }
+}
+
+// --- the editor ---------------------------------------------------------------------------
+let E = null;           // the campaign being edited
+let lastText = null;    // the last focused message field, for inserting placeholders
+function defaultsFor(kind) { return clone(S.reference.kinds[kind].defaults); }
+function deepMerge(base, extra) {
+  const out = clone(base);
+  Object.entries(extra || {}).forEach(([k, v]) => {
+    out[k] = (v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object') ? deepMerge(out[k], v) : clone(v);
+  });
+  return out;
+}
+function openEditor(campaign, kind, name, extraConfig) {
+  if (campaign) {
+    const defaults = defaultsFor(campaign.kind);
+    E = {id: campaign.id, name: campaign.name, kind: campaign.kind, priority: campaign.priority,
+         is_active: campaign.is_active, promotion_code: campaign.promotion_code || '',
+         config: deepMerge(defaults, campaign.config)};
+  } else {
+    E = {id: null, name: name || 'New campaign', kind, priority: 0, is_active: false, promotion_code: '',
+         config: deepMerge(defaultsFor(kind), extraConfig || {})};
+  }
+  $('ed-error').classList.add('hidden');
+  $('editor').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  drawEditor();
+}
+function closeEditor() { $('editor').classList.add('hidden'); document.body.style.overflow = ''; E = null; }
+document.querySelectorAll('[data-close-editor]').forEach((el) => el.addEventListener('click', closeEditor));
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('modal').classList.contains('hidden')) closeModal(); else if (E) closeEditor();
+});
+
+function section(id, title, sub, body, open = true) {
+  return `<details class="sec" ${open ? 'open' : ''} data-sec="${id}">
+    <summary><span class="chev text-stone-400">${icon(I.chev)}</span>
+      <span class="min-w-0 flex-1"><span class="block text-sm font-semibold text-stone-900">${title}</span><span class="block text-xs text-stone-500">${sub}</span></span></summary>
+    <div class="sec-body">${body}</div></details>`;
+}
+const inputHtml = (path, value, type, attrs = '') =>
+  `<input class="field" data-path="${path}" data-type="${type}" value="${esc(value ?? '')}" ${attrs}>`;
+function numberField(path, label, value, {unit, help, type = 'int', min = 0, step = 1, placeholder = ''} = {}) {
+  return `<div><label class="lbl">${label}</label>
+    <div class="flex items-center gap-2">${inputHtml(path, value, type, `type="number" min="${min}" step="${step}" placeholder="${esc(placeholder)}"`)}${unit ? `<span class="shrink-0 text-xs text-stone-500">${unit}</span>` : ''}</div>
+    ${help ? `<p class="help">${help}</p>` : ''}</div>`;
+}
+function boolField(path, label, value, help) {
+  return `<label class="flex items-start gap-3 rounded-xl border border-stone-200 p-3">
+    <input type="checkbox" data-path="${path}" data-type="bool" ${value ? 'checked' : ''} class="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600">
+    <span><span class="block text-sm font-medium text-stone-800">${label}</span>${help ? `<span class="help block">${help}</span>` : ''}</span></label>`;
+}
+function tagField(path, label, values, {list, help, placeholder = 'Type and press Enter'} = {}) {
+  return `<div><label class="lbl">${label}</label>
+    <div class="tagbox" data-tags="${path}">${(values || []).map((v, i) => `<span class="tag">${esc(v)}<button type="button" data-untag="${i}" aria-label="Remove">${icon(I.x, 'h-3 w-3')}</button></span>`).join('')}
+      <input ${list ? `list="${list}"` : ''} placeholder="${esc(placeholder)}"></div>
+    ${help ? `<p class="help">${help}</p>` : ''}</div>`;
+}
+function triField(path, label, value) {
+  return `<div><label class="lbl">${label}</label>
+    <select class="field" data-path="${path}" data-type="tri">
+      <option value="" ${value == null ? 'selected' : ''}>Doesn't matter</option>
+      <option value="true" ${value === true ? 'selected' : ''}>Yes</option>
+      <option value="false" ${value === false ? 'selected' : ''}>No</option></select></div>`;
+}
+
+function placeholdersFor(kind, hasCoupon) {
+  return Object.entries(S.reference.placeholders).map(([name, p]) => ({
+    name, description: p.description,
+    ok: p.kinds.includes(kind) && (!name.startsWith('coupon_') || hasCoupon),
+    why: !p.kinds.includes(kind) ? 'Not available for this kind' : (!hasCoupon && name.startsWith('coupon_')) ? 'Pick a coupon first' : '',
+  }));
+}
+
+function drawEditor() {
+  const c = E.config, k = KINDS[E.kind];
+  $('ed-kicker').textContent = `${E.id ? 'Edit' : 'New'} · ${k.label}`;
+  $('ed-title').textContent = E.name || 'Untitled';
+  const coupons = S.options.coupons;
+  const triggerOpts = S.reference.kinds[E.kind].trigger_options;
+  const m = c.message, t = m.template, s = c.schedule, l = c.limits;
+
+  const basics = `
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div class="sm:col-span-2"><label class="lbl">Campaign name</label>${inputHtml('name', E.name, 'text', 'maxlength="120"')}<p class="help">Only your team sees this - and Zoho, on each customer's timeline.</p></div>
+      <div><label class="lbl">Kind</label>
+        <select class="field" id="ed-kind">${Object.entries(KINDS).map(([key, v]) => `<option value="${key}" ${key === E.kind ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select>
+        <p class="help">${esc(k.blurb)}</p></div>
+      <div><label class="lbl">Priority</label>${inputHtml('priority', E.priority, 'int', 'type="number" min="-1000" max="1000"')}<p class="help">Higher goes first when a customer matches several campaigns in one run.</p></div>
+      <div class="sm:col-span-2"><label class="lbl">Coupon</label>
+        <select class="field" data-path="promotion_code" data-type="text">
+          <option value="">No coupon</option>
+          ${coupons.map((p) => `<option value="${esc(p.code)}" ${p.code === E.promotion_code ? 'selected' : ''}>${esc(p.code)} - ${esc(p.headline)} · ${esc(p.title)}${p.status !== 'live' ? ` (${esc(p.status)})` : ''}${p.placement === 'hidden' ? ' · hidden' : ''}</option>`).join('')}
+        </select>
+        <p class="help">Make codes on the <a class="font-medium text-brand-700 underline" href="/admin/promotions" target="_blank">Offers page</a>. A <b>hidden</b> coupon is ideal: only the people you message can use it.</p></div>
+      <div class="sm:col-span-2">${boolField('is_active', 'Active', E.is_active, 'Paused campaigns never send. Nothing sends at all while the master switch is off.')}</div>
+    </div>`;
+
+  const trigger = triggerOpts.length ? `<div class="grid gap-4 sm:grid-cols-2">${triggerOpts.map((name) => {
+    const meta = TRIGGER[name], value = c.trigger[name], path = `config.trigger.${name}`;
+    if (meta.type === 'bool') return `<div class="sm:col-span-2">${boolField(path, meta.label, value, meta.help)}</div>`;
+    if (meta.type === 'checks') return `<div class="sm:col-span-2"><label class="lbl">${meta.label}</label><div class="flex flex-wrap gap-2">${meta.choices.map(([v, lbl]) =>
+      `<label class="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-2 text-sm"><input type="checkbox" data-check="${path}" value="${v}" ${(value || []).includes(v) ? 'checked' : ''} class="h-4 w-4 rounded border-stone-300 text-brand-600">${lbl}</label>`).join('')}</div></div>`;
+    return numberField(path, meta.label, value, {unit: meta.unit, help: meta.help, type: meta.type === 'money' ? 'money' : 'int', step: meta.type === 'money' ? '0.01' : 1, placeholder: meta.optional ? 'No limit' : ''});
+  }).join('')}</div>` : '<p class="text-sm text-stone-600">A targeted offer has no timing: everyone your audience picks qualifies, once each (see Limits). Use the audience below and the schedule to aim it.</p>';
+
+  const a = c.audience;
+  const opt = S.options;
+  const audience = `
+    <p class="mb-4 text-sm text-stone-600">Every filter you leave empty lets everyone through. They all apply together.</p>
+    <div class="space-y-5">
+      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Order history</div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          ${numberField('config.audience.min_paid_orders', AUDIENCE_LABELS.min_paid_orders, a.min_paid_orders, {placeholder: 'Any'})}
+          ${numberField('config.audience.max_paid_orders', AUDIENCE_LABELS.max_paid_orders, a.max_paid_orders, {placeholder: 'Any'})}
+          ${numberField('config.audience.min_total_spent', AUDIENCE_LABELS.min_total_spent, a.min_total_spent, {type: 'money', step: '0.01', placeholder: 'Any'})}
+          ${numberField('config.audience.max_total_spent', AUDIENCE_LABELS.max_total_spent, a.max_total_spent, {type: 'money', step: '0.01', placeholder: 'Any'})}
+          ${numberField('config.audience.last_order_within_days', AUDIENCE_LABELS.last_order_within_days, a.last_order_within_days, {min: 1, placeholder: 'Any'})}
+          ${numberField('config.audience.last_order_older_than_days', AUDIENCE_LABELS.last_order_older_than_days, a.last_order_older_than_days, {min: 1, placeholder: 'Any'})}
+          <div class="sm:col-span-2">${tagField('config.audience.ordered_dishes', AUDIENCE_LABELS.ordered_dishes, a.ordered_dishes, {list: 'dl-dishes', help: 'Dish names or menu codes; any one of them counts.'})}</div>
+        </div></div>
+      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">When they joined</div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          ${numberField('config.audience.signed_up_within_days', AUDIENCE_LABELS.signed_up_within_days, a.signed_up_within_days, {min: 1, placeholder: 'Any'})}
+          ${numberField('config.audience.signed_up_older_than_days', AUDIENCE_LABELS.signed_up_older_than_days, a.signed_up_older_than_days, {placeholder: 'Any'})}
+        </div></div>
+      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Taste and place</div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          ${tagField('config.audience.cuisines', AUDIENCE_LABELS.cuisines, a.cuisines, {list: 'dl-cuisines'})}
+          <div><label class="lbl">${AUDIENCE_LABELS.kitchens}</label><div class="flex flex-wrap gap-2">${opt.kitchens.length ? opt.kitchens.map((kk) =>
+            `<label class="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-2 text-sm"><input type="checkbox" data-check="config.audience.kitchens" value="${esc(kk.code)}" ${(a.kitchens || []).includes(kk.code) ? 'checked' : ''} class="h-4 w-4 rounded border-stone-300 text-brand-600">${esc(kk.name)}</label>`).join('') : '<span class="text-sm text-stone-500">No kitchens yet</span>'}</div>
+            <p class="help">Their chosen kitchen, or the one their last order came from. None ticked: any.</p></div>
+          <div class="sm:col-span-2">${tagField('config.audience.postal_codes', AUDIENCE_LABELS.postal_codes, a.postal_codes)}</div>
+        </div></div>
+      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Zoho and contact</div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2"><label class="lbl">${AUDIENCE_LABELS.lead_stages}</label><div class="flex flex-wrap gap-2">${S.reference.lead_stages.map((st) =>
+            `<label class="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-1.5 text-xs"><input type="checkbox" data-check="config.audience.lead_stages" value="${esc(st)}" ${(a.lead_stages || []).includes(st) ? 'checked' : ''} class="h-3.5 w-3.5 rounded border-stone-300 text-brand-600">${esc(st)}</label>`).join('')}</div>
+            <p class="help">The stage the bot keeps in step with Zoho. None ticked: any.</p></div>
+          ${tagField('config.audience.lead_sources', AUDIENCE_LABELS.lead_sources, a.lead_sources, {list: 'dl-sources'})}
+          ${triField('config.audience.has_email', AUDIENCE_LABELS.has_email, a.has_email)}
+        </div></div>
+      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Phone numbers</div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          ${tagField('config.audience.country_codes', AUDIENCE_LABELS.country_codes, a.country_codes, {help: '1 = US and Canada, 91 = India. Empty: any.'})}
+          ${tagField('config.audience.exclude_country_codes', AUDIENCE_LABELS.exclude_country_codes, a.exclude_country_codes)}
+          ${tagField('config.audience.whatsapp_numbers', AUDIENCE_LABELS.whatsapp_numbers, a.whatsapp_numbers, {help: 'With country code. Empty: everyone.'})}
+          ${tagField('config.audience.exclude_whatsapp_numbers', AUDIENCE_LABELS.exclude_whatsapp_numbers, a.exclude_whatsapp_numbers)}
+        </div></div>
+    </div>`;
+
+  const chips = placeholdersFor(E.kind, !!E.promotion_code).map((p) => `<button type="button" data-ph="${p.name}" ${p.ok ? '' : 'disabled'} title="${esc(p.ok ? p.description : p.why)}"
+      class="rounded-lg border px-2 py-1 text-[11px] font-mono ${p.ok ? 'border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100' : 'cursor-not-allowed border-stone-200 bg-stone-50 text-stone-400'}">{${p.name}}</button>`).join('');
+  const message = `
+    <label class="lbl">Message</label>
+    <textarea class="field font-[inherit]" rows="6" maxlength="900" data-path="config.message.text" data-type="text" data-text>${esc(m.text)}</textarea>
+    <div class="mt-1 flex justify-between text-[11px] text-stone-500"><span>WhatsApp formatting works: *bold*, _italic_. Write {{ and }} for a literal brace.</span><span id="ed-count">${m.text.length}/900</span></div>
+    <div class="mt-3"><div class="mb-1.5 text-xs font-semibold text-stone-600">Insert a placeholder - click to add it where the cursor is</div><div class="flex flex-wrap gap-1.5">${chips}</div></div>
+    <div class="mt-5 grid gap-4 sm:grid-cols-2">
+      <div class="sm:col-span-2"><label class="lbl">Button under the message</label>
+        <div class="seg inline-flex rounded-xl bg-stone-100 p-1 text-sm" data-seg="config.message.button">
+          ${[['order_link', 'Their ordering page'], ['url', 'A link of mine'], ['none', 'No button']].map(([v, lbl]) =>
+            `<button type="button" data-value="${v}" aria-pressed="${m.button === v}" class="rounded-lg px-3 py-1.5 font-medium text-stone-600">${lbl}</button>`).join('')}
+        </div></div>
+      ${m.button !== 'none' ? `<div><label class="lbl">Button text</label>${inputHtml('config.message.button_text', m.button_text, 'text', 'maxlength="20"')}<p class="help">Up to 20 characters.</p></div>` : ''}
+      ${m.button === 'url' ? `<div><label class="lbl">Link</label>${inputHtml('config.message.button_url', m.button_url, 'opt', 'placeholder="https://..."')}</div>` : ''}
+    </div>
+    <div class="mt-6 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+      <div class="text-sm font-semibold text-stone-900">Outside WhatsApp's 24-hour window</div>
+      <p class="mt-1 text-xs leading-relaxed text-stone-700">A normal message can only go within 24 hours of the customer's last message to the bot. After that WhatsApp accepts only an <b>approved template</b>. Leave the name empty and those customers are skipped. Meta also does not deliver marketing templates to US numbers (see Settings).</p>
+      <div class="mt-3 grid gap-4 sm:grid-cols-2">
+        <div><label class="lbl">Template name in Gallabox</label>${inputHtml('config.message.template.name', t.name, 'opt', 'placeholder="e.g. cart_reminder_v1"')}</div>
+        <div><label class="lbl">Template button</label>
+          <select class="field" data-path="config.message.template.button" data-type="text">
+            <option value="none" ${t.button === 'none' ? 'selected' : ''}>No button</option>
+            <option value="order_link" ${t.button === 'order_link' ? 'selected' : ''}>Their ordering page (URL button ending in {{1}})</option></select></div>
+        <div class="sm:col-span-2"><label class="lbl">Template values, in order</label>
+          <div class="space-y-2" id="ed-params">${(t.params || []).map((p, i) => `
+            <div class="flex items-center gap-2"><span class="w-10 shrink-0 text-center font-mono text-xs text-stone-500">{{${i + 1}}}</span>
+              <input class="field" data-param="${i}" data-text value="${esc(p)}" placeholder="e.g. {first_name}">
+              <button type="button" class="btn btn-ghost !px-2" data-unparam="${i}" aria-label="Remove">${icon(I.x)}</button></div>`).join('')}</div>
+          <button type="button" class="btn btn-ghost mt-2 !py-1.5 text-xs" id="ed-add-param" ${(t.params || []).length >= 10 ? 'disabled' : ''}>${icon(I.plus)}Add a value</button></div>
+        <div class="sm:col-span-2">${boolField('config.message.template.always', 'Always use the template, even inside the window', t.always)}</div>
+      </div>
+    </div>`;
+
+  const ownHours = !!s.send_window;
+  const win = s.send_window || S.settings.send_window;
+  const schedule = `
+    <div class="space-y-4">
+      <div><label class="lbl">Sending hours (the customer's local time)</label>
+        <div class="seg inline-flex rounded-xl bg-stone-100 p-1 text-sm" id="ed-hours">
+          <button type="button" data-own="0" aria-pressed="${!ownHours}" class="rounded-lg px-3 py-1.5 font-medium text-stone-600">Shop hours (${esc(S.settings.send_window.start)}-${esc(S.settings.send_window.end)})</button>
+          <button type="button" data-own="1" aria-pressed="${ownHours}" class="rounded-lg px-3 py-1.5 font-medium text-stone-600">Hours for this campaign</button></div>
+        ${ownHours ? `<div class="mt-3 grid max-w-sm grid-cols-2 gap-3">
+          <div><label class="lbl">From</label>${inputHtml('config.schedule.send_window.start', win.start, 'text', 'type="time"')}</div>
+          <div><label class="lbl">Until</label>${inputHtml('config.schedule.send_window.end', win.end, 'text', 'type="time"')}</div></div>
+          <p class="help">An end before the start runs overnight.</p>` : ''}</div>
+      <div><label class="lbl">Days</label>
+        <div class="flex flex-wrap gap-1.5">${DAYS.map(([d, lbl]) => `<button type="button" class="daybtn rounded-lg border border-stone-200 px-3 py-1.5 text-sm font-medium text-stone-600" data-day="${d}" aria-pressed="${(s.days || []).includes(d)}">${lbl}</button>`).join('')}</div>
+        <p class="help">None selected: every day.</p></div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div><label class="lbl">Starts</label><input type="datetime-local" class="field" data-when="starts_at" value="${localInput(s.starts_at)}"><p class="help">Empty: straight away. Your computer's time.</p></div>
+        <div><label class="lbl">Ends</label><input type="datetime-local" class="field" data-when="ends_at" value="${localInput(s.ends_at)}"><p class="help">Empty: no end. Good for a limited-time offer.</p></div>
+      </div>
+    </div>`;
+
+  const limits = `
+    <div class="grid gap-4 sm:grid-cols-2">
+      ${numberField('config.limits.max_per_customer', 'Most times one customer gets it, ever', l.max_per_customer, {min: 1, placeholder: 'No limit', help: 'Empty: no limit (each new cart or order can be nudged).'})}
+      ${numberField('config.limits.cooldown_days', 'Days before the same customer can get it again', l.cooldown_days, {type: 'float', step: '0.5', unit: 'days'})}
+      ${numberField('config.limits.daily_cap', 'Most sends per day, everyone together', l.daily_cap, {min: 1, placeholder: 'No limit'})}
+      ${numberField('config.limits.per_run_cap', 'Most sends per 5-minute run', l.per_run_cap, {min: 1, placeholder: 'No limit'})}
+    </div>
+    <p class="mt-3 text-xs text-stone-500">On top of these, the shop-wide limits in Settings apply across all campaigns: ${S.settings.max_per_customer_per_day} per customer per day, ${S.settings.max_per_customer_per_week} per week, at least ${S.settings.min_hours_between} hours apart.</p>`;
+
+  const offer = E.promotion_code ? `
+    <div class="grid gap-3 sm:grid-cols-2">
+      ${boolField('config.offer.auto_apply', 'Apply the code for them', c.offer.auto_apply, 'Their ordering page opens with it already applied (never replaces a code they chose).')}
+      ${boolField('config.offer.require_eligible', 'Skip people who cannot use it', c.offer.require_eligible, 'First order only, already used, used up, wrong kitchen...')}
+    </div>` : '<p class="text-sm text-stone-600">Pick a coupon in Basics to set how it is offered.</p>';
+
+  const zoho = `
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div><label class="lbl">Tag on their Lead/Contact</label>${inputHtml('config.zoho.tag', c.zoho.tag, 'opt', 'maxlength="50" placeholder="No tag"')}<p class="help">Build Zoho views and email follow-ups from it. Zoho creates the tag the first time.</p></div>
+      <div class="pt-6">${boolField('config.zoho.note', 'Add a note to their timeline', c.zoho.note, 'The campaign, time, coupon and exact message.')}</div>
+    </div>`;
+
+  const advanced = `
+    <p class="mb-2 text-sm text-stone-600">The whole campaign set-up as JSON - every option, exactly as saved. Edit it and press Apply to load it into the form above.</p>
+    <textarea id="ed-json" class="field font-mono text-xs" rows="14" spellcheck="false"></textarea>
+    <div class="mt-2 flex gap-2"><button type="button" class="btn btn-ghost" id="ed-json-refresh">Reload from the form</button><button type="button" class="btn btn-ghost" id="ed-json-apply">Apply JSON</button></div>`;
+
+  $('ed-form').innerHTML =
+    section('basics', 'Basics', 'Name, kind, coupon, on or off', basics) +
+    section('trigger', 'When it fires', 'What has to happen first', trigger) +
+    section('audience', 'Who gets it', 'Filters on order history, taste, place and contact', audience, false) +
+    section('message', 'Message', 'What they read, the button, and the template for later', message) +
+    section('schedule', 'When it may send', 'Hours, days, and the dates it runs', schedule, false) +
+    section('limits', 'Limits', 'How often, and how many', limits, false) +
+    section('offer', 'Coupon', 'How the code is offered', offer, false) +
+    section('zoho', 'Zoho', 'What is recorded on their CRM record', zoho, false) +
+    section('advanced', 'Advanced: edit as JSON', 'For anything, all at once', advanced, false) +
+    `<datalist id="dl-dishes">${opt.dishes.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>
+     <datalist id="dl-cuisines">${opt.cuisines.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>
+     <datalist id="dl-sources">${opt.lead_sources.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>`;
+  wireEditor();
+  drawPreview();
+}
+
+function wireEditor() {
+  const form = $('ed-form');
+  form.querySelectorAll('[data-path]').forEach((el) => {
+    const update = () => {
+      const path = el.dataset.path, value = readInput(el);
+      if (path === 'name') { E.name = value; $('ed-title').textContent = value || 'Untitled'; }
+      else if (path === 'priority') E.priority = value ?? 0;
+      else if (path === 'is_active') E.is_active = value;
+      else if (path === 'promotion_code') { E.promotion_code = value; drawEditorKeepOpen(); return; }
+      else setPath(E, path, value);
+      if (path === 'config.message.text') $('ed-count').textContent = `${el.value.length}/900`;
+      drawPreview();
+    };
+    el.addEventListener('input', update); el.addEventListener('change', update);
+  });
+  form.querySelectorAll('[data-text]').forEach((el) => el.addEventListener('focus', () => { lastText = el; }));
+  form.querySelectorAll('[data-check]').forEach((el) => el.addEventListener('change', () => {
+    const path = el.dataset.check;
+    const values = [...form.querySelectorAll(`[data-check="${path}"]`)].filter((x) => x.checked).map((x) => x.value);
+    setPath(E, path, values); drawPreview();
+  }));
+  form.querySelectorAll('[data-tags]').forEach((box) => {
+    const path = box.dataset.tags, input = box.querySelector('input');
+    const add = () => {
+      const parts = input.value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean);
+      if (!parts.length) return;
+      const list = getPath(E, path) || [];
+      parts.forEach((p) => { if (!list.includes(p)) list.push(p); });
+      setPath(E, path, list); input.value = ''; redrawTags(box);
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); }
+      if (e.key === 'Backspace' && !input.value) { const list = getPath(E, path) || []; list.pop(); setPath(E, path, list); redrawTags(box); }
+    });
+    input.addEventListener('blur', add);
+    input.addEventListener('change', () => { if (input.list) add(); });
+    box.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-untag]');
+      if (b) { const list = getPath(E, path) || []; list.splice(+b.dataset.untag, 1); setPath(E, path, list); redrawTags(box); }
+      else input.focus();
+    });
+  });
+  form.querySelectorAll('[data-seg]').forEach((seg) => seg.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    setPath(E, seg.dataset.seg, b.dataset.value); drawEditorKeepOpen();
+  })));
+  const hours = $('ed-hours');
+  if (hours) hours.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    E.config.schedule.send_window = b.dataset.own === '1' ? clone(S.settings.send_window) : null; drawEditorKeepOpen();
+  }));
+  form.querySelectorAll('[data-day]').forEach((b) => b.addEventListener('click', () => {
+    const days = E.config.schedule.days || [];
+    const i = days.indexOf(b.dataset.day);
+    if (i >= 0) days.splice(i, 1); else days.push(b.dataset.day);
+    E.config.schedule.days = DAYS.map(([d]) => d).filter((d) => days.includes(d));
+    b.setAttribute('aria-pressed', String(i < 0));
+  }));
+  form.querySelectorAll('[data-when]').forEach((el) => el.addEventListener('change', () => {
+    E.config.schedule[el.dataset.when] = el.value ? new Date(el.value).toISOString() : null;
+  }));
+  form.querySelectorAll('[data-param]').forEach((el) => el.addEventListener('input', () => {
+    E.config.message.template.params[+el.dataset.param] = el.value; drawPreview();
+  }));
+  form.querySelectorAll('[data-unparam]').forEach((b) => b.addEventListener('click', () => {
+    E.config.message.template.params.splice(+b.dataset.unparam, 1); drawEditorKeepOpen();
+  }));
+  const addParam = $('ed-add-param');
+  if (addParam) addParam.addEventListener('click', () => {
+    E.config.message.template.params = [...(E.config.message.template.params || []), '']; drawEditorKeepOpen();
+  });
+  form.querySelectorAll('[data-ph]').forEach((b) => b.addEventListener('click', () => {
+    const target = lastText && document.body.contains(lastText) ? lastText : form.querySelector('[data-path="config.message.text"]');
+    const token = `{${b.dataset.ph}}`, start = target.selectionStart ?? target.value.length, end = target.selectionEnd ?? start;
+    target.value = target.value.slice(0, start) + token + target.value.slice(end);
+    target.focus(); target.setSelectionRange(start + token.length, start + token.length);
+    target.dispatchEvent(new Event('input'));
+  }));
+  $('ed-kind').addEventListener('change', async (e) => {
+    const next = e.target.value;
+    const ok = await confirmBox('Change the kind?', `The trigger settings switch to the defaults for <b>${esc(KINDS[next].label)}</b>. Placeholders that do not apply to it must come out of the message.`, 'Change kind');
+    if (!ok) { e.target.value = E.kind; return; }
+    const oldDefault = S.reference.kinds[E.kind].defaults.message.text;
+    E.kind = next;
+    E.config.trigger = defaultsFor(next).trigger;
+    if (E.config.message.text === oldDefault) E.config.message.text = defaultsFor(next).message.text;
+    drawEditorKeepOpen();
+  });
+  const json = $('ed-json');
+  json.value = JSON.stringify(E.config, null, 2);
+  $('ed-json-refresh').addEventListener('click', () => { json.value = JSON.stringify(E.config, null, 2); });
+  $('ed-json-apply').addEventListener('click', () => {
+    try {
+      const parsed = JSON.parse(json.value);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('It must be one JSON object.');
+      E.config = deepMerge(defaultsFor(E.kind), parsed); drawEditorKeepOpen(); toast('Loaded into the form. Save to keep it.');
+    } catch (err) { toast(`That JSON does not read: ${err.message}`, 'error'); }
+  });
+}
+function redrawTags(box) {
+  const path = box.dataset.tags, input = box.querySelector('input');
+  box.querySelectorAll('.tag').forEach((t) => t.remove());
+  (getPath(E, path) || []).forEach((v, i) => {
+    const span = document.createElement('span');
+    span.className = 'tag';
+    span.innerHTML = `${esc(v)}<button type="button" data-untag="${i}" aria-label="Remove">${icon(I.x, 'h-3 w-3')}</button>`;
+    box.insertBefore(span, input);
+  });
+}
+function drawEditorKeepOpen() {
+  const open = [...document.querySelectorAll('#ed-form details[open]')].map((d) => d.dataset.sec);
+  const scroller = $('ed-form').closest('.overflow-y-auto'), top = scroller.scrollTop;
+  drawEditor();
+  document.querySelectorAll('#ed-form details').forEach((d) => { d.open = open.includes(d.dataset.sec); });
+  scroller.scrollTop = top;
+}
+
+function sampleValues() {
+  const coupon = S.options.coupons.find((p) => p.code === E.promotion_code);
+  const t = E.config.trigger || {};
+  const name = 'Asha Menon';
+  return {
+    name, first_name: 'Asha', shop_name: S.settings.shop_name,
+    kitchen: (S.options.kitchens[0] || {}).name || 'Shero Edison', paid_orders: '3', total_spent: '$84.20',
+    order_link: `${location.origin}/order/…`,
+    cart_items: '2 × Drumstick Sambar, 1 × Tomato Rasam', cart_total: '$34.50', cart_count: '3',
+    order_number: 'SHO-261022-7KQ2M', order_total: '$41.18', order_items: '2 × Drumstick Sambar, 1 × Tomato Rasam',
+    last_order_items: '1 × Veg Biryani, 2 × Appam', last_order_date: '3 Oct',
+    days_since_last_order: String(t.days_since_last_order || 18),
+    coupon_code: coupon ? coupon.code : '', coupon_title: coupon ? coupon.title : '', coupon_offer: coupon ? coupon.headline : '',
+    coupon_terms: '', coupon_ends: coupon && coupon.ends_on ? `Valid till ${new Date(coupon.ends_on + 'T12:00').toLocaleDateString(undefined, {day: 'numeric', month: 'short'})}.` : '',
+  };
+}
+function fill(text, values, problems) {
+  return String(text || '').replace(/\{\{|\}\}|\{([^{}]*)\}/g, (m, name) => {
+    if (m === '{{') return '{';
+    if (m === '}}') return '}';
+    if (name in values) return values[name];
+    problems.add(name); return m;
+  });
+}
+function drawPreview() {
+  if (!E) return;
+  const m = E.config.message, values = sampleValues(), problems = new Set();
+  const available = new Set(placeholdersFor(E.kind, !!E.promotion_code).filter((p) => p.ok).map((p) => p.name));
+  const body = fill(m.text, values, problems).replace(/\s+\n/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
+  String(m.text || '').replace(/\{([a-z_]+)\}/g, (_, n) => { if (!available.has(n)) problems.add(n); });
+  const params = (m.template.params || []).map((p) => fill(p, values, problems) || '-');
+  const button = m.button !== 'none' ? `<div class="mt-1.5 flex items-center justify-center gap-1.5 rounded-lg bg-white py-2 text-[13px] font-medium text-sky-600 shadow-sm">${icon(I.link, 'h-3.5 w-3.5')}${esc(m.button_text || '')}</div>` : '';
+  $('ed-preview').innerHTML = `
+    <div class="wa-bg rounded-xl p-3">
+      <div class="max-w-[95%] rounded-lg rounded-tl-none bg-white px-3 py-2 text-[13.5px] leading-snug text-stone-900 shadow-sm">
+        <div class="whitespace-pre-line break-words">${wa(body) || '<span class="text-stone-400">Write a message...</span>'}</div>
+        <div class="mt-1 text-right text-[10px] text-stone-400">12:05</div>
+      </div>
+      ${button}
+    </div>
+    <p class="mt-2 text-[11px] text-stone-500">Inside the 24-hour window. Real sends use each customer's own name, cart and orders.</p>
+    ${m.template.name ? `<div class="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-2.5 text-xs text-stone-700"><b>Outside the window:</b> template <span class="font-mono">${esc(m.template.name)}</span>${params.length ? ` with ${params.map((p, i) => `<span class="font-mono text-stone-500">{{${i + 1}}}</span> = ${esc(p)}`).join(', ')}` : ''}${m.template.button === 'order_link' ? ' and the ordering-page button' : ''}.</div>` : '<p class="mt-3 text-xs text-stone-500">No template: customers outside the 24-hour window are skipped.</p>'}`;
+  const checks = [];
+  if (problems.size) checks.push(['error', `Not available here: ${[...problems].map((p) => `{${p}}`).join(', ')}. Saving will be refused until they come out.`]);
+  if (m.text.length > 900) checks.push(['error', 'The message is over 900 characters.']);
+  if (E.kind === 'abandoned_cart' && (E.config.trigger.within_hours || 0) > 24) checks.push(['warn', 'Carts older than 24 hours are usually outside the free message window - set a template, or keep it under 24.']);
+  if (!m.template.name && ['repeat_purchase', 'never_ordered', 'targeted_offer'].includes(E.kind)) checks.push(['warn', 'This kind usually goes days later, when most customers are outside the 24-hour window. Add an approved template to reach them.']);
+  if (E.kind === 'targeted_offer' && !E.promotion_code) checks.push(['info', 'A targeted offer usually carries a coupon.']);
+  if (!E.is_active) checks.push(['info', 'Saved paused: it will not send until you activate it.']);
+  $('ed-checks').innerHTML = checks.map(([kind, text]) => `<div class="mb-2 flex gap-2 rounded-xl border p-3 text-xs leading-snug ${kind === 'error' ? 'border-red-200 bg-red-50 text-red-800' : kind === 'warn' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-stone-200 bg-white text-stone-600'}">${icon(I.info, 'h-4 w-4 shrink-0')}<span>${esc(text)}</span></div>`).join('');
+}
+
+async function saveEditor(andPreview) {
+  const button = andPreview ? $('ed-save-preview') : $('ed-save');
+  const body = {name: E.name, kind: E.kind, priority: E.priority || 0, is_active: !!E.is_active,
+                promotion_code: E.promotion_code || null, config: E.config};
+  busy(button, true, 'Saving');
+  $('ed-error').classList.add('hidden');
+  try {
+    const saved = E.id ? await api(`/campaigns/${E.id}`, {method: 'PATCH', body}) : await api('/campaigns', {method: 'POST', body});
+    toast(`Saved "${saved.name}"${saved.is_active ? '' : ' (paused)'}.`);
+    closeEditor(); await refreshCampaigns();
+    if (andPreview) runPreview(saved);
+  } catch (e) {
+    $('ed-error').innerHTML = `<b>Not saved.</b> ${esc(e.message)}`;
+    $('ed-error').classList.remove('hidden');
+  } finally { busy(button, false); }
+}
+$('ed-save').addEventListener('click', () => saveEditor(false));
+$('ed-save-preview').addEventListener('click', () => saveEditor(true));
+
+// --- activity -----------------------------------------------------------------------------
+async function renderActivity() {
+  const box = panel('activity'), q = S.sends;
+  box.innerHTML = `
+    <div class="mb-4 flex flex-wrap items-end gap-3">
+      <div><label class="lbl">Campaign</label><select class="field" id="f-campaign"><option value="">All campaigns</option>${S.campaigns.map((c) => `<option value="${c.id}" ${q.campaign_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div><label class="lbl">Result</label><select class="field" id="f-status"><option value="">Any</option>${['sent', 'failed', 'dry_run', 'test', 'sending'].map((s) => `<option value="${s}" ${q.status === s ? 'selected' : ''}>${STATUS[s][0]}</option>`).join('')}</select></div>
+      <div><label class="lbl">Period</label><select class="field" id="f-days">${[['', 'All time'], ['1', 'Last 24 hours'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']].map(([v, l]) => `<option value="${v}" ${String(q.days || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    </div>
+    <div id="act-table"><div class="skeleton h-40 rounded-2xl"></div></div>`;
+  [['f-campaign', 'campaign_id'], ['f-status', 'status'], ['f-days', 'days']].forEach(([id, key]) =>
+    $(id).addEventListener('change', (e) => { S.sends[key] = e.target.value || undefined; S.sends.offset = 0; renderActivity(); }));
+  const params = new URLSearchParams({limit: q.limit, offset: q.offset});
+  ['campaign_id', 'status', 'days'].forEach((k) => { if (q[k]) params.set(k, q[k]); });
+  try {
+    const data = await api(`/sends?${params}`);
+    if (!data.sends.length) { $('act-table').innerHTML = '<div class="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">No nudges here yet.</div>'; return; }
+    $('act-table').innerHTML = `
+      <div class="overflow-x-auto rounded-2xl border border-stone-200 bg-white shadow-card"><table class="tbl w-full">
+        <thead><tr><th>When</th><th>Customer</th><th>Campaign</th><th>Result</th><th>Message</th><th>Zoho</th></tr></thead>
+        <tbody>${data.sends.map((s) => `<tr>
+          <td class="whitespace-nowrap text-xs text-stone-600">${esc(when(s.sent_at || s.created_at))}<div class="text-[11px] text-stone-400">${esc(s.actor || '')}</div></td>
+          <td><button type="button" class="font-medium text-brand-700 hover:underline" data-lookup="${esc(s.whatsapp_number)}">+${esc(s.whatsapp_number)}</button></td>
+          <td class="text-xs"><div class="font-medium text-stone-800">${esc(s.campaign || '(deleted)')}</div><div class="text-stone-500">${esc((KINDS[s.kind] || {}).label || s.kind)}${s.promo_code ? ` · ${esc(s.promo_code)}` : ''}</div></td>
+          <td>${statusChip(s.status)}${s.channel ? `<div class="mt-1 text-[11px] text-stone-500">${esc(s.channel)}</div>` : ''}${s.error ? `<div class="mt-1 max-w-[14rem] text-[11px] text-red-600">${esc(s.error)}</div>` : ''}</td>
+          <td class="max-w-md"><div class="line-clamp-3 whitespace-pre-line text-stone-700" title="${esc(s.message || '')}">${wa(s.message || '')}</div></td>
+          <td class="text-xs">${s.zoho_synced ? '<span class="text-emerald-700">Recorded</span>' : s.zoho_error ? `<span class="text-amber-700" title="${esc(s.zoho_error)}">Not recorded</span>` : '<span class="text-stone-400">-</span>'}</td>
+        </tr>`).join('')}</tbody></table></div>
+      <div class="mt-3 flex items-center justify-between text-sm text-stone-600">
+        <span>${q.offset + 1}-${q.offset + data.sends.length} of ${data.total}</span>
+        <span class="flex gap-2"><button type="button" class="btn btn-ghost" id="pg-prev" ${q.offset ? '' : 'disabled'}>Previous</button><button type="button" class="btn btn-ghost" id="pg-next" ${q.offset + data.sends.length < data.total ? '' : 'disabled'}>Next</button></span>
+      </div>`;
+    $('pg-prev').addEventListener('click', () => { S.sends.offset = Math.max(0, q.offset - q.limit); renderActivity(); });
+    $('pg-next').addEventListener('click', () => { S.sends.offset = q.offset + q.limit; renderActivity(); });
+    box.querySelectorAll('[data-lookup]').forEach((b) => b.addEventListener('click', () => { S.lookup = b.dataset.lookup; showTab('customer'); }));
+  } catch (e) { $('act-table').innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">${esc(e.message)}</div>`; }
+}
+
+// --- results ------------------------------------------------------------------------------
+async function renderResults() {
+  const box = panel('results');
+  box.innerHTML = `
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <p class="max-w-2xl text-sm text-stone-600">An order counts when it is paid within <b>${S.settings.attribution_days} days</b> of a nudge, credited to the latest nudge before it, so two campaigns never both claim one order.</p>
+      <div class="seg inline-flex rounded-xl bg-stone-100 p-1 text-sm" id="r-days">${[7, 30, 90, 365].map((d) => `<button type="button" data-days="${d}" aria-pressed="${S.resultsDays === d}" class="rounded-lg px-3 py-1.5 font-medium text-stone-600">${d === 365 ? '1 year' : `${d} days`}</button>`).join('')}</div>
+    </div>
+    <div id="r-body"><div class="skeleton h-40 rounded-2xl"></div></div>`;
+  box.querySelectorAll('[data-days]').forEach((b) => b.addEventListener('click', () => { S.resultsDays = +b.dataset.days; renderResults(); }));
+  try {
+    const r = await api(`/stats?days=${S.resultsDays}`), t = r.totals;
+    const tiles = [['Nudges sent', t.sent], ['Customers reached', t.customers], ['Orders after a nudge', t.conversions], ['Conversion', pct(t.conversion_rate)], ['Revenue', money(t.revenue)], ['Coupon used', t.coupon_uses], ['Failed', t.failed], ['Opted out', r.customers_opted_out]];
+    const max = Math.max(1, ...r.campaigns.map((c) => c.conversion_rate));
+    $('r-body').innerHTML = `
+      <div class="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">${tiles.map(([l, v]) => `<div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card"><div class="text-xs text-stone-500">${l}</div><div class="mt-1 text-2xl font-semibold text-stone-900">${v}</div></div>`).join('')}</div>
+      ${r.campaigns.length ? `<div class="overflow-x-auto rounded-2xl border border-stone-200 bg-white shadow-card"><table class="tbl w-full">
+        <thead><tr><th>Campaign</th><th>Sent</th><th>Customers</th><th>Orders after</th><th>Conversion</th><th>Revenue</th><th>Coupon used</th><th>Failed</th><th>Dry run</th><th>In Zoho</th></tr></thead>
+        <tbody>${r.campaigns.map((c) => `<tr>
+          <td><div class="font-medium text-stone-900">${esc(c.campaign || '(deleted)')}</div><div class="text-xs text-stone-500">${esc((KINDS[c.kind] || {}).label || c.kind)}</div></td>
+          <td>${c.sent}</td><td>${c.customers}</td><td>${c.conversions}</td>
+          <td><div class="flex items-center gap-2"><div class="h-1.5 w-20 overflow-hidden rounded-full bg-stone-100"><div class="h-full rounded-full bg-brand-500" style="width:${Math.round(c.conversion_rate / max * 100)}%"></div></div>${pct(c.conversion_rate)}</div></td>
+          <td class="font-medium">${money(c.revenue)}</td><td>${c.coupon_uses}</td><td>${c.failed}</td><td>${c.dry_run}</td><td>${c.zoho_synced}</td></tr>`).join('')}</tbody></table></div>`
+        : '<div class="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">No nudges in this period.</div>'}`;
+  } catch (e) { $('r-body').innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">${esc(e.message)}</div>`; }
+}
+
+// --- customer lookup ----------------------------------------------------------------------
+function renderCustomerTab() {
+  const box = panel('customer');
+  box.innerHTML = `
+    <form id="lookup" class="mb-5 flex max-w-xl gap-2">
+      <input class="field" id="lookup-number" inputmode="tel" placeholder="WhatsApp number, e.g. 17325550142" value="${esc(S.lookup || '')}">
+      <button class="btn btn-primary" type="submit">${icon(I.search)}Look up</button>
+    </form>
+    <div id="lookup-body"><p class="text-sm text-stone-600">See one customer's nudges, whether they opted out, and for every campaign whether they would get it right now - and if not, exactly why.</p></div>`;
+  $('lookup').addEventListener('submit', (e) => { e.preventDefault(); S.lookup = $('lookup-number').value.trim(); if (S.lookup) lookup(); });
+  if (S.lookup) lookup();
+}
+async function lookup() {
+  const out = $('lookup-body');
+  out.innerHTML = '<div class="skeleton h-40 rounded-2xl"></div>';
+  try {
+    const r = await api(`/customers/${encodeURIComponent(S.lookup.replace(/\D/g, ''))}`);
+    out.innerHTML = `
+      <div class="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-card">
+          <div class="text-lg font-semibold text-stone-900">${esc(r.name || 'No name yet')}</div>
+          <div class="text-sm text-stone-500">+${esc(r.whatsapp_number)}</div>
+          <dl class="mt-4 space-y-2 text-sm">
+            ${[['Paid orders', r.paid_orders], ['Spent', money(r.total_spent)], ['Last order', r.last_order_at ? when(r.last_order_at) : 'Never'], ['Last message to the bot', r.last_message_at ? when(r.last_message_at) : 'Over 24 h ago']].map(([k, v]) => `<div class="flex justify-between gap-3"><dt class="text-stone-500">${k}</dt><dd class="text-right font-medium text-stone-800">${esc(v)}</dd></div>`).join('')}
+          </dl>
+          <div class="mt-4 rounded-xl ${r.whatsapp_window_open ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'} p-3 text-xs">${r.whatsapp_window_open ? 'Inside the 24-hour window: a normal message reaches them.' : 'Outside the 24-hour window: only an approved template reaches them.'}</div>
+          <div class="mt-4 flex items-center justify-between gap-3 rounded-xl border border-stone-200 p-3">
+            <div class="text-sm"><div class="font-medium text-stone-800">${r.opted_out_at ? 'Opted out' : 'Receives nudges'}</div><div class="text-xs text-stone-500">${r.opted_out_at ? `Since ${esc(when(r.opted_out_at))}` : 'They can reply STOP any time'}</div></div>
+            <button type="button" class="btn ${r.opted_out_at ? 'btn-ghost' : 'btn-danger'} !py-1.5 text-xs" id="optbtn">${r.opted_out_at ? 'Opt back in' : 'Opt out'}</button>
+          </div>
+        </div>
+        <div class="space-y-5">
+          <div class="rounded-2xl border border-stone-200 bg-white shadow-card">
+            <div class="border-b border-stone-100 px-5 py-3 text-sm font-semibold text-stone-900">Would they get each campaign right now?</div>
+            ${r.campaigns.length ? `<ul class="divide-y divide-stone-100">${r.campaigns.map((o) => `<li class="px-5 py-3">
+              <div class="flex flex-wrap items-center gap-2"><span class="font-medium text-stone-900">${esc(o.campaign)}</span>${o.campaign_active ? '' : '<span class="chip bg-stone-100 text-stone-500">Paused</span>'}${statusChip(o.status)}</div>
+              <div class="mt-1 whitespace-pre-line text-sm ${o.status === 'skipped' ? 'text-stone-600' : 'text-stone-800'}">${o.status === 'skipped' ? esc(reasonText(o.reason)) : wa(o.message)}</div></li>`).join('')}</ul>` : '<p class="px-5 py-4 text-sm text-stone-500">No campaigns yet.</p>'}
+          </div>
+          <div class="rounded-2xl border border-stone-200 bg-white shadow-card">
+            <div class="border-b border-stone-100 px-5 py-3 text-sm font-semibold text-stone-900">Nudges they have had</div>
+            ${r.history.length ? `<ul class="divide-y divide-stone-100">${r.history.map((s) => `<li class="px-5 py-3 text-sm">
+              <div class="flex flex-wrap items-center gap-2 text-xs text-stone-500">${esc(when(s.sent_at || s.created_at))} · ${esc(s.campaign || '(deleted)')} ${statusChip(s.status)}</div>
+              <div class="mt-1 whitespace-pre-line text-stone-700">${esc(s.message || '')}</div></li>`).join('')}</ul>` : '<p class="px-5 py-4 text-sm text-stone-500">None yet.</p>'}
+          </div>
+        </div>
+      </div>`;
+    $('optbtn').addEventListener('click', async (e) => {
+      const button = e.currentTarget, goingOut = !r.opted_out_at;
+      if (goingOut && !await confirmBox('Opt this customer out?', 'They will get no more nudges until they reply START OFFERS or you opt them back in. Order updates still reach them.', 'Opt out', 'danger')) return;
+      busy(button, true);
+      try { await api(`/customers/${encodeURIComponent(r.whatsapp_number)}/${goingOut ? 'opt-out' : 'opt-in'}`, {method: 'POST'}); toast(goingOut ? 'Opted out.' : 'Opted back in.'); lookup(); }
+      catch (err) { toast(err.message, 'error'); busy(button, false); }
+    });
+  } catch (e) {
+    out.innerHTML = `<div class="rounded-xl border ${e.status === 404 ? 'border-stone-200 bg-white text-stone-600' : 'border-red-200 bg-red-50 text-red-800'} p-4 text-sm">${esc(e.message)}</div>`;
+  }
+}
+
+// --- settings -----------------------------------------------------------------------------
+let D = null;   // the settings draft
+function renderSettings() {
+  D = clone(S.settings);
+  const box = panel('settings');
+  const card = (title, sub, body) => `<div class="rounded-2xl border border-stone-200 bg-white shadow-card"><div class="border-b border-stone-100 px-5 py-4"><div class="text-sm font-semibold text-stone-900">${title}</div><div class="text-xs text-stone-500">${sub}</div></div><div class="p-5">${body}</div></div>`;
+  const num = (key, label, opts = {}) => `<div><label class="lbl">${label}</label><div class="flex items-center gap-2"><input class="field" type="number" data-skey="${key}" data-type="${opts.type || 'int'}" min="${opts.min ?? 0}" step="${opts.step || 1}" value="${esc(D[key])}">${opts.unit ? `<span class="shrink-0 text-xs text-stone-500">${opts.unit}</span>` : ''}</div>${opts.help ? `<p class="help">${opts.help}</p>` : ''}</div>`;
+  const check = (key, label, help) => `<label class="flex items-start gap-3 rounded-xl border border-stone-200 p-3"><input type="checkbox" data-skey="${key}" data-type="bool" ${D[key] ? 'checked' : ''} class="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600"><span><span class="block text-sm font-medium text-stone-800">${label}</span>${help ? `<span class="help block">${help}</span>` : ''}</span></label>`;
+  const tags = (key, label, help) => `<div><label class="lbl">${label}</label><div class="tagbox" data-stags="${key}">${(D[key] || []).map((v, i) => `<span class="tag">${esc(v)}<button type="button" data-untag="${i}" aria-label="Remove">${icon(I.x, 'h-3 w-3')}</button></span>`).join('')}<input placeholder="Type and press Enter"></div>${help ? `<p class="help">${help}</p>` : ''}</div>`;
+  box.innerHTML = `
+    <div id="set-error" class="mb-4 hidden rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"></div>
+    <div class="grid gap-5 xl:grid-cols-2">
+      ${card('Safety', 'Try things out without messaging customers', `<div class="space-y-4">
+        ${check('dry_run', 'Dry run', 'Runs log who <b>would</b> be sent what, and send nothing. Watch a campaign for a day before going live.')}
+        ${tags('test_numbers', 'Only send to these numbers', 'With country code. While set, nobody else is nudged - a live test on real data with your own phones.')}
+      </div>`)}
+      ${card('Sending hours', 'When nudges may go out, unless a campaign has its own hours', `<div class="grid gap-4 sm:grid-cols-2">
+        <div><label class="lbl">From</label><input class="field" type="time" data-skey="send_window.start" value="${esc(D.send_window.start)}"></div>
+        <div><label class="lbl">Until</label><input class="field" type="time" data-skey="send_window.end" value="${esc(D.send_window.end)}"></div>
+        <div class="sm:col-span-2"><label class="lbl">Timezone for customers with no kitchen yet</label><input class="field" list="dl-timezones" data-skey="timezone" data-type="text" value="${esc(D.timezone)}"><p class="help">Everyone else is judged by their kitchen's own timezone.</p></div>
+      </div>`)}
+      ${card('Frequency limits', 'Across all campaigns together, so nobody is spammed', `<div class="grid gap-4 sm:grid-cols-2">
+        ${num('max_per_customer_per_day', 'Most nudges per customer per day', {min: 1})}
+        ${num('max_per_customer_per_week', 'Most nudges per customer per week', {min: 1})}
+        ${num('min_hours_between', 'At least this long between two nudges', {type: 'float', step: '0.5', unit: 'hours'})}
+        ${num('max_sends_per_run', 'Most sends in one 5-minute run', {min: 1, help: 'The rest wait for the next run - a gentle pace.'})}
+      </div>`)}
+      ${card('WhatsApp', 'Rules Meta sets', `<div class="space-y-4">
+        ${check('block_marketing_templates_to_us', 'Skip marketing templates to US (+1) numbers', 'Meta currently does not deliver them, so sending one costs money and reaches nobody. Turn this off if Meta lifts the restriction.')}
+      </div>`)}
+      ${card('STOP and START OFFERS', "Customers' own control. Works even while nudges are off", `<div class="space-y-4">
+        ${tags('stop_keywords', 'Words that stop nudges', 'The whole message must be the word - "stop the order" is not an opt-out.')}
+        ${tags('start_keywords', 'Words that start them again')}
+        <div><label class="lbl">Reply when someone opts out</label><textarea class="field" rows="3" maxlength="1000" data-skey="opt_out_reply" data-type="text">${esc(D.opt_out_reply)}</textarea></div>
+        <div><label class="lbl">Reply when someone opts back in</label><textarea class="field" rows="3" maxlength="1000" data-skey="opt_in_reply" data-type="text">${esc(D.opt_in_reply)}</textarea></div>
+      </div>`)}
+      ${card('Zoho', 'What is recorded on customers\' Zoho records', `<div class="space-y-4">
+        ${check('zoho_sync', 'Record nudges in Zoho', 'On their Lead or Contact. If Zoho is down the nudge still goes.')}
+        ${check('zoho_notes', 'Add a timeline note for each nudge')}
+        <div><label class="lbl">Tag for customers who opt out</label><input class="field" data-skey="zoho_opt_out_tag" data-type="opt" maxlength="50" value="${esc(D.zoho_opt_out_tag || '')}" placeholder="No tag"></div>
+      </div>`)}
+      ${card('Reporting and wording', '', `<div class="grid gap-4 sm:grid-cols-2">
+        ${num('attribution_days', 'Count an order as a result within', {min: 1, unit: 'days of a nudge'})}
+        <div><label class="lbl">Shop name in messages</label><input class="field" data-skey="shop_name" data-type="text" maxlength="60" value="${esc(D.shop_name)}"><p class="help">What {shop_name} becomes.</p></div>
+      </div>`)}
+    </div>
+    <div class="sticky bottom-16 z-10 mt-5 flex flex-wrap justify-end gap-2 rounded-2xl border border-stone-200 bg-white/95 p-3 shadow-card backdrop-blur lg:bottom-4">
+      <button type="button" class="btn btn-ghost" id="set-defaults">Restore defaults</button>
+      <button type="button" class="btn btn-ghost" id="set-reset">Undo changes</button>
+      <button type="button" class="btn btn-primary" id="set-save">${icon(I.check)}Save settings</button>
+    </div>`;
+  box.querySelectorAll('[data-skey]').forEach((el) => {
+    const key = el.dataset.skey;
+    const update = () => {
+      if (key.startsWith('send_window.')) D.send_window[key.split('.')[1]] = el.value;
+      else D[key] = readInput(el);
+    };
+    el.addEventListener('input', update); el.addEventListener('change', update);
+  });
+  box.querySelectorAll('[data-stags]').forEach((tb) => {
+    const key = tb.dataset.stags, input = tb.querySelector('input');
+    const draw = () => {
+      tb.querySelectorAll('.tag').forEach((t) => t.remove());
+      (D[key] || []).forEach((v, i) => { const s = document.createElement('span'); s.className = 'tag'; s.innerHTML = `${esc(v)}<button type="button" data-untag="${i}" aria-label="Remove">${icon(I.x, 'h-3 w-3')}</button>`; tb.insertBefore(s, input); });
+    };
+    const add = () => { const parts = input.value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean); if (!parts.length) return; D[key] = [...new Set([...(D[key] || []), ...parts])]; input.value = ''; draw(); };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); } if (e.key === 'Backspace' && !input.value) { D[key] = (D[key] || []).slice(0, -1); draw(); } });
+    input.addEventListener('blur', add);
+    tb.addEventListener('click', (e) => { const b = e.target.closest('[data-untag]'); if (b) { D[key].splice(+b.dataset.untag, 1); draw(); } else input.focus(); });
+  });
+  $('set-reset').addEventListener('click', renderSettings);
+  $('set-defaults').addEventListener('click', async () => {
+    if (!await confirmBox('Restore the default settings?', 'The form fills with the defaults. Nothing changes until you press Save.', 'Fill defaults')) return;
+    const keep = S.settings; S.settings = clone(S.reference.settings_defaults); renderSettings(); S.settings = keep;
+  });
+  $('set-save').addEventListener('click', async (e) => {
+    const button = e.currentTarget;   // gone from the event once we await
+    busy(button, true, 'Saving');
+    $('set-error').classList.add('hidden');
+    try {
+      const r = await api('/settings', {method: 'PATCH', body: D});
+      S.settings = r.settings; S.enabled = r.enabled; renderSwitch(); renderSettings(); toast('Settings saved.');
+    } catch (err) {
+      $('set-error').innerHTML = `<b>Not saved.</b> ${esc(err.message)}`; $('set-error').classList.remove('hidden');
+      $('set-error').scrollIntoView({behavior: 'smooth', block: 'center'});
+    } finally { busy(button, false); }
+  });
+}
+
+// --- start --------------------------------------------------------------------------------
+$('refresh').addEventListener('click', async (e) => {
+  const button = e.currentTarget;
+  busy(button, true);
+  try { await loadAll(); toast('Up to date.'); } catch (err) { toast(err.message, 'error'); } finally { busy(button, false); }
+});
+const remembered = store('nudges.tab');
+S.tab = ['campaigns', 'activity', 'results', 'customer', 'settings'].includes(remembered) ? remembered : 'campaigns';
+document.querySelectorAll('[role=tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === S.tab)));
+document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== S.tab; });
+loadAll().catch((e) => {
+  $('switch-card').innerHTML = `<div class="p-5 text-sm text-red-800">Could not load nudges: ${esc(e.message)}</div>`;
+});
+})();
+</script>
+{% endraw %}
+{% endblock %}

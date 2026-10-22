@@ -66,6 +66,9 @@ class Customer(Base, UUIDPrimaryKey, Timestamps):
     # Last WhatsApp "we do not deliver to <address> yet" (services/out_of_area);
     # it goes at most once a day, however often they try another address.
     out_of_area_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set when they reply STOP to our offers and reminders (services/nudges);
+    # no nudge goes to them while it is set. Order updates still do.
+    nudges_opted_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Customer {self.whatsapp_number} stage={self.lead_stage}>"

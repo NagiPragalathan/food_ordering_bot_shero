@@ -185,6 +185,12 @@ async def _handle_global_intent(ctx: FlowContext) -> bool:
     """
     tapped = bool(ctx.event.reply_id)
 
+    # STOP / START OFFERS for nudges work from any step: nobody's address or
+    # name is the word "stop" on its own (services/nudges/optout.py).
+    from app.services.nudges import optout
+    if await optout.handle_keyword(ctx):
+        return True
+
     # Typed words are ambiguous while capturing free text - somebody living on
     # "Help Street" must be able to give their address. A tapped button is not
     # ambiguous, so it still works there.
