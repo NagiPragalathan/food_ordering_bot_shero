@@ -172,8 +172,10 @@ async def test_the_page_is_served_but_not_in_the_sidebar(session, monkeypatch):
     assert 'id="switch-card"' in page.text and "/api/nudges" in page.text
     # The script reached the browser whole: Jinja left WhatsApp's {{1}} alone.
     assert "{{${i + 1}}}" in page.text
-    assert 'href="/admin/nudges"' not in page.text
-    assert 'href="/admin/nudges"' not in client.get("/admin/promotions").text
+    # url_for renders absolute links, so match the path's end, not a whole href.
+    offers = client.get("/admin/promotions").text
+    assert '/admin/promotions"' in offers
+    assert '/admin/nudges"' not in page.text and '/admin/nudges"' not in offers
 
 
 async def test_the_reference_lists_every_option(api):

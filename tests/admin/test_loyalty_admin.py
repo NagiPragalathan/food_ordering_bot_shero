@@ -34,6 +34,9 @@ async def test_pages_and_program_save(admin, session, customer, outlet):
     assert page.status_code == 200
     assert "Program rules" in page.text and "Customer wallets" in page.text
     assert customer.whatsapp_number in page.text
+    # Not in the sidebar (url_for renders absolute links, so match the path's end).
+    offers = admin.get("/admin/promotions").text
+    assert '/admin/promotions"' in offers and '/admin/loyalty"' not in offers
     result = admin.post("/admin/loyalty", data=form(points_per_currency="2", first_order_bonus=50,
                         kitchen_ids=[str(outlet.id)], excluded_items=["not-eligible"]))
     assert result.status_code == 303
