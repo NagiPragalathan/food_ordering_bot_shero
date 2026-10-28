@@ -60,7 +60,10 @@ Points earned and loyalty savings appear in the existing WhatsApp payment/summar
 | First eligible order receiving repeat bonus | For example, start repeat bonuses at order 2 or 3 |
 | Milestone every N orders | 0 turns milestone bonuses off |
 | Points per milestone | Fixed milestone bonus |
-| Membership tiers | Custom names, eligible order thresholds and spend-point multipliers; [] disables tiers |
+| Big-order bonus | Extra points when eligible food (before discounts) reaches an amount, for example +30 points on $50 or more; 0 turns it off |
+| Bonus-points promotion | Multiplies the points food earns (for example x2), between optional start and end dates and on chosen days of the week; judged when the customer agrees the total |
+| Dish bonuses | Extra points for each one of chosen dishes ordered, for example +20 per Biryani |
+| Membership tiers | Rows of name, from which eligible order, and points multiplier; remove every row for no tiers |
 | Discount value of one point | Currency value, to two decimal places |
 | Minimum points per redemption | Smallest allowed points transaction |
 | Spend points in multiples | For example, 50 means customers can use 100, 150, 200, etc. Minimum must be a multiple |
@@ -71,20 +74,13 @@ Points earned and loyalty savings appear in the existing WhatsApp payment/summar
 | Earn points on coupon orders | Applies to the remaining eligible food after the food coupon |
 | Earn when redeeming | If enabled, earns on the remaining eligible food after the loyalty discount |
 | Eligible kitchens | Select none for all, or restrict the program to selected partners |
-| Excluded dishes | Retailer IDs that earn no points and cannot be discounted with points |
+| Excluded dishes | Picked by name; they earn no points, get no dish bonus and cannot be discounted with points |
 | Manual wallet adjustment | Grant/remove points with a required reason and recorded admin email |
+| Reset every balance to zero | Type RESET to confirm; each reset is an adjustment in that customer's history |
 
-Example tier configuration:
+The page also shows **What the saved rules give**: the points an order of $20, $50 or $100 earns at order 1, 2, 5 and 10, worked out by the same code that awards points at payment, with the promotion figure in brackets.
 
-```json
-[
-  {"name": "Silver", "orders": 5, "multiplier": 1.5},
-  {"name": "Gold", "orders": 10, "multiplier": 2},
-  {"name": "VIP", "orders": 20, "multiplier": 3}
-]
-```
-
-The highest reached order threshold wins. Thresholds include the order currently being paid. A full refund removes that order from the eligible order count for future thresholds; past orders are not repriced or recalculated. Changing point value/currency changes the future redemption value of existing balances: review those settings carefully before saving. There is no historical import, referral program, birthday campaign, expiry schedule, cash payout or free-item reward in this version.
+The highest reached order threshold wins. Thresholds include the order currently being paid. A full refund removes that order from the eligible order count for future thresholds; past orders are not repriced or recalculated. Changing point value/currency changes the future redemption value of existing balances: review those settings carefully before saving. Points are worked out in this order: the food's points times the tier and promotion multipliers (rounded down), then the per-order, first-order, repeat, milestone, big-order and dish bonuses, then the per-order cap. There is no historical import, referral program, birthday campaign, expiry schedule, cash payout or free-item reward in this version.
 
 ## Payment and refund safeguards
 

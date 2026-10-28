@@ -6,6 +6,7 @@ and its original points were already spent. Future earnings repay that debt.
 from __future__ import annotations
 import json
 import uuid
+from datetime import date
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select, update
@@ -18,6 +19,14 @@ CENT = Decimal("0.01")
 class LoyaltyError(BotFlowError):
     def __init__(self, message):
         super().__init__(message, customer_message=message)
+
+DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+class DishBonus(BaseModel):
+    """Extra points for each one of a dish ordered."""
+    model_config = ConfigDict(extra="forbid", validate_default=True)
+    retailer_id: str = Field(min_length=1, max_length=120)
+    points: int = Field(ge=1, le=100000)
 
 class Tier(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_default=True)
@@ -47,6 +56,13 @@ class Policy(BaseModel):
     minimum_redeem_subtotal: Decimal = Field(10, ge=0, le=1000000, description="Minimum eligible food subtotal to redeem")
     maximum_redeem_percent: Decimal = Field(25, gt=0, le=100, description="Maximum percent of eligible food covered by points")
     maximum_redeem_amount: Decimal = Field(10, ge=0, le=1000000, description="Maximum loyalty discount per order (0 = no fixed cap)")
+    big_order_threshold: Decimal = Field(0, ge=0, le=1000000, description="Big-order bonus: eligible food of at least (0 = off)")
+    big_order_bonus: int = Field(0, ge=0, le=1000000, description="Big-order bonus points")
+    promo_multiplier: Decimal = Field(1, ge=1, le=10, description="Bonus-points promotion: multiply spend points by")
+    promo_starts_on: date | None = Field(None, description="Promotion starts on (blank = already running)")
+    promo_ends_on: date | None = Field(None, description="Promotion ends on (blank = no end)")
+    promo_days: list[str] = Field(default_factory=list, description="Promotion days of the week (none = every day)")
+    dish_bonuses: list[DishBonus] = Field(default_factory=list, description="Extra points per dish ordered")
     stack_with_coupons: bool = Field(False, description="Allow points and a coupon on the same order")
     earn_with_coupons: bool = Field(True, description="Earn points on coupon orders")
     earn_on_redemption: bool = Field(True, description="Earn on remaining food spend when using points")
@@ -71,6 +87,14 @@ class Policy(BaseModel):
             raise ValueError("Use at most 20 tiers, each with a different order threshold")
         if len(self.excluded_items) > 500 or len(self.kitchen_ids) > 500:
             raise ValueError("Too many item or kitchen rules")
+        if self.promo_starts_on and self.promo_ends_on and self.promo_ends_on < self.promo_starts_on:
+            raise ValueError("The promotion ends before it starts")
+        if any(day not in DAYS for day in self.promo_days):
+            raise ValueError("Promotion days must be mon, tue, wed, thu, fri, sat or sun")
+        if len(self.dish_bonuses) > 500 or len({b.retailer_id for b in self.dish_bonuses}) != len(self.dish_bonuses):
+            raise ValueError("Give each dish one bonus (at most 500 dishes)")
+        if self.big_order_bonus and not self.big_order_threshold:
+            raise ValueError("Set the food amount a big-order bonus needs")
         return self
 
 async def policy(session) -> Policy:
@@ -134,6 +158,47 @@ async def _change(session, wallet, points, kind, key, *, order=None, note="", ac
     await session.flush()
     return balance
 
+def promo_active(rules, day: date) -> bool:
+    """Whether the bonus-points promotion runs on this day."""
+    return (rules.promo_multiplier > 1
+            and (rules.promo_starts_on is None or day >= rules.promo_starts_on)
+            and (rules.promo_ends_on is None or day <= rules.promo_ends_on)
+            and (not rules.promo_days or DAYS[day.weekday()] in rules.promo_days))
+
+def dish_bonus(lines, rules) -> int:
+    """Extra points for the bonus dishes in these cart lines."""
+    per_dish = {b.retailer_id: b.points for b in rules.dish_bonuses}
+    return sum(per_dish[line.retailer_id] * line.quantity for line in lines
+               if line.retailer_id in per_dish and line.retailer_id not in rules.excluded_items)
+
+def tier_for(rules, number):
+    """The tier an eligible order with this number falls in, or None."""
+    found = None
+    for tier in sorted(rules.tiers, key=lambda t: t.orders):
+        if number >= tier.orders:
+            found = tier
+    return found
+
+def earn_points(rules, *, spend, subtotal, number, promo=False, dish_points=0) -> int:
+    """Points for the customer's `number`th eligible order: `spend` is the
+    food they paid for, `subtotal` the eligible food before discounts. Used
+    when an order is paid, and for the examples on the admin page."""
+    tier = tier_for(rules, number)
+    multiplier = (tier.multiplier if tier else Decimal(1)) * (rules.promo_multiplier if promo else 1)
+    points = int((spend * rules.points_per_currency * multiplier).to_integral_value(rounding=ROUND_FLOOR)) + rules.points_per_order
+    if number == 1:
+        points += rules.first_order_bonus
+    if number >= rules.repeat_from_order:
+        points += rules.repeat_order_bonus
+    if rules.milestone_every and number % rules.milestone_every == 0:
+        points += rules.milestone_bonus
+    if rules.big_order_threshold and subtotal >= rules.big_order_threshold:
+        points += rules.big_order_bonus
+    points += dish_points
+    if rules.max_earn_per_order:
+        points = min(points, rules.max_earn_per_order)
+    return points
+
 def eligible_subtotal(priced, rules):
     return sum((line.line_total for line in priced.lines if line.retailer_id not in rules.excluded_items), Decimal(0))
 
@@ -192,6 +257,14 @@ async def apply_to_quote(session, priced, *, customer_id, outlet_id, requested=0
     priced.loyalty_policy["eligible_subtotal"] = str(subtotal)
     priced.loyalty_policy["eligible_net_spend"] = str(max(Decimal(0), available_food - priced.loyalty_discount))
     priced.loyalty_policy["eligible_kitchen"] = usable
+    # The promotion and dish bonuses are judged now too, so a payment made
+    # tomorrow still gets the points the customer was offered today.
+    if rules.promo_multiplier > 1:
+        from app.db.models import Outlet
+        from app.services import promotions
+        outlet = await session.get(Outlet, outlet_id) if outlet_id else None
+        priced.loyalty_policy["eligible_promo"] = promo_active(rules, await promotions.local_today(session, outlet))
+    priced.loyalty_policy["eligible_dish_bonus"] = dish_bonus(priced.lines, rules)
     return {"enabled": rules.enabled, "name": rules.name, "balance": balance,
             "max_points": max_points, "minimum_points": rules.minimum_redeem_points,
             "step": rules.redeem_step, "point_value": str(rules.point_value),
@@ -240,26 +313,16 @@ async def paid(session, order):
     subtotal = Decimal(data.pop("eligible_subtotal", "0"))
     spend = Decimal(data.pop("eligible_net_spend", "0"))
     usable = data.pop("eligible_kitchen", False)
+    promo = data.pop("eligible_promo", False)
+    dish_points = int(data.pop("eligible_dish_bonus", 0))
     rules = Policy.model_validate(data)
     qualifies = (usable and rules.earning_enabled and subtotal > 0 and subtotal >= rules.minimum_earn_subtotal
                  and (rules.earn_with_coupons or not order.promo_code)
                  and (rules.earn_on_redemption or not order.loyalty_points))
     points = 0
     if qualifies:
-        number = wallet.eligible_orders + 1
-        multiplier = Decimal(1)
-        for tier in sorted(rules.tiers, key=lambda t: t.orders):
-            if number >= tier.orders:
-                multiplier = tier.multiplier
-        points = int((spend * rules.points_per_currency * multiplier).to_integral_value(rounding=ROUND_FLOOR)) + rules.points_per_order
-        if number == 1:
-            points += rules.first_order_bonus
-        if number >= rules.repeat_from_order:
-            points += rules.repeat_order_bonus
-        if rules.milestone_every and number % rules.milestone_every == 0:
-            points += rules.milestone_bonus
-        if rules.max_earn_per_order:
-            points = min(points, rules.max_earn_per_order)
+        points = earn_points(rules, spend=spend, subtotal=subtotal, number=wallet.eligible_orders + 1,
+                             promo=promo, dish_points=dish_points)
         await session.execute(update(LoyaltyAccount).where(LoyaltyAccount.customer_id == order.customer_id)
                               .values(eligible_orders=LoyaltyAccount.eligible_orders + 1))
     order.loyalty_earned = points
@@ -306,14 +369,23 @@ async def adjust(session, customer_id, points, *, note, actor, request_id):
     if not await _exists(session, key):
         await _change(session, wallet, points, "adjustment", key, note=note, actor=actor, require_funds=points < 0)
 
+async def reset_all(session, *, note, actor) -> tuple[int, int]:
+    """Every balance to zero, each as an adjustment in that customer's
+    history. Returns (wallets changed, points removed)."""
+    wallets = list((await session.execute(select(LoyaltyAccount).where(LoyaltyAccount.balance != 0))).scalars())
+    removed = 0
+    for wallet in wallets:
+        before = wallet.balance
+        await adjust(session, wallet.customer_id, -before, note=note, actor=actor, request_id=uuid.uuid4())
+        removed += before
+    return len(wallets), removed
+
 async def overview(session, customer_id):
     rules = await policy(session)
     wallet = await account(session, customer_id)
     count = wallet.eligible_orders if wallet else 0
-    tier_name = "Member"
-    for tier in sorted(rules.tiers, key=lambda t: t.orders):
-        if count >= tier.orders:
-            tier_name = tier.name
+    tier = tier_for(rules, count)
+    tier_name = tier.name if tier else "Member"
     entries = list((await session.execute(select(LoyaltyEntry).where(LoyaltyEntry.customer_id == customer_id)
                    .order_by(LoyaltyEntry.created_at.desc(), LoyaltyEntry.id.desc()).limit(30))).scalars())
     return {"enabled": rules.enabled, "name": rules.name, "balance": wallet.balance if wallet else 0,

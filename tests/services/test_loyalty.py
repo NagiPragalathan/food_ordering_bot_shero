@@ -226,3 +226,41 @@ async def test_customer_deletion_removes_wallet_and_audit_rows(session, customer
     await delete_customer(session, customer)
     assert await session.scalar(select(func.count(LoyaltyEntry.id))) == 0
     assert await session.scalar(select(func.count(LoyaltyAccount.customer_id))) == 0
+
+
+async def test_big_order_dish_and_promotion_bonuses(session, customer, outlet):
+    from app.services import promotions
+    today = await promotions.local_today(session, outlet)
+    await configure(session, first_order_bonus=0, big_order_threshold="80", big_order_bonus=30,
+                    promo_multiplier="2", dish_bonuses=[{"retailer_id": "dish", "points": 7}])
+    first = await draft(session, customer, outlet, subtotal="100")
+    # Policy changed after the total was agreed: the order keeps what it was offered.
+    await configure(session, first_order_bonus=0)
+    assert await pay(session, first) == 100 * 2 + 30 + 7
+
+    # A promotion on another weekday, and food under the big-order amount.
+    other_day = loyalty.DAYS[(today.weekday() + 1) % 7]
+    await configure(session, first_order_bonus=0, big_order_threshold="80", big_order_bonus=30,
+                    promo_multiplier="2", promo_days=[other_day],
+                    dish_bonuses=[{"retailer_id": "dish", "points": 7}])
+    second = await draft(session, customer, outlet, subtotal="50")
+    assert await pay(session, second) == 50 + 7
+
+
+def test_the_promotion_runs_only_on_its_dates_and_days():
+    from datetime import date
+    rules = loyalty.Policy(promo_multiplier=2, promo_starts_on=date(2026, 11, 1),
+                           promo_ends_on=date(2026, 11, 30), promo_days=["sat", "sun"])
+    assert loyalty.promo_active(rules, date(2026, 11, 7))          # a Saturday inside
+    assert not loyalty.promo_active(rules, date(2026, 11, 6))      # a Friday
+    assert not loyalty.promo_active(rules, date(2026, 12, 5))      # a Saturday after the end
+    assert not loyalty.promo_active(loyalty.Policy(), date(2026, 11, 7))   # x1 is no promotion
+
+
+async def test_resetting_every_balance_is_in_each_history(session, customer):
+    await grant(session, customer, 250)
+    assert await loyalty.reset_all(session, note="Fresh start", actor="admin@test.local") == (1, 250)
+    assert await balance(session, customer) == 0
+    entry = (await session.execute(select(LoyaltyEntry).where(LoyaltyEntry.note == "Fresh start"))).scalar_one()
+    assert entry.points == -250 and entry.actor == "admin@test.local"
+    assert await loyalty.reset_all(session, note="Again", actor="admin@test.local") == (0, 0)
