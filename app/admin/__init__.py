@@ -20,7 +20,6 @@ router.include_router(customers.router)
 router.include_router(bot_replies.router)
 router.include_router(settings.router)
 router.include_router(order_alerts.router)
-# Not in the sidebar yet: reached at /admin/nudges.
 router.include_router(nudges.router)
 
 __all__ = ["router"]

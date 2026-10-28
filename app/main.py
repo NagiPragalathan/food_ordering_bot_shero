@@ -133,7 +133,7 @@ app.mount(media.MEDIA_URL_PREFIX,
 # rather than caching a replaced logo forever.
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(ops.router)
-# Retargeting nudges: JSON only for now (docs/nudges.md).
+# Retargeting nudges' JSON API, behind the admin Nudges page (docs/nudges.md).
 app.include_router(nudges.router)
 app.include_router(admin_router)
 

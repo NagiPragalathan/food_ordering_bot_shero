@@ -18,10 +18,8 @@ Zoho API calls. Zoho gets a record of every nudge (see [Zoho](#zoho)).
 
 ## The page
 
-Sign in to the dashboard and open **`/admin/nudges`** (for example
-https://smo.shero.us/admin/nudges). It is **not in the sidebar yet**; to add
-it later, put `('admin_nudges', 'Nudges', '<icon path>')` in the `nav` list
-in `templates/admin/base.html`.
+Sign in to the dashboard and open **Nudges** in the sidebar (for example
+https://smo.shero.us/admin/nudges).
 
 Everything below can be done on the page:
 
@@ -279,8 +277,10 @@ A template with an `order_link` button must have its URL button set to
 When a nudge is sent, the bot adds a **note** to the customer's Lead or
 Contact: the campaign, the time, the coupon and the exact message. It also
 adds the campaign's **tag**, for example `Nudge: Abandoned cart`. A customer
-who replies STOP is tagged `WhatsApp Opt-out`. Zoho creates new tags
-automatically.
+who replies STOP gets a note and is tagged `WhatsApp Opt-out`; START OFFERS
+adds a note too. Zoho creates new tags automatically. Zoho's Free edition has
+no tags: there the note (which names the tag) is the record, and the send
+still counts as written to Zoho.
 
 With those tags your team can:
 

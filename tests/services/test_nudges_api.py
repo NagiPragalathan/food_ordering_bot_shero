@@ -155,7 +155,7 @@ async def test_options_feed_the_editors_pickers(api, session, outlet, menu):
     assert "Drumstick Sambar" in options["dishes"] and "Chettinad" in options["cuisines"]
 
 
-async def test_the_page_is_served_but_not_in_the_sidebar(session, monkeypatch):
+async def test_the_page_is_served_and_in_the_sidebar(session, monkeypatch):
     from app.admin import router as admin_router
     from app.admin.deps import require_admin
 
@@ -174,8 +174,7 @@ async def test_the_page_is_served_but_not_in_the_sidebar(session, monkeypatch):
     assert "{{${i + 1}}}" in page.text
     # url_for renders absolute links, so match the path's end, not a whole href.
     offers = client.get("/admin/promotions").text
-    assert '/admin/promotions"' in offers
-    assert '/admin/nudges"' not in page.text and '/admin/nudges"' not in offers
+    assert '/admin/nudges"' in offers
 
 
 async def test_the_reference_lists_every_option(api):
