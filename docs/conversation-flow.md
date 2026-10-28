@@ -10,7 +10,7 @@ Every step from section 1 of the spec, with where it lives in the code.
 |---|---|---|---|
 | 1-2 | Entry, returning check. A known customer's "hi" / "hello" / "menu" gets one message, the `shero_welcome_back` template: "Welcome back to Shero Home Food, {name}! 👋" with **Order Now** (opens https://www.shero.us/) and **Continue on WhatsApp** (carries on with the bot). The name comes from our own database, or from the Zoho record found by the phone number when ours has none | `START` | `onboarding.start` |
 | 3 | Ask name | `AWAIT_NAME` | `onboarding.handle_name` |
-| 4 | Ask email, with a **Change name** button | `AWAIT_EMAIL` | `onboarding.handle_email` |
+| 4 | Ask email, with a **Change name** button. Skipped while **Ask for their email** is off on the Bot replies page: the name leads straight to step 5 | `AWAIT_EMAIL` | `onboarding.handle_email` |
 | 5 | Main menu: the welcome template (`shero_welcome_back`, or `shero_welcome_ready` right after sign-up) with **Order Now** (the website) and **Continue on WhatsApp** (the ordering flow, from any step) | `MAIN_MENU` | `onboarding.handle_main_menu` |
 | 6 | Cuisine + Check Availability | `CUISINE_MENU` | `menu.handle_cuisine_menu` |
 | 6a | Check Availability | `AWAIT_AVAILABILITY_LOCATION` | `menu.handle_availability_location` |
@@ -148,7 +148,7 @@ keeps its original timestamp, so drop-off reports show when a customer
 | Stage | Set at (chat) | Set at (web page) |
 |---|---|---|
 | New Enquiry | First message | |
-| Details Captured | Name + email | |
+| Details Captured | Name + email (the name alone while the email question is off) | |
 | Cuisine Selected | Cuisine chosen | First dish added (the menu has no cuisine step; sent to Zoho with Cart Created) |
 | Cart Created | Cart sent | First dish added; also when Change menu / Update location releases an order |
 | Not Serviceable | Step 6a or 10 | Address outside the delivery area |

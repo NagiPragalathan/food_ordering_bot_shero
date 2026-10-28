@@ -13,6 +13,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.config import settings
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.db.models.enums import LeadStage
 
@@ -75,8 +76,9 @@ class Customer(Base, UUIDPrimaryKey, Timestamps):
 
     @property
     def has_details(self) -> bool:
-        """True once name and email are captured (spec steps 3-4)."""
-        return bool(self.name and self.email)
+        """True once name and email are captured (spec steps 3-4); the name
+        alone while the Bot replies page has asking for the email off."""
+        return bool(self.name and (self.email or not settings.asks_customer_email))
 
     @property
     def greeting_name(self) -> str:

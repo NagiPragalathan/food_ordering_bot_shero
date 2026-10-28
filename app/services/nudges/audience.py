@@ -22,6 +22,7 @@ from decimal import Decimal
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.models import (
     Conversation,
     Customer,
@@ -321,7 +322,11 @@ async def _never_ordered(session, trigger: Trigger, audience: Audience,
     if trigger.max_days_since_signup:
         query = query.where(Customer.created_at >= now - timedelta(days=trigger.max_days_since_signup))
     if trigger.require_details:
-        query = query.where(Customer.name.is_not(None), Customer.email.is_not(None))
+        # The same details as Customer.has_details: no email while the bot
+        # is not asking for one.
+        query = query.where(Customer.name.is_not(None))
+        if settings.asks_customer_email:
+            query = query.where(Customer.email.is_not(None))
     return [Candidate(customer=c, dedupe_key="signup", since=aware(c.created_at))
             for c in (await session.execute(query)).scalars()]
 

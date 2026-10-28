@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import ConversationStep, LeadStage
 from app.integrations.gallabox import templates as tpl
@@ -39,6 +40,10 @@ async def handle_name(ctx: FlowContext) -> None:
         return
 
     ctx.customer.name = name
+    if not settings.asks_customer_email:
+        # Switched off on the Bot replies page: the name is all we ask.
+        await _details_captured(ctx)
+        return
     await _ask_email(ctx, p.ASK_EMAIL.format(name=name))
     ctx.goto(ConversationStep.AWAIT_EMAIL)
 
@@ -63,14 +68,21 @@ async def handle_email(ctx: FlowContext) -> None:
         return
 
     email = clean_email(ctx.text)
-    if email is None:
+    if email is None and settings.asks_customer_email:
         await _ask_email(ctx, p.EMAIL_REASK)
         return
 
-    ctx.customer.email = email
-    # Both details are now in hand (spec stage "Details Captured").
+    # Asked before the email question was switched off: an email they type
+    # is still kept, and anything else moves them on without asking again.
+    ctx.customer.email = email or ctx.customer.email
+    await _details_captured(ctx)
+
+
+async def _details_captured(ctx: FlowContext) -> None:
+    """The details are in hand (spec stage "Details Captured"): tell Zoho and
+    show the main menu."""
     await ctx.set_stage(LeadStage.DETAILS_CAPTURED)
-    await push_details(ctx.customer, name=ctx.customer.name, email=email)
+    await push_details(ctx.customer, name=ctx.customer.name, email=ctx.customer.email)
     await show_main_menu(ctx)
 
 

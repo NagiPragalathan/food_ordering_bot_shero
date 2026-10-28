@@ -175,6 +175,11 @@ class Settings(BaseSettings):
     bot_reply_trigger: str = Field(default="", validation_alias="ADMIN_PAGE_ONLY_BOT_REPLY_TRIGGER")
     bot_trigger_keywords: str = Field(default="",
                                       validation_alias="ADMIN_PAGE_ONLY_BOT_TRIGGER_KEYWORDS")
+    # Ask a new customer for their email after their name: "on" (also when
+    # nothing is saved) or "off". Bot replies page only, like the above.
+    # See services/conversation/handlers/onboarding.py.
+    ask_customer_email: str = Field(default="",
+                                    validation_alias="ADMIN_PAGE_ONLY_ASK_CUSTOMER_EMAIL")
 
     # --- Team alerts -----------------------------------------------------
     # WhatsApp numbers told about every paid order, "number|name,...". Set on
@@ -227,6 +232,11 @@ class Settings(BaseSettings):
         return ZOHO_HOSTS.get(self.zoho_data_center, ZOHO_HOSTS["com"])[1]
 
     @computed_field  # type: ignore[prop-decorator]
+    @property
+    def asks_customer_email(self) -> bool:
+        """Whether the bot asks new customers for their email (Bot replies page)."""
+        return self.ask_customer_email.strip().lower() != "off"
+
     @property
     def meta_graph_url(self) -> str:
         return f"https://graph.facebook.com/{self.meta_graph_version}"

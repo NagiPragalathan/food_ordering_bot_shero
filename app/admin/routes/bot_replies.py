@@ -1,4 +1,5 @@
-"""Bot replies: who the bot answers, and which messages start it.
+"""Bot replies: who the bot answers, which messages start it, and whether
+new customers are asked for an email (ASK_CUSTOMER_EMAIL).
 
 Two independent settings, each saved from its own form:
 
@@ -18,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.deps import redirect, render, require_admin
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import AdminUser, AppSetting
 from app.db.session import get_session
@@ -53,7 +55,24 @@ async def bot_replies_page(
         "active_hours": reply_triggers.ACTIVE_HOURS,
         "message_check": _message_check(message) if message.strip() else None,
         "message_query": message,
+        "asks_email": settings.asks_customer_email,
     })
+
+
+@router.post("/email", name="admin_bot_email_save")
+async def save_email_question(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    current_user: AdminUser = Depends(require_admin),
+):
+    """Ask new customers for their email, or not (onboarding.handle_name)."""
+    asks = (await request.form()).get("ask_email") == "1"
+    await save_many(session, {"ASK_CUSTOMER_EMAIL": "on" if asks else "off"},
+                    updated_by=current_user.email, allow_blank={"ASK_CUSTOMER_EMAIL"})
+    log.info("ask_email_saved", asks=asks, by=current_user.email)
+    return redirect(str(request.url_for("admin_bot_replies")), flash=("success", (
+        "The bot now asks new customers for their email." if asks else
+        "The bot no longer asks for an email: new customers go from their name to the menu.")))
 
 
 @router.post("", name="admin_bot_replies_save")

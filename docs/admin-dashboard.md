@@ -584,6 +584,20 @@ a keyword saved without `reply` means both). Not
 read from `.env`. The check is `services/reply_triggers.decide`, run by the
 WhatsApp webhook after the whitelist.
 
+### New customers' details
+
+The bot always asks a new customer for their name. **Ask for their email**
+decides whether it then asks for an email:
+
+- **On** (the default): name, then email, then the menu.
+- **Off**: name, then straight to the menu. Nobody is asked for an email,
+  including customers who gave a name earlier but no email. Someone who was
+  asked just before it was switched off is moved on by their next message
+  (an email they type then is still kept).
+
+Payments, receipts and Zoho work without an email. Saved as
+`ASK_CUSTOMER_EMAIL` (`on` / `off`), and takes effect at once.
+
 ---
 
 ## The customer ordering page
