@@ -22,6 +22,7 @@ from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
 from app.services.conversation.handlers import (
     checkout,
+    coupons,
     delivery,
     feedback,
     location,
@@ -29,7 +30,7 @@ from app.services.conversation.handlers import (
     onboarding,
     order_changes,
 )
-from app.services import crm_sync, customers, orders
+from app.services import crm_sync, customers, orders, promotions
 from app.services.customers import get_or_create_conversation, get_or_create_customer
 
 log = get_logger(__name__)
@@ -218,6 +219,9 @@ async def _handle_global_intent(ctx: FlowContext) -> bool:
             await ctx.reply_text("Type redeem followed by a whole number of points, for example redeem 100.")
         elif ctx.step not in {str(ConversationStep.CART_REVIEW), str(ConversationStep.AWAIT_SLOT_CHOICE), str(ConversationStep.CUISINE_MENU), str(ConversationStep.BROWSING_CATEGORIES), str(ConversationStep.BROWSING_ITEMS)}:
             await ctx.reply_text("Choose points before selecting your delivery slot. For an existing payment link, use Change menu to release it first.")
+        elif (int(value) and (code := promotions.stored_code(ctx.conversation))
+              and not await coupons.stacks_with_points(ctx)):
+            await ctx.reply_text(p.COUPON_NOT_WITH_POINTS.format(code=code, points=int(value)))
         else:
             ctx.put(loyalty_points=int(value))
             await ctx.reply_text(f"Requested {int(value)} loyalty points. Your balance and the reward rules will be checked in the order summary.")
@@ -259,6 +263,10 @@ async def _handle_global_intent(ctx: FlowContext) -> bool:
         # before the menu, and asks a new one for their name. Jumping
         # straight to the menu read as a cold reply to a "hi".
         await onboarding.start(ctx)
+        return True
+
+    # Last, so a built-in keyword always wins over a coupon of the same name.
+    if not tapped and await coupons.handle(ctx, text):
         return True
 
     return False

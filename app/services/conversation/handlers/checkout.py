@@ -93,8 +93,31 @@ async def build_and_show_summary(ctx: FlowContext) -> None:
             Button(p.SUMMARY_EDIT, p.BTN_EDIT),
             Button(p.SUMMARY_CANCEL, p.BTN_CANCEL),
         ],
+        # A code can be typed right here (handlers/coupons.py).
+        footer=p.SUMMARY_COUPON_HINT if promotion is None else None,
     )
     ctx.goto(ConversationStep.AWAIT_SUMMARY_CONFIRM)
+
+
+async def reprice_summary(ctx: FlowContext) -> None:
+    """Show the summary again after a coupon was applied or removed in chat.
+
+    The draft is cancelled and priced afresh on the same slot: its hold is
+    released only for the new draft to take it back, and any points it used
+    are asked for again.
+    """
+    from app.services.conversation.handlers import coupons
+
+    order = await _draft_order(ctx)
+    points = order.loyalty_points if order is not None else 0
+    if points and promotions.stored_code(ctx.conversation) and not await coupons.stacks_with_points(ctx):
+        # The coupon was asked for last, so it wins; the customer is told.
+        await ctx.reply_text(p.POINTS_NOT_WITH_COUPON.format(points=points))
+        points = 0
+    if points and not ctx.get("loyalty_points"):
+        ctx.put(loyalty_points=points)
+    await _abandon_draft(ctx, order, reason="coupon_changed", keep_slot=True)
+    await build_and_show_summary(ctx)
 
 
 async def handle_summary_choice(ctx: FlowContext) -> None:
@@ -151,8 +174,9 @@ async def _send_payment(ctx: FlowContext, order: Order | None) -> None:
 
 
 async def _abandon_draft(ctx: FlowContext, order: Order | None, *,
-                         reason: str) -> None:
-    """Release an unpaid draft order and its slot hold."""
+                         reason: str, keep_slot: bool = False) -> None:
+    """Release an unpaid draft order and its slot hold. `keep_slot` leaves
+    the chosen slot on the conversation, for a draft about to be re-priced."""
     if order is None:
         return
     if order.payment_status == PaymentStatus.PAID:
@@ -164,8 +188,9 @@ async def _abandon_draft(ctx: FlowContext, order: Order | None, *,
     await slots.release_holds_for_order(ctx.session, order.id, reason=reason)
     # set_stage stamps cancelled_at as part of the transition.
     order_service.set_stage(order, OrderStage.CANCELLED)
-    ctx.drop("order_id", "order_number", "slot_id", "slot_label",
-             "slot_starts_at", "slot_ends_at")
+    ctx.drop("order_id", "order_number")
+    if not keep_slot:
+        ctx.drop("slot_id", "slot_label", "slot_starts_at", "slot_ends_at")
     await ctx.session.flush()
     log.info("draft_order_abandoned", order_number=order.order_number, reason=reason)
 

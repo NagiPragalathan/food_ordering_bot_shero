@@ -208,6 +208,14 @@ SLOT_TAKEN = "Sorry, that slot was just taken. Please pick another one."
 
 # --- Summary and payment (steps 14-15) ---------------------------------------
 SUMMARY_PROMPT = "Please review your order:"
+# The summary's footer while no coupon is on it. WhatsApp allows 60 characters.
+SUMMARY_COUPON_HINT = "Have a coupon? Type the code. Type offers to see them."
+# Loyalty points and a coupon on one order, while the loyalty rules say no:
+# whichever the customer asked for last wins (handlers/coupons.py).
+POINTS_NOT_WITH_COUPON = ("Points can't be used together with a coupon, so your {points} "
+                          "points stay in your balance.")
+COUPON_NOT_WITH_POINTS = ("Points can't be used together with a coupon, and *{code}* is "
+                          "applied. Type *remove coupon* first, then *redeem {points}*.")
 BTN_CONFIRM = "Confirm"
 BTN_EDIT = "Edit"
 BTN_CANCEL = "Cancel"

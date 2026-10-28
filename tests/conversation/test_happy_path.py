@@ -47,7 +47,8 @@ class FakeGallabox:
 
     async def send_buttons(self, to, body, buttons, header=None, footer=None):
         self.sent.append(SentMessage(
-            "buttons", to, body, {"buttons": [(b.id, b.title) for b in buttons]}))
+            "buttons", to, body, {"buttons": [(b.id, b.title) for b in buttons],
+                                  "footer": footer}))
 
     async def send_list(self, to, body, sections, button_text="Choose",
                         header=None, footer=None):

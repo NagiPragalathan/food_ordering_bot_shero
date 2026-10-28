@@ -266,6 +266,20 @@ their older unpaid one.
 - The cart shows the applied code, or how much more unlocks the nearest offer.
 - The order summary has a coupon box, the listed offers with what each saves
   (or why not yet), and the discount as its own line in the total.
+- In the WhatsApp chat (ordering inside WhatsApp, not on the page), the
+  customer types **offers** to see the codes they can use, **apply CODE**
+  (or just the code) to use one, and **remove coupon** to take it off. A code
+  typed at the order summary re-prices it at once on the same delivery slot;
+  the summary's footer says "Have a coupon? Type the code." while none is on
+  it. Every rule above is checked exactly as on the page, and the two share
+  one applied code. Once the payment link is out the total is fixed, so the
+  customer is told to type **change menu** first. Hidden codes are never
+  listed but work when typed. A code is not read from a free-text answer
+  (name, address and so on).
+- When the loyalty rules do not allow points and a coupon on one order, the
+  customer's latest choice wins: a coupon typed after points keeps the
+  coupon and tells them their points stay in their balance; **redeem** after a
+  coupon tells them to remove the coupon first.
 - The WhatsApp summary and payment messages give the total with the saving,
   e.g. `$44.59 (you saved $8.87 with FEAST20)`.
 - Stripe shows the same discount line, and the PDF bill lists the coupon and
