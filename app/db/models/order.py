@@ -111,6 +111,10 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
     # Zoho Order Item record per cart line: {retailer_id: zoho id}. Lets a
     # re-push update the lines instead of filing them twice.
     zoho_item_ids: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # On a Zoho plan without the Orders module (the Free edition), the order
+    # is a note on the customer's Lead/Contact instead: "Contacts/<id>/<note
+    # id>", so it is noted once and its status changes go on the same record.
+    zoho_note: Mapped[str | None] = mapped_column(String(80))
     uber_quote_id: Mapped[str | None] = mapped_column(String(128))
     # The courier, booked UBER_DISPATCH_HOURS_BEFORE the slot (services/dispatch.py).
     # When the order joins the Uber queue's send list: set at payment to

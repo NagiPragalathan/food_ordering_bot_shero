@@ -34,7 +34,7 @@ from app.db.models import (
     OrderStage,
     Outlet,
 )
-from app.integrations.zoho import crm
+from app.integrations.zoho import crm, engagement
 from app.integrations.zoho import fields as f
 from app.services import catalogue_sync
 from app.services.customers import record_stage
@@ -218,6 +218,18 @@ async def convert_and_record_order(customer: Customer, order: Order,
 async def push_order_stage(order: Order, stage: OrderStage, *,
                            delivered_at: datetime | None = None) -> None:
     """Mirror an order stage change into Zoho's Order Status (spec 17-18)."""
+    if not order.zoho_order_id and order.zoho_note:
+        # Noted rather than filed (_note_order): the change is a short note
+        # on the same Lead/Contact, so the record shows how the order went.
+        module, record_id = order.zoho_note.split("/")[:2]
+        try:
+            await engagement.add_note(module, record_id,
+                                      title=f"Order {order.order_number}: {stage}",
+                                      content=f"Order {order.order_number} is now {stage}.")
+        except ZOHO_ERRORS as exc:
+            log.error("zoho_order_stage_note_failed", order_number=order.order_number,
+                      error=str(exc))
+        return
     if not order.zoho_order_id:
         log.info("zoho_order_stage_skipped", order_number=order.order_number,
                  reason="no zoho order id")
@@ -344,8 +356,43 @@ async def _file_order(customer: Customer, order: Order, ctx: OrderContext) -> st
         order.zoho_order_id = None
     zoho_order_id = order.zoho_order_id
     if not zoho_order_id:
+        if await _note_order(customer, order, ctx):
+            return (f"Order {order.order_number} is a note on the customer's Zoho record: "
+                    "the Orders module could not be used - see the server log.")
         return f"Order {order.order_number} could not be filed - see the server log."
     return await _file_items_and_sales_order(customer, order, ctx, zoho_order_id)
+
+
+async def _note_order(customer: Customer, order: Order, ctx: OrderContext) -> bool:
+    """The order, with every dish, as a note on the customer's Lead/Contact.
+
+    For when the Order cannot be filed: on Zoho's Free edition there is no
+    Orders module (nor Products or Sales Orders), but notes always work, so
+    the team still sees each order on the customer. Noted once: a webhook
+    replay or a Push to Zoho does not add it again.
+    """
+    if order.zoho_note:
+        return True
+    record = _record_of(customer)
+    if record is None:
+        return False
+    title, content = crm.order_note(order, outlet_name=ctx.outlet_name)
+    try:
+        note_id = await engagement.add_note(*record, title=title, content=content)
+    except ZOHO_ERRORS as exc:
+        log.error("zoho_order_note_failed", order_number=order.order_number, error=str(exc))
+        return False
+    order.zoho_note = f"{record[0]}/{record[1]}/{note_id or ''}"[:80]
+    log.info("zoho_order_noted", order_number=order.order_number, module=record[0])
+    return True
+
+
+def _record_of(customer: Customer) -> tuple[str, str] | None:
+    if customer.zoho_contact_id:
+        return f.CONTACTS, customer.zoho_contact_id
+    if customer.zoho_lead_id:
+        return f.LEADS, customer.zoho_lead_id
+    return None
 
 
 async def _file_items_and_sales_order(customer: Customer, order: Order, ctx: OrderContext,

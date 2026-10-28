@@ -10,6 +10,23 @@ Every Zoho field name the bot uses is in one file,
 `app/integrations/zoho/fields.py`; what the setup script creates is in
 `app/integrations/zoho/schema.py`.
 
+> **The org needs a paid edition.** The Orders and Order Items modules, Products,
+> Vendors, Sales Orders and tags are not in Zoho CRM's **Free** edition (a
+> trial that ends drops to it). On Free, Zoho refuses those writes with
+> "permission denied to access the module", and the bot falls back to what
+> Free has:
+>
+> - Leads, Contacts, stages and Lead → Contact conversion work as normal.
+> - Each paid order becomes a **note on the customer's Contact** (Lead if not
+>   converted) with every dish, quantity and price, the coupon, points,
+>   kitchen, slot, address and total. Each later status change ("Delivered",
+>   "Refunded") is a short note on the same record.
+> - Nudges and STOP / START OFFERS are notes; the tag is named in the note.
+>
+> Once the org is on a paid edition, run `scripts/setup_zoho_crm.py` and new
+> orders file as Orders again. Older orders can be filed with **Push to Zoho**
+> on the customer's page.
+
 ---
 
 ## 1. How records flow

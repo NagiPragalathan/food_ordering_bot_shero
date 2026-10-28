@@ -276,6 +276,37 @@ def _coupon_line(order) -> str | None:
     return "; ".join(lines) or None
 
 
+def order_note(order, *, outlet_name: str | None) -> tuple[str, str]:
+    """(title, text) of the order as a note on the customer's Lead/Contact,
+    for a Zoho plan without the Orders module (services/crm_sync.py)."""
+    stage = str(OrderStage(order.stage))
+    address = ", ".join(p for p in (order.delivery_address, order.apartment_unit,
+                                    order.postal_code) if p)
+    lines = [f"Order {order.order_number}, placed on the WhatsApp bot", f"Status: {stage}"]
+    for label, value in (("Kitchen", outlet_name), ("Delivery slot", order.slot_label),
+                         ("Deliver to", address), ("Instructions", order.delivery_instructions),
+                         ("Contact number", order.contact_number)):
+        if value:
+            lines.append(f"{label}: {value}")
+    lines += ["", "Items:", item_lines(order.items or []) or "-", ""]
+    lines.append(f"Dishes: {order.dish_total:.2f}")
+    if order.delivery_fee:
+        lines.append(f"Delivery: {order.delivery_fee:.2f}")
+    fees = Decimal(str(order.extra_fees or 0)) + Decimal(str(order.tax or 0))
+    if fees:
+        lines.append(f"Taxes and fees: {fees:.2f}")
+    discounts = _coupon_line(order)
+    if discounts:
+        lines.extend(discounts.split("; "))
+    lines.append(f"Total: {order.total:.2f} {order.currency}")
+    if order.paid_at:
+        lines.append(f"Paid: {order.paid_at:%d %b %Y %H:%M} UTC")
+    if order.stripe_payment_intent_id:
+        lines.append(f"Stripe payment: {order.stripe_payment_intent_id}")
+    title = f"Order {order.order_number}: {stage}, {order.total:.2f} {order.currency}"
+    return title, "\n".join(lines)
+
+
 
 # Order fields added after the CRM was first set up. A CRM where
 # setup_zoho_crm.py has not been run since may refuse them; the Order is then

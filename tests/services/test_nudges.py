@@ -367,6 +367,27 @@ async def test_stop_opts_out_from_any_step_and_start_offers_opts_back_in(session
     assert customer.nudges_opted_out_at is None and "back on our list" in phone.sent[-1]["body"]
 
 
+async def test_stop_and_start_are_noted_in_zoho_even_without_tags(session, customer, monkeypatch):
+    from app.integrations.zoho import engagement
+    noted = []
+
+    async def note(module, record_id, *, title, content):
+        noted.append((module, record_id, title))
+
+    async def no_tags(*args, **kwargs):                  # Zoho's Free edition
+        raise IntegrationError("zoho", 'returned 403: {"code":"NOT_SUPPORTED_FEATURE"}')
+
+    monkeypatch.setattr(engagement, "add_note", note)
+    monkeypatch.setattr(engagement, "add_tags", no_tags)
+    customer.zoho_contact_id = "C-1"
+    from app.services.nudges import optout
+
+    assert await optout.opt_out(session, customer, source="whatsapp")
+    assert await optout.opt_in(session, customer, source="api:ops@shero.test")
+    assert noted == [("Contacts", "C-1", "WhatsApp offers: opted out"),
+                     ("Contacts", "C-1", "WhatsApp offers: opted back in")]
+
+
 async def test_stop_inside_a_sentence_is_just_a_message(session, customer):
     conversation, _ = await cart.for_customer(session, customer)
     conversation.step = ConversationStep.CART_REVIEW
@@ -625,6 +646,31 @@ async def test_each_send_is_noted_and_tagged_in_zoho(session, customer, monkeypa
     assert calls[1] == ("tags", "Leads", "L-1", ["Nudge: Abandoned cart"])
     [row] = await sends(session)
     assert row.zoho_synced is True
+
+
+async def test_a_zoho_plan_without_tags_still_counts_the_note(session, customer, monkeypatch):
+    from app.integrations.zoho import engagement
+    noted = []
+
+    async def note(module, record_id, *, title, content):
+        noted.append(content)
+
+    async def no_tags(*args, **kwargs):                  # Zoho's Free edition
+        raise IntegrationError("zoho", 'returned 403: {"code":"NOT_SUPPORTED_FEATURE"}')
+
+    monkeypatch.setattr(engagement, "add_note", note)
+    monkeypatch.setattr(engagement, "add_tags", no_tags)
+    customer.zoho_lead_id = "L-1"
+    await switch_on(session)
+    await make(session, "abandoned_cart")
+    await left_cart(session, customer)
+    await wrote_in(session, customer)
+
+    await run(session)
+
+    [row] = await sends(session)
+    assert row.zoho_synced is True and "no tags" in row.zoho_error
+    assert "Tag: Nudge: Abandoned cart" in noted[0]
 
 
 async def test_zoho_being_down_does_not_unsend_a_nudge(session, customer, monkeypatch):

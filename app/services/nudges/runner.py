@@ -590,19 +590,28 @@ async def _record_in_zoho(customer: Customer, campaign: NudgeCampaign, config: C
         row.zoho_error = "no Zoho record for this customer yet"
         return
     module, record_id = record
+    noted = False
     try:
         if settings.zoho_notes and config.zoho.note:
             lines = [f"Campaign: {campaign.name} ({campaign.kind})",
                      f"Sent: {state.now:%d %b %Y %H:%M} UTC, WhatsApp {plan.channel}"]
             if row.promo_code:
                 lines.append(f"Coupon: {row.promo_code}")
+            if config.zoho.tag:
+                lines.append(f"Tag: {config.zoho.tag}")
             lines += ["", plan.text]
             await engagement.add_note(module, record_id, title=f"WhatsApp nudge: {campaign.name}",
                                       content="\n".join(lines))
+            noted = True
         if config.zoho.tag:
             await engagement.add_tags(module, record_id, [config.zoho.tag])
         row.zoho_synced = True
     except ZOHO_ERRORS as exc:
+        # A plan without tags (Zoho Free) still has the note, tag named in it.
+        if noted and isinstance(exc, IntegrationError) and engagement.unsupported(exc):
+            row.zoho_synced = True
+            row.zoho_error = "Noted; this Zoho plan has no tags"
+            return
         row.zoho_error = str(exc)[:500]
         log.warning("nudge_zoho_sync_failed", campaign=campaign.name,
                     customer_id=str(customer.id), error=str(exc))

@@ -606,6 +606,67 @@ async def test_delivery_updates_move_the_zoho_order(customer, zoho):
                                              OrderStage.OUT_FOR_DELIVERY)]
 
 
+# --- a Zoho plan without the Orders module (the Free edition) -----------------
+@pytest.fixture
+def notes(monkeypatch):
+    calls = []
+
+    async def add_note(module, record_id, *, title, content):
+        calls.append((module, record_id, title, content))
+        return f"note-{len(calls)}"
+
+    monkeypatch.setattr(crm_sync.engagement, "add_note", add_note)
+    return calls
+
+
+async def test_without_the_orders_module_the_order_is_a_note_on_the_contact(
+        session, customer, zoho, notes, monkeypatch):
+    async def refused(fields):
+        raise IntegrationError("zoho", 'POST /crm/v6/Orders returned 400: {"code":"NO_PERMISSION"}')
+    monkeypatch.setattr(crm_sync.crm, "create_order", refused)
+    customer.zoho_lead_id = "lead-1"
+    order = _paid_order(customer)
+    order.promo_code, order.discount, order.total = "SAVE5", Decimal("5.00"), Decimal("20.50")
+    session.add(order)
+    await session.flush()
+
+    await crm_sync.convert_and_record_order(customer, order, _ctx())
+
+    [(module, record_id, title, content)] = notes
+    assert (module, record_id) == (f.CONTACTS, "contact-1")
+    assert title == "Order SHO-TEST-9: Paid & Slot Booked, 20.50 USD"
+    for line in ("2 x Sambar @ 9.50 = 19.00", "Deliver to: 12 Maple St, 2B, 08820",
+                 "Delivery slot: Fri 7:00 PM - 8:00 PM", "Coupon SAVE5 = -5.00",
+                 "Taxes and fees: 2.50", "Total: 20.50 USD", "Stripe payment: pi_1"):
+        assert line in content, line
+    assert order.zoho_note == "Contacts/contact-1/note-1" and order.zoho_order_id is None
+
+    # A replayed payment does not note it twice; a status change is a short
+    # note on the same Contact.
+    await crm_sync.convert_and_record_order(customer, order, _ctx())
+    assert len(notes) == 1
+    await crm_sync.push_order_stage(order, OrderStage.DELIVERED)
+    assert notes[-1][:3] == (f.CONTACTS, "contact-1", "Order SHO-TEST-9: Delivered")
+    assert _writes(zoho, "order_stage") == []
+
+
+async def test_a_filed_order_is_not_also_noted(session, customer, zoho, notes):
+    customer.zoho_contact_id = "contact-1"
+    order = _paid_order(customer)
+    session.add(order)
+    await session.flush()
+
+    await crm_sync.convert_and_record_order(customer, order, _ctx())
+
+    assert order.zoho_order_id == "zorder-1" and notes == [] and order.zoho_note is None
+
+
+def test_long_names_are_cut_to_what_zoho_accepts():
+    first, last = f.split_name("Sri " * 15 + "Venkata Lakshmi Narasimha")
+    assert len(first) <= f.FIRST_NAME_MAX and last == "Narasimha"
+    assert f.split_name("x" * 100) == ("", "x" * f.LAST_NAME_MAX)
+
+
 # --- the Zoho layer itself ------------------------------------------------------
 def test_every_field_gets_the_api_name_zoho_derives_from_its_label():
     for spec in schema.FIELDS:

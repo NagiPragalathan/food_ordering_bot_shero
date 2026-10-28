@@ -3,9 +3,12 @@
 Each WhatsApp nudge is written onto the customer's Lead or Contact, so the
 team sees in Zoho who was reminded, about what, and with which coupon - and
 can build their own Zoho views and workflows on the tags ("Nudge: Abandoned
-cart", "WhatsApp Opt-out").
+cart", "WhatsApp Opt-out"). On a Zoho plan without the Orders module, each
+order is a note here too (services/crm_sync.py).
 
 Zoho creates a tag the first time it is used, so nothing has to be set up.
+The Free edition has no tags: `unsupported` tells that refusal apart, so the
+note that did go in still counts.
 """
 
 from __future__ import annotations
@@ -35,13 +38,23 @@ def _raise_on_refusal(result: Any, what: str) -> None:
                                    payload=item)
 
 
-async def add_note(module: str, record_id: str, *, title: str, content: str) -> None:
+async def add_note(module: str, record_id: str, *, title: str, content: str) -> str | None:
+    """Add a note to the record; returns the note's id."""
     result = await zoho_client.post(
         f"{_record_path(module, record_id)}/Notes",
         json={"data": [{"Note_Title": title[:NOTE_TITLE_MAX],
                         "Note_Content": content[:NOTE_MAX]}]})
     _raise_on_refusal(result, "note")
     log.info("zoho_note_added", module=module, zoho_id=record_id)
+    first = ((result or {}).get("data") or [{}])[0]
+    return ((first.get("details") or {}).get("id") if isinstance(first, dict) else None)
+
+
+def unsupported(exc: IntegrationError) -> bool:
+    """Zoho refused because this plan has no such feature or module (the
+    Free edition: no tags, no Orders), not because of the request."""
+    text = str(exc)
+    return "NOT_SUPPORTED_FEATURE" in text or "NO_PERMISSION" in text
 
 
 async def add_tags(module: str, record_id: str, tags: list[str]) -> None:

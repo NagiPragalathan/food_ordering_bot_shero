@@ -166,6 +166,7 @@ COUNTRY_NAMES = {
 }
 
 NAME_PLACEHOLDER = "WhatsApp Customer"        # Last Name until the customer gives one
+FIRST_NAME_MAX, LAST_NAME_MAX = 40, 80        # Zoho's lengths for Leads and Contacts
 
 
 def country_name(code: str | None) -> str | None:
@@ -197,8 +198,9 @@ def split_name(full_name: str | None) -> tuple[str, str]:
         return "", NAME_PLACEHOLDER
     parts = cleaned.split()
     if len(parts) == 1:
-        return "", parts[0]
-    return " ".join(parts[:-1]), parts[-1]
+        return "", parts[0][:LAST_NAME_MAX]
+    # Zoho refuses the whole write over a long name, so it is cut to fit.
+    return " ".join(parts[:-1])[:FIRST_NAME_MAX].rstrip(), parts[-1][:LAST_NAME_MAX]
 
 
 def join_name(record: dict) -> str:
