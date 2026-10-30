@@ -100,8 +100,30 @@ Every endpoint takes either:
    Nothing is sent.
 5. **Live**: `PATCH /api/nudges/settings {"dry_run": false}`.
 
-To try it on real data with only your own phone: set
-`{"test_numbers": ["17325550142"]}`, and only those numbers are nudged.
+### Test mode: the flows on your own phone
+
+**Settings > Test mode > Test numbers** (`test_numbers`). While any number is
+there:
+
+* **only those numbers get nudges** - every other customer is skipped
+  (`not_a_test_number`), on the live site, with real data;
+* a test number always counts for the follow-up journey, as someone who
+  wrote in and never ordered, whatever its past orders. An order paid
+  *after* its journey started still ends the journey, as it would for a
+  customer (Restart the journey to test again);
+* **Customer lookup** shows the number as a test number, with **Send now**
+  (**Send next now** on the follow-up) on every campaign
+  (`POST /api/nudges/customers/{number}/send-now`, `runner.send_now`). It
+  sends that campaign's next message straight away: no waiting days, no
+  cart or payment-link wait, no 3 days after ORDER FOOD (the flow counts as
+  abandoned), no quiet hours, no once-a-day or 20-hour limits. It is a real
+  send: the journey moves on, Zoho is written, and the same cart or order is
+  never chased twice. It works with the master switch off and the campaign
+  paused. STOP, a hold, an ended journey, Dry run and WhatsApp's 24-hour rule
+  still apply - message the bot from the phone first.
+
+The scheduler keeps the real timing for test numbers too. Remove every
+number to go live.
 
 ---
 
@@ -125,6 +147,7 @@ To try it on real data with only your own phone: set
 | GET | `/api/nudges/stats?days=30&campaign_id=` | Sends, conversions, revenue |
 | GET | `/api/nudges/customers/{number}` | One customer: history, follow-up journeys, and why they would or would not get each campaign |
 | POST | `/api/nudges/customers/{number}/opt-out`, `/opt-in` | |
+| POST | `/api/nudges/customers/{number}/send-now` | Test mode: `{"campaign_id"}` - a test number's next message from that campaign, now ([Test mode](#test-mode-the-flows-on-your-own-phone)) |
 | POST | `/api/nudges/campaigns/import` | Multipart `file` (.xlsx, .csv, .json), `mode` (`upsert` / `add_only`), `commit` (false: check only). Matched on name; new campaigns are paused |
 | GET | `/api/nudges/campaigns/export?format=xlsx\|csv\|json` | Every campaign as a file that imports straight back |
 | GET | `/api/nudges/campaigns/sample?format=…` | An example file: a 6-month follow-up, a cart reminder, a win-back |

@@ -27,6 +27,12 @@ The master switch is checked before anything else: off, and a run sends
 nothing at all. A preview runs every rule and sends nothing, whatever the
 switch says.
 
+Test mode (Settings > Test mode, `test_numbers`): only those numbers are
+nudged, they always count for the follow-up journey whatever their orders
+(followup.testers), and `send_now` sends one of them a campaign's next
+message straight away - no waiting days, quiet hours or frequency limits;
+STOP, a hold, an ended journey and WhatsApp's 24-hour rule still apply.
+
 A send is claimed in the database (`nudge_sends.claim_key`, unique) and
 committed before the WhatsApp call, so two workers - the scheduler and a
 manual run - can never send the same nudge twice.
@@ -51,6 +57,7 @@ from app.core.logging import get_logger
 from app.db.models import (
     ConversationStep,
     Customer,
+    FlowStatus,
     JourneyBucket,
     NudgeCampaign,
     NudgeKind,
@@ -186,6 +193,8 @@ class _State:
     run_sends: dict[uuid.UUID, list[datetime]] = field(default_factory=dict)
     # Library messages and menu dishes, read once per run (followup.py).
     library: dict = field(default_factory=dict)
+    # A test number's Send now: no waiting, quiet hours or frequency limits.
+    fast: bool = False
 
 
 @dataclass
@@ -294,7 +303,8 @@ async def _run_campaign(session, campaign: NudgeCampaign, state: _State,
         return
 
     if campaign.kind == NudgeKind.FOLLOW_UP:
-        candidates = await followup.find(session, campaign, config, now, preview=state.preview)
+        candidates = await followup.find(session, campaign, config, now, preview=state.preview,
+                                         test_numbers=state.settings.test_numbers)
     else:
         candidates = await aud.find(session, campaign.kind, config.trigger, config.audience, now)
     if only_customer is not None:
@@ -424,7 +434,7 @@ async def _evaluate(session, campaign: NudgeCampaign, config: CampaignConfig,
         return f"audience:{problem}"
     if customer.id in busy:
         return "order_in_progress"
-    if campaign.kind == NudgeKind.FOLLOW_UP:
+    if campaign.kind == NudgeKind.FOLLOW_UP and not state.fast:
         problem = followup.gate(candidate, config.journey, now)
         if problem:
             return problem
@@ -438,6 +448,34 @@ async def _evaluate(session, campaign: NudgeCampaign, config: CampaignConfig,
     if sum(status == NudgeStatus.FAILED for status, _ in same) >= MAX_FAILURES:
         return "gave_up_after_failures"
 
+    problem = None if state.fast else _limits_problem(customer, config, settings, history,
+                                                      state, now)
+    if problem:
+        return problem
+
+    kitchen = aud.kitchen_of(candidate, state.outlets)
+    zone, candidate.tz_source = _customer_zone(kitchen, settings.timezone)
+    candidate.tz = zone.key
+    local = now.astimezone(zone)
+    window = config.schedule.send_window or settings.send_window
+    if not state.fast and not window.allows(local.time()):
+        return "quiet_hours"
+    if not state.fast and config.schedule.days and DAYS[local.weekday()] not in config.schedule.days:
+        return "not_a_send_day"
+
+    if promotion is not None and config.offer.require_eligible:
+        try:
+            await promotions.check(session, promotion, customer=customer, outlet=kitchen)
+        except promotions.PromoError as exc:
+            return f"coupon: {exc}"
+
+    return await _plan(session, config, promotion, candidate, kitchen, state, number)
+
+
+def _limits_problem(customer: Customer, config: CampaignConfig, settings: GlobalSettings,
+                    history: _History, state: _State, now: datetime) -> str | None:
+    """The campaign's own limits, then the shop-wide frequency caps."""
+    earlier = history.campaign.get(customer.id, [])
     sent = sorted(at for _key, status, at in earlier if status == NudgeStatus.SENT and at)
     limits = config.limits
     if limits.max_per_customer is not None and len(sent) >= limits.max_per_customer:
@@ -453,24 +491,7 @@ async def _evaluate(session, campaign: NudgeCampaign, config: CampaignConfig,
         return "daily_limit"
     if len(recent) >= settings.max_per_customer_per_week:
         return "weekly_limit"
-
-    kitchen = aud.kitchen_of(candidate, state.outlets)
-    zone, candidate.tz_source = _customer_zone(kitchen, settings.timezone)
-    candidate.tz = zone.key
-    local = now.astimezone(zone)
-    window = config.schedule.send_window or settings.send_window
-    if not window.allows(local.time()):
-        return "quiet_hours"
-    if config.schedule.days and DAYS[local.weekday()] not in config.schedule.days:
-        return "not_a_send_day"
-
-    if promotion is not None and config.offer.require_eligible:
-        try:
-            await promotions.check(session, promotion, customer=customer, outlet=kitchen)
-        except promotions.PromoError as exc:
-            return f"coupon: {exc}"
-
-    return await _plan(session, config, promotion, candidate, kitchen, state, number)
+    return None
 
 
 def _customer_zone(kitchen, fallback: str) -> tuple[ZoneInfo, str]:
@@ -743,6 +764,114 @@ SAMPLE_CART = [{"retailer_id": "sample-1", "name": "Drumstick Sambar", "quantity
                 "unit_price": "9.50"}]
 
 
+# Why a test did not send, and what to do about it.
+HINTS = {
+    "outside_24h_window": "WhatsApp only delivers a normal message within 24 hours "
+                          "of that phone's last message to the bot. Send the bot any "
+                          "message from it, then test again - or set "
+                          "message.template for this campaign.",
+    "us_marketing_blocked": "Meta does not deliver marketing templates to US numbers. "
+                            "Message the bot from the phone first so the normal "
+                            "message is used.",
+    "template_not_approved": "The template is not approved in Gallabox yet.",
+    "no_order_link": "ADMIN_SESSION_SECRET is not set, so no ordering link can be made.",
+    "no_message_available": "No active message in the library fits this journey "
+                            "(its pool, month and group). Add or switch one on in the "
+                            "Messages tab.",
+    "no_approved_template": "That phone has not messaged the bot in 24 hours, and none "
+                            "of the fitting messages has an approved WhatsApp template. "
+                            "Send the bot any message from it, then test again.",
+    "opted_out": "This number replied STOP. Reply START OFFERS from it, or press Opt back in.",
+    "on_hold": "This number is on hold. Lift the hold to send again.",
+    "journey_converted": "This number paid for an order after its journey started, so the "
+                         "journey ended - as it should. Press Restart on the journey to test "
+                         "again.",
+    "journey_ended": "The journey has ended. Press Restart on the journey to test again.",
+    "journey_finished": "The journey ran its full length. Press Restart on the journey to "
+                        "test again.",
+    "journey_paused": "The journey is paused. Press Resume on the journey first.",
+    "with_an_agent": "The chat is with one of your team. Close the agent chat first.",
+    "order_in_progress": "This number has an order waiting for payment. Pay it or let the "
+                         "link expire first.",
+    "already_sent": "This one was already sent (the same cart or order is never chased "
+                    "twice). Change the cart, or place another order, then try again.",
+    "gave_up_after_failures": "Three sends to this number failed. Check the number in "
+                              "Gallabox.",
+}
+# A test number's Send now, when there is nothing for that campaign to chase.
+NOTHING_TO_CHASE = {
+    NudgeKind.ABANDONED_CART: "Their cart is empty. Add a dish to the cart on WhatsApp or the "
+                              "menu page, leave it unpaid, then press Send now.",
+    NudgeKind.ABANDONED_CHECKOUT: "No unpaid order whose payment link has expired or failed. "
+                                  "Place an order without paying; once its link expires "
+                                  "(30 minutes), press Send now.",
+}
+
+
+async def send_now(session: AsyncSession, campaign: NudgeCampaign, customer: Customer, *,
+                   actor: str) -> dict:
+    """Test mode: a test number's next message from this campaign, now.
+
+    The real send, recorded as one: the journey moves on, Zoho is written,
+    a cart or order is never chased twice. Only the waiting is skipped - the
+    days until the next follow-up, a cart's or link's wait, an ORDER FOOD's
+    days before follow-ups resume, quiet hours, chatting and the frequency
+    limits. Works with the master switch off and the campaign paused.
+    """
+    now = utcnow()
+    _, settings = await store.load_settings(session)
+    number = digits(customer.whatsapp_number)
+    if number not in settings.test_numbers:
+        raise NudgeConfigError("Send now is for test numbers only: add this number under "
+                               "Settings > Test mode first.")
+    promotion = await store.promotion_of(session, campaign)
+    config = store.campaign_config(campaign, has_coupon=promotion is not None)
+    state = _State(now=now, settings=settings, preview=False, dry_run=settings.dry_run,
+                   actor=actor, inbound=await aud.last_inbound(session, now),
+                   outlets=await aud.outlets_by_id(session), fast=True)
+    notes: list[str] = []
+
+    if campaign.kind == NudgeKind.FOLLOW_UP:
+        found = await followup.find(session, campaign, config, now, preview=False,
+                                    test_numbers=settings.test_numbers)
+    else:
+        # As if the wait after the cart or the lapsed link were over.
+        wait = timedelta(minutes=config.trigger.after_minutes or 0)
+        found = await aud.find(session, campaign.kind, config.trigger, config.audience,
+                               now + wait)
+    candidate = next((c for c in found if c.customer.id == customer.id), None)
+    if candidate is None:
+        await session.commit()
+        return {"sent": False, "reason": "trigger_not_met",
+                "hint": NOTHING_TO_CHASE.get(NudgeKind(campaign.kind), ""), "notes": notes}
+    if candidate.skip == "not_due":
+        candidate.skip = None
+    elif candidate.skip == "in_ordering_flow":
+        candidate.journey.flow_status = FlowStatus.ABANDONED
+        candidate.skip = None
+        notes.append(f"Their ORDER FOOD counted as abandoned, as after "
+                     f"{config.journey.resume_after_days:g} days with no order.")
+
+    history = await _history(session, campaign, [customer.id], now)
+    busy = await aud.busy_customers(session, [customer.id], now)
+    candidate.conversation = candidate.conversation or \
+        (await aud.conversations_of(session, [customer.id])).get(customer.id)
+    plan = await _evaluate(session, campaign, config, promotion, candidate, state, history, busy)
+    if isinstance(plan, str):
+        await session.commit()
+        return {"sent": False, "reason": plan, "hint": HINTS.get(plan.split(":")[0], ""),
+                "notes": notes}
+    status = await _deliver(session, campaign, config, promotion, candidate, plan, state)
+    if status == "dry_run":
+        notes.append("Dry run is on (Settings > Test mode): logged, not sent.")
+    log.info("nudge_send_now", campaign=campaign.name, to=number[-4:], status=status,
+             actor=actor)
+    return {"sent": status == "sent", "status": status,
+            "reason": None if status == "sent" else status, "hint": HINTS.get(status, ""),
+            "channel": plan.channel, "message": plan.text,
+            "detail": plan.pick.detail if plan.pick else None, "notes": notes}
+
+
 async def send_test(session: AsyncSession, campaign: NudgeCampaign, whatsapp_number: str, *,
                     actor: str, now: datetime | None = None) -> dict:
     """Send this campaign's message to one number, now, to see it on a phone.
@@ -773,24 +902,7 @@ async def send_test(session: AsyncSession, campaign: NudgeCampaign, whatsapp_num
     kitchen = aud.kitchen_of(candidate, outlets)
     plan = await _plan(session, config, promotion, candidate, kitchen, state, number)
     if isinstance(plan, str):
-        hints = {
-            "outside_24h_window": "WhatsApp only delivers a normal message within 24 hours "
-                                  "of that phone's last message to the bot. Send the bot any "
-                                  "message from it, then test again - or set "
-                                  "message.template for this campaign.",
-            "us_marketing_blocked": "Meta does not deliver marketing templates to US numbers. "
-                                    "Message the bot from the phone first so the normal "
-                                    "message is used.",
-            "template_not_approved": "The template is not approved in Gallabox yet.",
-            "no_order_link": "ADMIN_SESSION_SECRET is not set, so no ordering link can be made.",
-            "no_message_available": "No active message in the library fits this journey "
-                                    "(its pool, month and group). Add or switch one on in the "
-                                    "Messages tab.",
-            "no_approved_template": "That phone has not messaged the bot in 24 hours, and none "
-                                    "of the fitting messages has an approved WhatsApp template. "
-                                    "Send the bot any message from it, then test again.",
-        }
-        return {"sent": False, "reason": plan, "hint": hints.get(plan, "")}
+        return {"sent": False, "reason": plan, "hint": HINTS.get(plan, "")}
 
     await _send(number, plan)
     if known:

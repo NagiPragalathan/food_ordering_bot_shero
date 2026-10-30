@@ -39,10 +39,11 @@ from __future__ import annotations
 import random
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConfigurationError, IntegrationError
@@ -178,17 +179,24 @@ def journey_config(campaign: NudgeCampaign | None) -> Journey:
 
 # --- who is due ---------------------------------------------------------------------------
 async def find(session: AsyncSession, campaign: NudgeCampaign, config: CampaignConfig,
-               now: datetime, *, preview: bool) -> list[Candidate]:
+               now: datetime, *, preview: bool,
+               test_numbers: Sequence[str] = ()) -> list[Candidate]:
     """Everyone the campaign covers, each with their journey and the attempt due.
 
     Those not due (waiting, paused, finished) come back with `skip` set, so a
     preview and the customer lookup can say why; the runner skips them first.
+    The test numbers (Settings > Test mode) are always covered: see testers.
     """
     cfg = config.journey or Journey()
     candidates = await aud.find(session, NudgeKind.FOLLOW_UP, config.trigger, config.audience, now)
+    if test_numbers:
+        candidates += await testers(session, test_numbers, {c.customer.id for c in candidates})
     journeys = await journeys_for(session, campaign.id, [c.customer.id for c in candidates])
     chats = await last_messages(session, now - timedelta(hours=max(cfg.pause_after_chat_hours,
                                                                    ACTIVE_HOURS)))
+    # Before the loop: a journey a paid order just ended is not due. (A test
+    # number stays a candidate after it orders, so this is what stops it.)
+    converted = [] if preview else await _close_converted(session, campaign, now, test_numbers)
     finished, abandoned = [], []
     for candidate in candidates:
         candidate.last_inbound = chats.get(digits(candidate.customer.whatsapp_number))
@@ -214,7 +222,6 @@ async def find(session: AsyncSession, campaign: NudgeCampaign, config: CampaignC
                 candidate.skip = "not_due"
 
     if not preview:
-        converted = await _close_converted(session, campaign, now)
         await session.flush()
         from app.services.nudges import crm_fields
 
@@ -243,6 +250,27 @@ def flow_lapsed(journey: NudgeJourney, cfg: Journey, now: datetime) -> bool:
     return started is None or now >= started + timedelta(days=cfg.resume_after_days)
 
 
+def number_variants(numbers: Sequence[str]) -> list[str]:
+    """A number as customers.whatsapp_number may hold it: with or without the +."""
+    return [*numbers, *(f"+{n}" for n in numbers)]
+
+
+async def testers(session: AsyncSession, numbers: Sequence[str],
+                  present: set) -> list[Candidate]:
+    """The test numbers, as people who wrote in and never ordered, whatever
+    their own history and however recently they first wrote: a live test of
+    the journey on your own phone. A paid order still ends their journey, if
+    it is paid after the journey started (_close_converted)."""
+    rows = await session.execute(
+        select(Customer).where(Customer.whatsapp_number.in_(number_variants(numbers))))
+    found = [Candidate(customer=c, dedupe_key="signup", since=aware(c.created_at))
+             for c in rows.scalars() if c.id not in present]
+    facts = await aud.load_facts(session, [c.customer.id for c in found])
+    for candidate in found:
+        candidate.facts = facts[candidate.customer.id]
+    return found
+
+
 async def journeys_for(session: AsyncSession, campaign_id, customer_ids: list) -> dict:
     found = {}
     for start in range(0, len(customer_ids), aud.CHUNK):
@@ -267,10 +295,18 @@ async def last_messages(session: AsyncSession, since: datetime) -> dict[str, dat
 
 
 async def _close_converted(session: AsyncSession, campaign: NudgeCampaign,
-                           now: datetime) -> list[NudgeJourney]:
-    """A paid order ends the journey: its job is done."""
-    paid = exists().where(Order.customer_id == NudgeJourney.customer_id,
-                          Order.payment_status.in_([PaymentStatus.PAID, PaymentStatus.REFUNDED]))
+                           now: datetime, test_numbers: Sequence[str] = ()) -> list[NudgeJourney]:
+    """A paid order ends the journey: its job is done. For a test number,
+    only an order paid after its journey started."""
+    rules = [Order.customer_id == NudgeJourney.customer_id,
+             Order.payment_status.in_([PaymentStatus.PAID, PaymentStatus.REFUNDED])]
+    if test_numbers:
+        testing = select(Customer.id).where(
+            Customer.whatsapp_number.in_(number_variants(test_numbers)))
+        rules.append(or_(NudgeJourney.customer_id.not_in(testing),
+                         func.coalesce(Order.paid_at, Order.created_at)
+                         >= NudgeJourney.started_at))
+    paid = exists().where(*rules)
     rows = await session.execute(select(NudgeJourney).where(
         NudgeJourney.campaign_id == campaign.id,
         NudgeJourney.status.in_([JourneyStatus.ACTIVE, JourneyStatus.PAUSED]), paid))

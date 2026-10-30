@@ -427,6 +427,7 @@ async def customer_detail(number: str, session: AsyncSession = Depends(get_sessi
     now - and if not, why not."""
     customer = await _customer(session, number)
     now = datetime.now(timezone.utc)
+    _, nudge_settings = await store.load_settings(session)
     facts = (await aud.load_facts(session, [customer.id]))[customer.id]
     last = (await aud.last_inbound(session, now)).get(aud.digits(customer.whatsapp_number))
     report = await runner.run(session, preview=True, actor=actor, only_customer=customer,
@@ -436,6 +437,8 @@ async def customer_detail(number: str, session: AsyncSession = Depends(get_sessi
         "customer_id": str(customer.id),
         "whatsapp_number": customer.whatsapp_number,
         "name": customer.name,
+        # Settings > Test mode: this number gets Send now on each campaign.
+        "test_number": aud.digits(customer.whatsapp_number) in nudge_settings.test_numbers,
         "opted_out_at": customer.nudges_opted_out_at.isoformat()
         if customer.nudges_opted_out_at else None,
         "hold": customer.nudge_hold,
@@ -455,6 +458,20 @@ async def customer_detail(number: str, session: AsyncSession = Depends(get_sessi
                                              limit=50))["sends"],
         "journeys": await followup.customer_journeys(session, customer),
     }
+
+
+@router.post("/customers/{number}/send-now")
+async def customer_send_now(number: str, body: dict = Body(...),
+                            session: AsyncSession = Depends(get_session),
+                            actor: str = Depends(nudge_actor)) -> dict:
+    """Test mode: send a test number this campaign's next message now,
+    without the waiting (runner.send_now). {"campaign_id": "..."}"""
+    customer = await _customer(session, number)
+    campaign = await _campaign(session, str(body.get("campaign_id") or ""))
+    try:
+        return await runner.send_now(session, campaign, customer, actor=actor)
+    except NudgeConfigError as exc:
+        raise _invalid(exc) from None
 
 
 @router.post("/customers/{number}/opt-out")

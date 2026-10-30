@@ -396,7 +396,7 @@ function renderSwitch() {
   const on = S.enabled, st = S.settings;
   const chips = [];
   if (st.dry_run) chips.push('<span class="chip bg-sky-100 text-sky-800">Dry run - nothing is really sent</span>');
-  if (st.test_numbers.length) chips.push(`<span class="chip bg-violet-100 text-violet-800">Test numbers only (${st.test_numbers.length})</span>`);
+  if (st.test_numbers.length) chips.push(`<span class="chip bg-violet-100 text-violet-800">Test mode: only ${st.test_numbers.length === 1 ? '1 test number gets' : `${st.test_numbers.length} test numbers get`} nudges</span>`);
   if (window.NUDGE_BOT_RESTRICTED) chips.push('<span class="chip bg-amber-100 text-amber-800">Bot test mode: whitelisted numbers only</span>');
   const active = S.campaigns.filter((c) => c.is_active).length;
   $('switch-card').className = `mb-6 overflow-hidden rounded-2xl border shadow-card ${on ? 'border-emerald-200 bg-gradient-to-r from-emerald-50 to-white' : 'border-stone-200 bg-white'}`;
@@ -1736,13 +1736,14 @@ async function lookup() {
           </div>
         </div>
         <div class="space-y-5">
+          ${r.test_number ? testBanner(r) : ''}
           ${(r.journeys || []).length ? `<div class="rounded-2xl border border-stone-200 bg-white shadow-card">
             <div class="border-b border-stone-100 px-5 py-3 text-sm font-semibold text-stone-900">Follow-up journeys</div>
             <ul class="divide-y divide-stone-100">${r.journeys.map(journeyRow).join('')}</ul></div>` : ''}
           <div class="rounded-2xl border border-stone-200 bg-white shadow-card">
             <div class="border-b border-stone-100 px-5 py-3 text-sm font-semibold text-stone-900">Would they get each campaign right now?</div>
             ${r.campaigns.length ? `<ul class="divide-y divide-stone-100">${r.campaigns.map((o) => `<li class="px-5 py-3">
-              <div class="flex flex-wrap items-center gap-2"><span class="font-medium text-stone-900">${esc(o.campaign)}</span>${o.campaign_active ? '' : '<span class="chip bg-stone-100 text-stone-500">Paused</span>'}${statusChip(o.status)}</div>
+              <div class="flex flex-wrap items-center gap-2"><span class="font-medium text-stone-900">${esc(o.campaign)}</span>${o.campaign_active ? '' : '<span class="chip bg-stone-100 text-stone-500">Paused</span>'}${statusChip(o.status)}${r.test_number ? `<button type="button" class="btn btn-primary ml-auto !px-2.5 !py-1 text-xs" data-sendnow="${esc(o.campaign_id)}" data-name="${esc(o.campaign)}">${o.kind === 'follow_up' ? 'Send next now' : 'Send now'}</button>` : ''}</div>
               <div class="mt-1 whitespace-pre-line text-sm ${o.status === 'skipped' ? 'text-stone-600' : 'text-stone-800'}">${o.status === 'skipped' ? esc(reasonText(o.reason)) : wa(o.message)}</div></li>`).join('')}</ul>` : '<p class="px-5 py-4 text-sm text-stone-500">No campaigns yet.</p>'}
           </div>
           <div class="rounded-2xl border border-stone-200 bg-white shadow-card">
@@ -1753,6 +1754,15 @@ async function lookup() {
           </div>
         </div>
       </div>`;
+    out.querySelectorAll('[data-sendnow]').forEach((el) => el.addEventListener('click', async () => {
+      busy(el, true);
+      try {
+        const res = await api(`/customers/${encodeURIComponent(r.whatsapp_number)}/send-now`, {method: 'POST', body: {campaign_id: el.dataset.sendnow}});
+        S.lastSend = {number: r.whatsapp_number, campaign: el.dataset.name, at: new Date().toISOString(), ...res};
+        toast(res.sent ? 'Sent - check the phone.' : res.status === 'dry_run' ? 'Dry run: logged, not sent.' : 'Not sent - see why above.', res.sent ? 'success' : 'error');
+        lookup();
+      } catch (err) { toast(err.message, 'error'); busy(el, false); }
+    }));
     out.querySelectorAll('[data-jact]').forEach((el) => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'click', async () => {
       const action = el.dataset.jact, body = {action};
       if (action === 'move') { if (!el.value) return; body.bucket = el.value; }
@@ -1785,6 +1795,19 @@ async function lookup() {
   }
 }
 
+function testBanner(r) {
+  const last = S.lastSend && S.lastSend.number === r.whatsapp_number ? S.lastSend : null;
+  const result = !last ? '' : last.sent
+    ? `<div class="mt-3 rounded-xl bg-white/70 p-3 text-sm text-stone-800"><div class="text-xs font-medium text-emerald-700">Sent: ${esc(last.campaign)}, ${esc(when(last.at))}</div>${last.detail ? `<div class="mt-0.5 text-xs text-stone-500">${esc(last.detail)}</div>` : ''}<div class="mt-1 whitespace-pre-line">${wa(last.message || '')}</div></div>`
+    : `<div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><b>${esc(last.campaign)}: not sent</b> - ${esc(reasonText(last.reason))}.${last.hint ? `<div class="mt-1">${esc(last.hint)}</div>` : ''}</div>`;
+  const notes = last && (last.notes || []).length ? `<div class="mt-2 text-xs text-violet-900">${last.notes.map(esc).join('<br>')}</div>` : '';
+  return `<div class="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-sm text-violet-900">
+    <div class="font-semibold">Test number</div>
+    <div class="mt-1 text-xs">While Test mode has numbers (Settings), only those numbers get nudges, and this one counts as someone who has never ordered. <b>Send now</b> sends this number a campaign's next message straight away: no waiting days, quiet hours or daily limits. STOP, holds and WhatsApp's 24-hour rule still apply - message the bot from this phone first.</div>
+    ${result}${notes}
+  </div>`;
+}
+
 function journeyRow(j) {
   const [label, cls] = JOURNEY_STATUS[j.status] || [j.status, 'bg-stone-100 text-stone-600'];
   const running = j.status === 'active' || j.status === 'paused';
@@ -1810,7 +1833,7 @@ function journeyRow(j) {
       <select class="field !w-auto !py-1 text-xs" data-jact="move" data-id="${j.id}"><option value="">Move to group…</option>${BUCKETS.filter(([k]) => k !== j.bucket).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
       ${j.status === 'active' ? `<button type="button" class="${small}" data-jact="pause" data-id="${j.id}">Pause</button>` : ''}
       ${j.status === 'paused' ? `<button type="button" class="${small}" data-jact="resume" data-id="${j.id}">Resume</button>` : ''}
-      ${running ? `<button type="button" class="${small}" data-jact="due_now" data-id="${j.id}" title="The next follow-up goes at the next run, within the usual rules">Send next now</button>` : ''}
+      ${running ? `<button type="button" class="${small}" data-jact="due_now" data-id="${j.id}" title="The next follow-up goes at the next run, within the usual rules">Due at next run</button>` : ''}
       <button type="button" class="${small}" data-jact="restart" data-id="${j.id}">Restart</button>
       ${running ? `<button type="button" class="btn btn-danger !px-2.5 !py-1 text-xs" data-jact="end" data-id="${j.id}">End</button>` : ''}
     </div></li>`;
@@ -1828,9 +1851,9 @@ function renderSettings() {
   box.innerHTML = `
     <div id="set-error" class="mb-4 hidden rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"></div>
     <div class="grid gap-5 xl:grid-cols-2">
-      ${card('Pilot', 'Try it out first: the handoff\'s pilot runs with a limited group', `<div class="space-y-4">
+      ${card('Test mode', 'Try the flows on your own phone before customers get them', `<div class="space-y-4">
+        ${tags('test_numbers', 'Test numbers', 'With country code, e.g. 17325550142. While any number is here, <b>only these numbers get nudges</b> - nobody else. Each counts as someone who wrote in and never ordered, whatever their past orders, and Customer lookup gets a <b>Send now</b> button for them that skips the waiting. Remove every number to go live.')}
         ${check('dry_run', 'Dry run', 'Runs log who <b>would</b> be sent what, and send nothing. Watch a campaign for a day before going live.')}
-        ${tags('test_numbers', 'Only send to these numbers', 'With country code. While set, nobody else is nudged - a live test on real data with your own phones.')}
       </div>`)}
       ${card('Sending hours', 'When nudges may go out, unless a campaign has its own hours', `<div class="grid gap-4 sm:grid-cols-2">
         <div><label class="lbl">From</label><input class="field" type="time" data-skey="send_window.start" value="${esc(D.send_window.start)}"></div>
