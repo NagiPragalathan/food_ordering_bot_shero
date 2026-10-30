@@ -15,8 +15,7 @@ and the first that fails is the reason they are skipped:
     shop-wide frequency caps    -> too_soon / daily_limit / weekly_limit
     local quiet hours and days  -> quiet_hours / not_a_send_day
     the coupon still usable     -> coupon: <why>
-    a way to reach them         -> outside_24h_window / us_marketing_blocked /
-                                   template_not_approved
+    a way to reach them         -> outside_24h_window / template_not_approved
 
 A follow-up journey (followup.py) first has to be due - not_due,
 journey_paused / _converted / _ended / _finished - and not mid-order or just
@@ -99,11 +98,6 @@ _run_lock = asyncio.Lock()
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def is_us(number: str) -> bool:
-    """+1 is the US and Canada (NANP), where Meta holds back marketing templates."""
-    return number.startswith("1") and len(number) == 11
 
 
 # --- the report ------------------------------------------------------------------------
@@ -529,8 +523,6 @@ async def _plan(session, config: CampaignConfig, promotion, candidate: Candidate
 
     chosen = None
     if config.journey is not None:
-        if not window_open and state.settings.block_marketing_templates_to_us and is_us(number):
-            return "us_marketing_blocked"
         chosen = await followup.pick(session, config.journey, candidate, now=state.now,
                                      window_open=window_open, has_coupon=promotion is not None,
                                      cache=state.library, kitchen=kitchen)
@@ -553,8 +545,6 @@ async def _plan(session, config: CampaignConfig, promotion, candidate: Candidate
     template = message.template
     if not template.name:
         return "outside_24h_window"
-    if state.settings.block_marketing_templates_to_us and is_us(number):
-        return "us_marketing_blocked"
     if not await template_status.is_approved(template.name):
         return "template_not_approved"
     params = tuple(render.fill(p, found) or "-" for p in template.params)
@@ -770,9 +760,6 @@ HINTS = {
                           "of that phone's last message to the bot. Send the bot any "
                           "message from it, then test again - or set "
                           "message.template for this campaign.",
-    "us_marketing_blocked": "Meta does not deliver marketing templates to US numbers. "
-                            "Message the bot from the phone first so the normal "
-                            "message is used.",
     "template_not_approved": "The template is not approved in Gallabox yet.",
     "no_order_link": "ADMIN_SESSION_SECRET is not set, so no ordering link can be made.",
     "no_message_available": "No active message in the library fits this journey "
@@ -798,6 +785,22 @@ HINTS = {
     "gave_up_after_failures": "Three sends to this number failed. Check the number in "
                               "Gallabox.",
 }
+# A number without its country code is the usual cause of "invalid recipient".
+LOCAL_LENGTH = 10
+
+
+def refused_hint(number: str, exc: Exception) -> str:
+    """Why WhatsApp (Gallabox) refused a send, in words the team can act on."""
+    text = str(exc)
+    if "phone" in text.lower() or "recipient" in text.lower():
+        hint = ("WhatsApp says this is not a valid number. Type it with its country code, "
+                "digits only - 1 for the US, 91 for India")
+        if len(number) == LOCAL_LENGTH:
+            hint += f": 1{number} or 91{number}"
+        return hint + "."
+    return f"WhatsApp (Gallabox) did not accept it: {text[:200]}"
+
+
 # A test number's Send now, when there is nothing for that campaign to chase.
 NOTHING_TO_CHASE = {
     NudgeKind.ABANDONED_CART: "Their cart is empty. Add a dish to the cart on WhatsApp or the "
@@ -904,7 +907,11 @@ async def send_test(session: AsyncSession, campaign: NudgeCampaign, whatsapp_num
     if isinstance(plan, str):
         return {"sent": False, "reason": plan, "hint": HINTS.get(plan, "")}
 
-    await _send(number, plan)
+    try:
+        await _send(number, plan)
+    except ZOHO_ERRORS as exc:     # IntegrationError / ConfigurationError: WhatsApp refused it
+        log.warning("nudge_test_refused", campaign=campaign.name, to=number[-4:], error=str(exc))
+        return {"sent": False, "reason": "send_failed", "hint": refused_hint(number, exc)}
     if known:
         # In the log for the record; a test never counts toward a limit.
         session.add(NudgeSend(

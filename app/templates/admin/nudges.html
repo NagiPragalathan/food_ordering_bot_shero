@@ -222,7 +222,7 @@ const REASONS = {
   quiet_hours: 'Outside sending hours (their time)', not_a_send_day: 'Not a sending day',
   outside_24h_window: 'No message from them in 24 h, and no template set',
   us_marketing_blocked: 'US number - Meta blocks marketing templates', template_not_approved: 'Template not approved yet',
-  no_order_link: 'Ordering link unavailable',
+  no_order_link: 'Ordering link unavailable', send_failed: 'WhatsApp did not accept it',
   not_due: 'Not due yet - waiting for their next follow-up date', journey_paused: 'Follow-ups paused by your team',
   journey_converted: 'Ordered - follow-ups done', journey_ended: 'Follow-up journey ended',
   journey_finished: 'Follow-up journey ran its full length', ordering_now: 'Part-way through an order',
@@ -710,7 +710,7 @@ function testSend(c) {
     <p class="text-sm text-stone-600">Sends this campaign's message to one phone now, with that customer's real cart and orders - or sample ones if the number is not a customer. It ignores every rule and limit, and works with nudges off.</p>
     <label class="lbl mt-4" for="test-number">WhatsApp number, with country code</label>
     <input id="test-number" class="field" inputmode="tel" placeholder="17325550142" value="${esc(last)}">
-    <p class="help">WhatsApp only delivers a normal message within 24 hours of that phone's last message to the bot - send the bot "hi" from it first.</p>
+    <p class="help">Include the country code, digits only: 1 for the US (17325550142), 91 for India (919800000001). WhatsApp only delivers a normal message within 24 hours of that phone's last message to the bot - send the bot "hi" from it first.</p>
     <div id="test-result" class="mt-4"></div>`,
     actions: [{label: 'Close', kind: 'ghost'}, {html: `${icon(I.send)}Send test`, kind: 'primary', onClick: async (b) => {
       const number = $('test-number').value.trim();
@@ -1186,7 +1186,6 @@ function drawFollowUpPreview() {
   const checks = [];
   if (!poolCounts(j.pool).total) checks.push(['error', `The ${j.pool} pool has no active messages: add or import them in the Messages tab.`]);
   if (S.options.order_food_starts_bot === false) checks.push(['warn', 'In keyword mode, ORDER FOOD does not start the bot yet. Add it as a trigger keyword on the Bot replies page - every library message asks for it.']);
-  if (S.settings.block_marketing_templates_to_us) checks.push(['info', 'US (+1) numbers only get follow-ups inside the 24-hour window while Meta holds back marketing templates there (Settings).']);
   const last = (key) => { const st = j[key].steps; return st[st.length - 1]; };
   BUCKETS.forEach(([key, label]) => { if (last(key).times != null && last(key).times !== '' && !j[key].max_attempts) checks.push(['info', `${label}: the last step has a count, so the journey ends after it.`]); });
   if (!E.is_active) checks.push(['info', 'Saved paused: it will not send until you activate it.']);
@@ -1300,7 +1299,7 @@ function renderMessages() {
       ${[['Active messages', `${active.length}`, `of ${S.messages.length}`, 'text-stone-900'], ['Approved by Meta', `${tc.approved || 0}`, 'ready to send', 'text-emerald-700'], ['Waiting for Meta', `${tc.pending || 0}`, 'usually minutes to hours', 'text-amber-700'], ['Need action', `${needAction}`, 'rejected or not submitted', needAction ? 'text-red-700' : 'text-stone-900']].map(([l, v, sub, cls]) =>
         `<div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card"><div class="text-xs text-stone-500">${l}</div><div class="mt-1 text-2xl font-semibold ${cls}">${v}</div><div class="text-[11px] text-stone-400">${sub}</div></div>`).join('')}
     </div>
-    <div class="mb-4 rounded-xl border border-stone-200 bg-white p-3 text-xs leading-relaxed text-stone-600"><b class="text-stone-800">How sending works.</b> Every message is sent to Meta for approval as a WhatsApp template when you save or import it. A customer who messaged the bot in the last 24 hours gets any message straight away; anyone else only gets an <b>approved</b> one. Meta does not deliver these (Marketing) templates to <b>US numbers</b> at all at the moment, so US customers only get messages within 24 hours of writing to the bot. Changing a message's text submits a new version for approval.${S.templates.reachable === false ? ' <b class="text-red-700">Gallabox could not be reached just now: the statuses below are unknown.</b>' : ''}</div>
+    <div class="mb-4 rounded-xl border border-stone-200 bg-white p-3 text-xs leading-relaxed text-stone-600"><b class="text-stone-800">How sending works.</b> Every message is sent to Meta for approval as a WhatsApp template when you save or import it. A customer who messaged the bot in the last 24 hours gets any message straight away; anyone else gets the <b>approved</b> template - every number, US included. Changing a message's text submits a new version for approval.${S.templates.reachable === false ? ' <b class="text-red-700">Gallabox could not be reached just now: the statuses below are unknown.</b>' : ''}</div>
     ${leftoversPanel()}
     <div class="mb-4 flex flex-wrap items-end gap-3">
       <div class="min-w-[14rem] flex-1"><label class="lbl">Search</label><input class="field" id="mf-q" placeholder="ID, title, words in the message…" value="${esc(S.msgFilter.q)}"></div>
@@ -1358,7 +1357,7 @@ document.addEventListener('click', (e) => {
 function templateStatus(m) {
   const key = waState(m), [label, cls] = WA_STATE[key] || WA_STATE.unknown, w = m.wa || {};
   const what = {
-    approved: 'Goes to any customer, any time - except US numbers outside 24 hours (Meta blocks Marketing templates there).',
+    approved: 'Goes to any customer, any time.',
     pending: 'Meta is reviewing it. Until then it only goes to customers who messaged the bot in the last 24 hours.',
     rejected: `Meta refused it${w.reason ? `: ${w.reason}` : ''}. Change the text and save to submit a new version.`,
     text_changed: 'The text was changed after it was submitted. Press Submit for approval to send the new text to Meta.',
@@ -1917,9 +1916,6 @@ function renderSettings() {
         <div><label class="lbl">From</label><input class="field" type="time" data-skey="send_window.start" value="${esc(D.send_window.start)}"></div>
         <div><label class="lbl">Until</label><input class="field" type="time" data-skey="send_window.end" value="${esc(D.send_window.end)}"></div>
         <div class="sm:col-span-2"><label class="lbl">Fallback time zone</label><input class="field" list="dl-timezones" data-skey="timezone" data-type="text" value="${esc(D.timezone)}"><p class="help">Customers are sent to in their kitchen's time zone. One with no kitchen yet uses this, and it is recorded as a fallback on their journey and in Zoho.</p></div>
-      </div>`)}
-      ${card('WhatsApp', 'Rules Meta sets', `<div class="space-y-4">
-        ${check('block_marketing_templates_to_us', 'Skip marketing templates to US (+1) numbers', 'Meta currently does not deliver them, so sending one costs money and reaches nobody. Turn this off if Meta lifts the restriction.')}
       </div>`)}
       ${card('STOP and START OFFERS', "Customers' own control. Works even while nudges are off", `<div class="space-y-4">
         ${tags('stop_keywords', 'Words that stop nudges', 'The whole message must be the word - "stop the order" is not an opt-out.')}

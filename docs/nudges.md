@@ -283,7 +283,6 @@ it to can use it.
   "min_hours_between": 20,
   "max_sends_per_run": 50,
   "attribution_days": 3,
-  "block_marketing_templates_to_us": true,
   "stop_keywords": ["stop", "stop promotions", "stop offers", "unsubscribe", "opt out"],
   "start_keywords": ["start offers", "start promotions", "subscribe", "opt in"],
   "opt_out_reply": "Done - you won't get offers or reminders from us any more. …",
@@ -313,15 +312,11 @@ several campaigns match one customer, the highest `priority` goes first.
   Set `message.template.name` to one approved in Gallabox. Without one,
   those customers are skipped (`outside_24h_window`) rather than sent a
   message WhatsApp would drop.
-- **US numbers.** Meta currently does not deliver *marketing* templates to
-  US (+1) numbers. Those sends are skipped (`us_marketing_blocked`) so you
-  don't pay for messages nobody receives. If Meta lifts this, set
-  `block_marketing_templates_to_us` to `false`.
-
-In practice, cart and unpaid-order reminders reach US customers, because
-they are inside the window. Reminders that come days later reach them only
-if they wrote in recently. For those customers, use the Zoho tags with email
-(next section).
+- **US numbers.** Approved templates are sent to every number, US (+1)
+  included (the option to skip them was removed on 30 Oct 2026). Meta has
+  paused delivering *marketing* templates to US numbers since April 2025;
+  while that lasts it reports those sends as not delivered (error 131049),
+  which shows in Activity once delivery receipts are on.
 
 A template with an `order_link` button must have its URL button set to
 `https://smo.shero.us/order/{{1}}` when you submit it.
@@ -366,7 +361,6 @@ and gives the first rule that stopped it:
 | `quiet_hours`, `not_a_send_day` | Their local time |
 | `coupon: …` | They can't use the code (first order only, used up…) |
 | `outside_24h_window` | No message from them in 24 hours, and no template set |
-| `us_marketing_blocked` | US number, template needed (see above) |
 | `template_not_approved` | The template isn't approved in Gallabox |
 | `not_due` | Follow-up: waiting for their next date |
 | `journey_paused`, `journey_ended`, `journey_converted`, `journey_finished` | Follow-up: paused by the team, ended, ordered, or ran its length |
@@ -467,7 +461,7 @@ becomes {{1}}, {{2}}... and is filled in at send time.
 
 | On the Messages tab | Means |
 |---|---|
-| Approved by Meta | Goes to any customer, any time - except US (+1) numbers outside 24 hours: Meta does not deliver Marketing templates there |
+| Approved by Meta | Goes to any customer, any time |
 | Waiting for Meta | Meta is reviewing it; meanwhile only customers who wrote in the last 24 hours get it |
 | Rejected by Meta | With Meta's reason. Change the text and save: a new version is submitted |
 | Text changed | The text no longer matches what was submitted, so the old template is not used. Submit for approval sends the new text |

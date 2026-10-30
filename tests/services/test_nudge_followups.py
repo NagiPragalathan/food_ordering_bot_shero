@@ -215,7 +215,6 @@ async def test_inside_the_window_it_is_the_libraries_text(session):
 
 @pytest.mark.parametrize("number, hours_ago, templated, reason", [
     (UK, 30, False, "no_approved_template"),       # outside the window, no template
-    ("17325550142", 30, True, "us_marketing_blocked"),
     (UK, 2, False, "chatted_recently"),            # 2 h ago, the journey waits 12
 ])
 async def test_why_a_follow_up_is_held_back(session, number, hours_ago, templated, reason):
@@ -230,6 +229,17 @@ async def test_why_a_follow_up_is_held_back(session, number, hours_ago, template
     await wrote_in(session, customer, hours_ago=hours_ago)
     report = await run(session, Phone())
     assert reasons(report)[number] == reason
+
+
+async def test_a_us_number_outside_the_window_gets_the_template(session):
+    await switch_on(session, **CAPS)
+    await add_messages(session)
+    await journey_campaign(session, pause_after_chat_hours=12)
+    customer = await prospect(session, number="17325550142")
+    await wrote_in(session, customer, hours_ago=30)
+    phone = Phone()
+    await run(session, phone)
+    assert phone.sent[0]["channel"] == "template" and phone.sent[0]["to"] == "17325550142"
 
 
 async def test_nobody_mid_order_and_nothing_without_messages(session):

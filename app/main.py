@@ -144,13 +144,21 @@ async def not_authenticated_handler(request: Request, _: NotAuthenticated):
     return RedirectResponse(request.url_for("admin_login_form"), status_code=303)
 
 
+# How each upstream is named on the admin pages.
+SERVICE_NAMES = {"gallabox": "WhatsApp (Gallabox)", "stripe": "Stripe", "zoho": "Zoho",
+                 "uber": "Uber Direct", "google": "Google Maps"}
+
+
 @app.exception_handler(IntegrationError)
 async def integration_error_handler(_: Request, exc: IntegrationError) -> JSONResponse:
     """An upstream failed. 502 so the caller can distinguish it from our bugs."""
     log.error("unhandled_integration_error", service=exc.service, error=str(exc))
+    name = SERVICE_NAMES.get(exc.service, exc.service)
     return JSONResponse(
         status_code=502,
-        content={"error": "upstream_unavailable", "service": exc.service},
+        content={"error": "upstream_unavailable", "service": exc.service,
+                 "detail": f"{name} did not accept the request. Check the details and try "
+                           f"again; if it keeps failing, {name} may be down."},
     )
 
 

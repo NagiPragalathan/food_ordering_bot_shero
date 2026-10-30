@@ -113,9 +113,6 @@ class GlobalSettings(Strict):
     max_sends_per_run: int = Field(50, ge=1, le=1000)
     # A paid order this many days after a nudge counts as its conversion.
     attribution_days: int = Field(3, ge=1, le=60)
-    # Meta does not deliver MARKETING templates to US (+1) numbers. Sending
-    # one costs a message and reaches nobody, so it is skipped instead.
-    block_marketing_templates_to_us: bool = True
     stop_keywords: list[str] = Field(default_factory=lambda: list(DEFAULT_STOP))
     start_keywords: list[str] = Field(default_factory=lambda: list(DEFAULT_START))
     opt_out_reply: str = Field(
@@ -743,9 +740,16 @@ def check_library_text(text: str, *, where: str) -> list[str]:
     return [name for name in placeholders_in(text) if name in COUPON_PLACEHOLDERS]
 
 
+# Options that were removed: a saved value of one is ignored, not an error
+# (an error would put every setting back to its default).
+RETIRED_SETTINGS = {"block_marketing_templates_to_us"}
+
+
 def build_settings(raw: dict | None, *, current: dict | None = None) -> GlobalSettings:
     merged = _merge(GlobalSettings().model_dump(mode="json"), current or {})
     merged = _merge(merged, raw or {})
+    for name in RETIRED_SETTINGS:
+        merged.pop(name, None)
     try:
         return GlobalSettings.model_validate(merged)
     except ValidationError as exc:

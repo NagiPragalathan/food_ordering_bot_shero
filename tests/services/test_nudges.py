@@ -318,18 +318,23 @@ async def test_outside_the_window_the_template_goes(session):
     assert message["button"]                       # the ordering link's token
 
 
-async def test_marketing_templates_are_not_sent_to_us_numbers(session, customer):
+async def test_templates_go_to_us_numbers_too(session, customer):
     await switch_on(session)
     await make(session, "abandoned_cart", config={"message": {"template": {"name": "cart_reminder"}}})
     await left_cart(session, customer)              # +1 number, window closed
-
-    report = await run(session)
-    assert reasons(report)[customer.whatsapp_number] == "us_marketing_blocked"
-
-    await store.save_settings(session, {"block_marketing_templates_to_us": False}, actor="t")
     phone = Phone()
     await run(session, phone)
-    assert phone.sent[0]["channel"] == "template"
+    assert phone.sent[0]["channel"] == "template" and phone.sent[0]["to"] == customer.whatsapp_number
+
+
+async def test_settings_saved_with_the_removed_us_option_still_load(session):
+    """The option was removed; a saved value of it must not reset the rest."""
+    await store.save_settings(session, {"test_numbers": ["17325550142"]}, actor="t")
+    row = await store._settings_row(session)
+    row.values = {**row.values, "block_marketing_templates_to_us": True}
+    await session.flush()
+    _, settings = await store.load_settings(session)
+    assert settings.test_numbers == ["17325550142"]
 
 
 async def test_an_unapproved_template_is_not_sent(session, monkeypatch):
@@ -723,6 +728,25 @@ async def test_a_test_send_uses_sample_data_for_a_stranger(session):
 
     assert result["sent"] and result["used_sample_data"]
     assert "2 × Drumstick Sambar" in phone.sent[0]["body"]
+
+
+async def test_a_test_send_whatsapp_refuses_is_explained_not_a_502(session):
+    """A number without its country code: Gallabox says invalid recipient."""
+    campaign = await make(session, "abandoned_cart", active=False)
+    session.add(InboundMessage(provider_message_id="m-2", whatsapp_number="7401268091",
+                               payload={}, created_at=now() - timedelta(hours=1)))
+    await session.flush()
+
+    class Refuses(Phone):
+        def _record(self, **message):
+            raise IntegrationError("gallabox", "POST /messages/whatsapp returned 422: "
+                                               "Invalid recipient phone or rawPhone")
+
+    with use_sender(Refuses()):
+        result = await runner.send_test(session, campaign, "7401268091", actor="t")
+
+    assert (result["sent"], result["reason"]) == (False, "send_failed")
+    assert "country code" in result["hint"] and "17401268091" in result["hint"]
 
 
 async def test_a_test_send_explains_a_closed_window(session, customer):
