@@ -6,7 +6,8 @@ Two shapes, both plain JSON on the way in and out:
     frequency caps, STOP keywords, Zoho sync. (The master switch is its own
     column, `nudge_settings.enabled`.)
   * CampaignConfig - one per campaign, in sections: trigger, audience,
-    message, schedule, limits, offer, zoho.
+    message, schedule, limits, offer, zoho - and, for a follow-up journey,
+    journey (its length, how messages are picked, each reply group's timing).
 
 Unknown options are refused rather than ignored (`extra="forbid"`), so a
 misspelt "after_minuts" is an error message, not a setting that silently
@@ -25,7 +26,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from app.db.models import LeadStage, NudgeKind
+from app.db.models import JourneyBucket, LeadStage, NudgeKind
 
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -90,6 +91,9 @@ class SendWindow(Strict):
 # --- global settings -------------------------------------------------------------
 DEFAULT_STOP = ["stop", "stop promotions", "stop offers", "unsubscribe", "opt out"]
 DEFAULT_START = ["start offers", "start promotions", "subscribe", "opt in"]
+# A reply to a follow-up that moves the customer to another group.
+DEFAULT_LATER = ["later", "not now", "maybe later", "remind me later"]
+DEFAULT_NO = ["no", "no thanks", "not interested"]
 
 
 class GlobalSettings(Strict):
@@ -121,6 +125,18 @@ class GlobalSettings(Strict):
     opt_in_reply: str = Field(
         "You're back on our list - we'll send you offers and reminders again. "
         "Reply STOP any time to stop them.", min_length=1, max_length=1000)
+    # Replies to a follow-up journey (services/nudges/followup.py). "Later"
+    # and "No" move the customer to that group, with its own timing.
+    later_keywords: list[str] = Field(default_factory=lambda: list(DEFAULT_LATER))
+    no_keywords: list[str] = Field(default_factory=lambda: list(DEFAULT_NO))
+    # "No" means "not this time" unless this is on: then it is a STOP.
+    no_means_opt_out: bool = False
+    later_reply: str = Field(
+        "No problem - we'll check back in a few days. Whenever you're ready, "
+        "send ORDER FOOD.", min_length=1, max_length=1000)
+    no_reply: str = Field(
+        "Thanks for letting us know - we'll message you less often. Send ORDER FOOD "
+        "whenever you'd like to see the menu.", min_length=1, max_length=1000)
     # Record each nudge on the customer's Lead/Contact in Zoho.
     zoho_sync: bool = True
     zoho_notes: bool = True
@@ -149,11 +165,23 @@ class GlobalSettings(Strict):
             raise ValueError("needs at least one keyword")
         return cleaned
 
+    @field_validator("later_keywords", "no_keywords")
+    @classmethod
+    def _reply_words(cls, values: list[str]) -> list[str]:
+        return _words(values)
+
     @model_validator(mode="after")
     def _keywords_apart(self):
         clash = set(self.stop_keywords) & set(self.start_keywords)
         if clash:
             raise ValueError(f"{sorted(clash)} cannot both stop and start offers")
+        lists = {"stop_keywords": self.stop_keywords, "start_keywords": self.start_keywords,
+                 "later_keywords": self.later_keywords, "no_keywords": self.no_keywords}
+        for name in ("later_keywords", "no_keywords"):
+            for other, words in lists.items():
+                clash = set(lists[name]) & set(words) if other != name else set()
+                if clash:
+                    raise ValueError(f"{sorted(clash)} is in both {name} and {other}")
         if self.max_per_customer_per_day > self.max_per_customer_per_week:
             raise ValueError("max_per_customer_per_day is more than max_per_customer_per_week")
         return self
@@ -188,6 +216,8 @@ TRIGGER_FIELDS: dict[str, tuple[str, ...]] = {
     NudgeKind.REPEAT_PURCHASE: ("days_since_last_order", "max_days_since_last_order"),
     NudgeKind.NEVER_ORDERED: ("days_since_signup", "max_days_since_signup", "require_details"),
     NudgeKind.TARGETED_OFFER: (),
+    # Who joins: people who wrote in and never paid, as for never_ordered.
+    NudgeKind.FOLLOW_UP: ("days_since_signup", "max_days_since_signup", "require_details"),
 }
 
 
@@ -369,6 +399,100 @@ class ZohoOptions(Strict):
     note: bool = True
 
 
+# --- a follow-up journey ------------------------------------------------------------------
+BUCKET_LABELS = {JourneyBucket.NO_RESPONSE: "No response", JourneyBucket.LATER: "Later",
+                 JourneyBucket.NO: "No"}
+
+
+class Step(Strict):
+    """"Every 3 days, 3 times". No `times`: until the journey ends."""
+
+    every_days: float = Field(..., gt=0, le=365)
+    times: int | None = Field(None, ge=1, le=100)
+
+
+class Cadence(Strict):
+    """One reply group's timing: its steps in order, and an optional cap."""
+
+    steps: list[Step] = Field(..., min_length=1, max_length=10)
+    # Sends to one customer while in this group; then the journey ends.
+    max_attempts: int | None = Field(None, ge=1, le=500)
+
+    @model_validator(mode="after")
+    def _open_end_last(self):
+        if any(step.times is None for step in self.steps[:-1]):
+            raise ValueError("only the last step can repeat until the journey ends")
+        return self
+
+    def days_until(self, done: int) -> float | None:
+        """Days from a send to the next one, after `done` sends in this group.
+
+        Step i covers that many sends in turn, so with 3 days x 3 then 10 days
+        x 3, sends 1-3 are 3 days apart and the gap after the 3rd is 10 days.
+        None: this group has no more sends. `done` 0 is entering the group:
+        the wait for its first send.
+        """
+        if self.max_attempts is not None and done >= self.max_attempts:
+            return None
+        upcoming, covered = done + 1, 0
+        for step in self.steps:
+            if step.times is None:
+                return step.every_days
+            covered += step.times
+            if upcoming <= covered:
+                return step.every_days
+        return None
+
+
+def _cadence(*steps: tuple[float, int | None], max_attempts: int | None = None) -> Cadence:
+    return Cadence(steps=[Step(every_days=d, times=t) for d, t in steps],
+                   max_attempts=max_attempts)
+
+
+class Journey(Strict):
+    """A follow-up campaign's own settings (the message comes from the library)."""
+
+    # Which messages: the library's pool of this name.
+    pool: str = Field("SMO", min_length=1, max_length=60)
+    # The whole journey, from the first send. Six months by default.
+    length_days: int = Field(183, ge=1, le=3650)
+    # How long each stage lasts: month 1's messages, then month 2's...
+    stage_days: int = Field(30, ge=1, le=365)
+    # Random from the eligible ones, or in their code order.
+    pick: Literal["random", "in_order"] = "random"
+    # None of the customer's last N messages again.
+    avoid_repeat: int = Field(9, ge=0, le=200)
+    # Nor the same angle ("Meal completion", "Regional discovery"...) as any
+    # of their last N: no near-identical message back to back.
+    avoid_angle_repeat: int = Field(2, ge=0, le=200)
+    # When this stage's messages are all used, take one from another stage.
+    borrow_other_months: bool = True
+    # Hold off this long after they last messaged the bot: no sales message
+    # in the middle of a conversation.
+    pause_after_chat_hours: float = Field(12, ge=0, le=720)
+    # After ORDER FOOD the follow-ups wait for the order. With none after this
+    # many days the ordering flow counts as abandoned and they resume - never
+    # straight away (handoff section 4).
+    resume_after_days: float = Field(3, ge=0.5, le=60)
+    no_response: Cadence = Field(default_factory=lambda: _cadence((3, 3), (10, 3), (30, None)))
+    later: Cadence = Field(default_factory=lambda: _cadence((10, 3), (30, None)))
+    no: Cadence = Field(default_factory=lambda: _cadence((30, None), max_attempts=6))
+
+    @field_validator("pool")
+    @classmethod
+    def _pool(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    def cadence(self, bucket: str) -> Cadence:
+        return getattr(self, str(JourneyBucket(bucket)))
+
+    @property
+    def stages(self) -> int:
+        """How many month stages the journey has: 6 for 183 days of 30 (the
+        last few days stay in month 6)."""
+        return max(1, self.length_days // self.stage_days)
+
+
 class CampaignConfig(Strict):
     trigger: Trigger = Field(default_factory=Trigger)
     audience: Audience = Field(default_factory=Audience)
@@ -377,6 +501,8 @@ class CampaignConfig(Strict):
     limits: Limits = Field(default_factory=Limits)
     offer: Offer = Field(default_factory=Offer)
     zoho: ZohoOptions = Field(default_factory=ZohoOptions)
+    # Follow-up journeys only.
+    journey: Journey | None = None
 
 
 # --- per-kind defaults -----------------------------------------------------------------
@@ -389,7 +515,11 @@ KIND_DESCRIPTIONS = {
     NudgeKind.NEVER_ORDERED: "Wrote in but never paid for an order.",
     NudgeKind.TARGETED_OFFER: "Everyone the audience filters match, once - for an offer "
                               "to a segment.",
+    NudgeKind.FOLLOW_UP: "Wrote in but never paid: a message from the library every few "
+                         "days or weeks, for months, timed by how they replied.",
 }
+
+FOLLOW_UP_TEXT = "Each follow-up uses a message from the Messages library."
 
 KIND_DEFAULTS: dict[str, dict] = {
     NudgeKind.ABANDONED_CART: {
@@ -427,6 +557,16 @@ KIND_DEFAULTS: dict[str, dict] = {
                             "{coupon_offer} with code {coupon_code}. {coupon_ends}"},
         "limits": {"max_per_customer": 1, "cooldown_days": 0},
         "zoho": {"tag": "Nudge: Offer"},
+    },
+    NudgeKind.FOLLOW_UP: {
+        "trigger": {"days_since_signup": 1, "require_details": False},
+        # The words come from the library; the message ends with its own
+        # call to action (send ORDER FOOD), so no button by default.
+        "message": {"text": FOLLOW_UP_TEXT, "button": "none"},
+        # The journey's own timing decides when; nothing else holds it back.
+        "limits": {"max_per_customer": None, "cooldown_days": 0},
+        "zoho": {"tag": "Nudge: Follow-up"},
+        "journey": Journey().model_dump(mode="json"),
     },
 }
 
@@ -530,6 +670,9 @@ def build_campaign_config(kind: str, raw: dict | None, *, has_coupon: bool,
     """The campaign's config: kind defaults, then what is stored, then `raw`."""
     kind = parse_kind(kind)
     merged = _merge(_merge(KIND_DEFAULTS[kind], current or {}), raw or {})
+    if kind != NudgeKind.FOLLOW_UP:
+        # Only a follow-up has a journey; one left over from a kind change goes.
+        merged.pop("journey", None)
     try:
         config = CampaignConfig.model_validate(merged)
     except ValidationError as exc:
@@ -555,7 +698,7 @@ def build_campaign_config(kind: str, raw: dict | None, *, has_coupon: bool,
                 and trigger.max_days_since_last_order <= trigger.days_since_last_order):
             raise NudgeConfigError("trigger: max_days_since_last_order must be more than "
                                    "days_since_last_order")
-    if kind == NudgeKind.NEVER_ORDERED:
+    if kind in (NudgeKind.NEVER_ORDERED, NudgeKind.FOLLOW_UP):
         if trigger.days_since_signup is None:
             raise NudgeConfigError("trigger: days_since_signup is required")
         if (trigger.max_days_since_signup is not None
@@ -570,6 +713,8 @@ def build_campaign_config(kind: str, raw: dict | None, *, has_coupon: bool,
                            where=f"message.template.params[{index}]")
     if message.template.always and not message.template.name:
         raise NudgeConfigError("message.template.always needs message.template.name")
+    if kind == NudgeKind.FOLLOW_UP and config.journey is None:
+        config.journey = Journey()
     return config
 
 
@@ -577,7 +722,25 @@ def dump_config(kind: str, config: CampaignConfig) -> dict:
     """The config as stored and shown: JSON, with only this kind's trigger options."""
     data = config.model_dump(mode="json")
     data["trigger"] = {name: data["trigger"][name] for name in TRIGGER_FIELDS[parse_kind(kind)]}
+    if data.get("journey") is None:
+        data.pop("journey", None)
     return data
+
+
+# --- a library message ----------------------------------------------------------------------
+MESSAGE_MAX = 1024        # WhatsApp's limit for a template's body
+LIBRARY_KIND = NudgeKind.FOLLOW_UP
+
+
+def check_library_text(text: str, *, where: str) -> list[str]:
+    """Validate a library message's placeholders; the coupon ones it uses.
+
+    The coupon is the campaign's, unknown when the message is written, so a
+    message using {coupon_code} is simply never picked by a campaign without
+    a coupon (services/nudges/followup.py).
+    """
+    check_placeholders(text, kind=LIBRARY_KIND, has_coupon=True, where=where)
+    return [name for name in placeholders_in(text) if name in COUPON_PLACEHOLDERS]
 
 
 def build_settings(raw: dict | None, *, current: dict | None = None) -> GlobalSettings:
@@ -589,9 +752,24 @@ def build_settings(raw: dict | None, *, current: dict | None = None) -> GlobalSe
         raise NudgeConfigError(_explain(exc)) from None
 
 
+# The campaigns the Nudges page offers: the SMO follow-up journey, and the two
+# recovery rules for an order left unfinished (handoff section 4). The other
+# kinds are kept for the history of sends made before, but no new campaign
+# of them can be made.
+ACTIVE_KINDS = (NudgeKind.FOLLOW_UP, NudgeKind.ABANDONED_CART, NudgeKind.ABANDONED_CHECKOUT)
+
+
+def parse_active_kind(raw) -> NudgeKind:
+    kind = parse_kind(raw)
+    if kind not in ACTIVE_KINDS:
+        raise NudgeConfigError(f"kind must be one of {[str(k) for k in ACTIVE_KINDS]}")
+    return kind
+
+
 def reference() -> dict:
     """Everything a dashboard (or a person with curl) needs to build a campaign."""
     return {
+        "active_kinds": [str(k) for k in ACTIVE_KINDS],
         "kinds": {
             str(kind): {
                 "description": KIND_DESCRIPTIONS[kind],
@@ -606,4 +784,6 @@ def reference() -> dict:
         "lead_stages": [str(s) for s in LeadStage],
         "days": list(DAYS),
         "settings_defaults": GlobalSettings().model_dump(mode="json"),
+        "buckets": {str(b): label for b, label in BUCKET_LABELS.items()},
+        "message_max": MESSAGE_MAX,
     }

@@ -496,7 +496,7 @@ kitchen also updates its Zoho Vendor when Zoho is connected.
 
 ### When the kitchen hears about an order
 
-New paid orders notify the assigned kitchen immediately using its **Kitchen WhatsApp** number and the existing `shero_new_order_alert` template. The message includes the order number, customer, slot, kitchen, address, total and item quantities. Approve this template in Gallabox so notifications can reach partners outside an active chat window.
+New paid orders notify the assigned kitchen immediately using its **Kitchen WhatsApp** number and the `shero_kitchen_order` template: the order code, delivery slot, kitchen and dishes with quantities. The partner never gets the customer's name, number or address, nor the amount (Shero arranges the delivery). Approve this template in Gallabox so notifications reach partners outside an active chat window; until it is approved, the kitchen gets the team's `shero_new_order_alert` with the customer, amount and address shown as "-".
 
 **Kitchens > View orders** shows each partner's order queue and active order count. **Orders** can be filtered by partner and shows dishes, quantities, delivery notes, the kitchen's number and notification status. **WhatsApp alert accepted** means the provider accepted the send; it is not a delivery or read receipt. Failed sends stay pending for the kitchen-alert worker, and **Retry kitchen alert** sends them again after the number or integration is fixed. Existing queued orders keep their previously saved alert time; **Send to kitchen** can send them earlier.
 
@@ -640,6 +640,16 @@ extra work. Shared stat tiles, cards, badges and empty states live in
 
 A setting saved on one instance reaches other instances within a minute
 (the refresh job), not instantly. With a single instance this never comes up.
+
+## Payouts
+
+**Payouts** in the sidebar sets how each order's money is split between its
+kitchen partner and Shero. By default the kitchen gets a percentage of the
+food; it can instead get each dish's PPP from the menu sheet, and any kitchen
+can have its own split. The page shows what each kitchen is owed for any
+dates, records the payments you make to kitchens (with a statement to
+download), and can undo a payment recorded by mistake. See the
+[payouts guide](kitchen-payouts.md).
 
 ## Loyalty rewards
 

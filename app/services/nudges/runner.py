@@ -18,6 +18,11 @@ and the first that fails is the reason they are skipped:
     a way to reach them         -> outside_24h_window / us_marketing_blocked /
                                    template_not_approved
 
+A follow-up journey (followup.py) first has to be due - not_due,
+journey_paused / _converted / _ended / _finished - and not mid-order or just
+chatting (ordering_now, chatted_recently); its message is then picked from
+the library (no_message_available, no_approved_template).
+
 The master switch is checked before anything else: off, and a run sends
 nothing at all. A preview runs every rule and sends nothing, whatever the
 switch says.
@@ -46,6 +51,7 @@ from app.core.logging import get_logger
 from app.db.models import (
     ConversationStep,
     Customer,
+    JourneyBucket,
     NudgeCampaign,
     NudgeKind,
     NudgeSend,
@@ -63,9 +69,15 @@ from app.integrations.zoho import fields as f
 from app.services import allowlist, order_link, promotions
 from app.services.customers import get_customer, get_or_create_conversation
 from app.services.nudges import audience as aud
-from app.services.nudges import render, store
+from app.services.nudges import followup, render, store
 from app.services.nudges.audience import Candidate, Facts, PastOrder, aware, digits
-from app.services.nudges.config import DAYS, CampaignConfig, GlobalSettings, NudgeConfigError
+from app.services.nudges.config import (
+    BUCKET_LABELS,
+    DAYS,
+    CampaignConfig,
+    GlobalSettings,
+    NudgeConfigError,
+)
 
 log = get_logger(__name__)
 
@@ -100,6 +112,7 @@ class Outcome:
     reason: str | None = None
     channel: str | None = None
     message: str | None = None
+    detail: str | None = None    # a follow-up's message, month and group
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -171,6 +184,8 @@ class _State:
     sent_in_run: int = 0
     # Sends made earlier in this run, by customer, for the shop-wide caps.
     run_sends: dict[uuid.UUID, list[datetime]] = field(default_factory=dict)
+    # Library messages and menu dishes, read once per run (followup.py).
+    library: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -182,6 +197,7 @@ class _Plan:
     template: TemplateSpec | None = None
     template_values: tuple[str, ...] = ()
     button_value: str | None = None
+    pick: followup.Pick | None = None   # a follow-up's library message
 
 
 @dataclass
@@ -277,7 +293,10 @@ async def _run_campaign(session, campaign: NudgeCampaign, state: _State,
         result.status = "ended"
         return
 
-    candidates = await aud.find(session, campaign.kind, config.trigger, config.audience, now)
+    if campaign.kind == NudgeKind.FOLLOW_UP:
+        candidates = await followup.find(session, campaign, config, now, preview=state.preview)
+    else:
+        candidates = await aud.find(session, campaign.kind, config.trigger, config.audience, now)
     if only_customer is not None:
         candidates = [c for c in candidates if c.customer.id == only_customer.id]
         if not candidates:
@@ -320,6 +339,9 @@ async def _run_campaign(session, campaign: NudgeCampaign, state: _State,
             result.skipped[plan_or_reason.split(":")[0]] += 1
             report.outcomes.append(_outcome(campaign, candidate, "skipped",
                                             reason=plan_or_reason))
+            if campaign.kind == NudgeKind.FOLLOW_UP and not state.preview:
+                # A due follow-up held back: recorded, with the reason.
+                await followup.log_skip(session, campaign, candidate, plan_or_reason, now)
             continue
         plan = plan_or_reason
 
@@ -334,7 +356,8 @@ async def _run_campaign(session, campaign: NudgeCampaign, state: _State,
                 continue
         result.counts[status] += 1
         report.outcomes.append(_outcome(campaign, candidate, status, channel=plan.channel,
-                                        message=plan.text))
+                                        message=plan.text,
+                                        detail=plan.pick.detail if plan.pick else None))
         if status in ("sent", "would_send", "dry_run"):
             sent_here += 1
             state.sent_in_run += 1
@@ -381,8 +404,12 @@ async def _evaluate(session, campaign: NudgeCampaign, config: CampaignConfig,
     customer, settings, now = candidate.customer, state.settings, state.now
     number = digits(customer.whatsapp_number)
 
+    if candidate.skip:
+        return candidate.skip       # a follow-up not due (followup.find)
     if customer.nudges_opted_out_at is not None:
         return "opted_out"
+    if customer.nudge_hold:
+        return "on_hold"            # a complaint or support issue the team is handling
     if not number:
         return "no_whatsapp_number"
     if not allowlist.permits(number):
@@ -397,6 +424,10 @@ async def _evaluate(session, campaign: NudgeCampaign, config: CampaignConfig,
         return f"audience:{problem}"
     if customer.id in busy:
         return "order_in_progress"
+    if campaign.kind == NudgeKind.FOLLOW_UP:
+        problem = followup.gate(candidate, config.journey, now)
+        if problem:
+            return problem
 
     earlier = history.campaign.get(customer.id, [])
     same = [(status, at) for key, status, at in earlier if key == candidate.dedupe_key]
@@ -424,7 +455,9 @@ async def _evaluate(session, campaign: NudgeCampaign, config: CampaignConfig,
         return "weekly_limit"
 
     kitchen = aud.kitchen_of(candidate, state.outlets)
-    local = now.astimezone(_zone(kitchen.timezone if kitchen else None, settings.timezone))
+    zone, candidate.tz_source = _customer_zone(kitchen, settings.timezone)
+    candidate.tz = zone.key
+    local = now.astimezone(zone)
     window = config.schedule.send_window or settings.send_window
     if not window.allows(local.time()):
         return "quiet_hours"
@@ -437,7 +470,18 @@ async def _evaluate(session, campaign: NudgeCampaign, config: CampaignConfig,
         except promotions.PromoError as exc:
             return f"coupon: {exc}"
 
-    return await _plan(config, promotion, candidate, kitchen, state, number)
+    return await _plan(session, config, promotion, candidate, kitchen, state, number)
+
+
+def _customer_zone(kitchen, fallback: str) -> tuple[ZoneInfo, str]:
+    """Their local time zone: their kitchen's, else the settings' (recorded
+    as a fallback, as the handoff asks)."""
+    if kitchen is not None and kitchen.timezone:
+        try:
+            return ZoneInfo(kitchen.timezone), "kitchen"
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    return _zone(None, fallback), "fallback"
 
 
 def _zone(name: str | None, fallback: str) -> ZoneInfo:
@@ -451,25 +495,39 @@ def _zone(name: str | None, fallback: str) -> ZoneInfo:
     return ZoneInfo("UTC")
 
 
-async def _plan(config: CampaignConfig, promotion, candidate: Candidate, kitchen,
+async def _plan(session, config: CampaignConfig, promotion, candidate: Candidate, kitchen,
                 state: _State, number: str) -> _Plan | str:
     """How to reach them: a normal message inside the 24-hour window, else
-    the approved template, else not at all."""
+    the approved template, else not at all. A follow-up first picks its
+    message from the library."""
     message = config.message
     found = render.values(candidate, settings=state.settings, promotion=promotion,
                           kitchen=kitchen, now=state.now)
     last = state.inbound.get(number)
     window_open = last is not None and last >= state.now - SERVICE_WINDOW
 
+    chosen = None
+    if config.journey is not None:
+        if not window_open and state.settings.block_marketing_templates_to_us and is_us(number):
+            return "us_marketing_blocked"
+        chosen = await followup.pick(session, config.journey, candidate, now=state.now,
+                                     window_open=window_open, has_coupon=promotion is not None,
+                                     cache=state.library, kitchen=kitchen)
+        if isinstance(chosen, str):
+            return chosen
+        message = followup.as_message(chosen.message, config.message)
+
     if window_open and not message.template.always:
         text = render.fill(message.text, found)
         if message.button == "order_link":
             if not found.get("order_link"):
                 return "no_order_link"
-            return _Plan("button", text, url=found["order_link"], button_text=message.button_text)
+            return _Plan("button", text, url=found["order_link"], button_text=message.button_text,
+                         pick=chosen)
         if message.button == "url":
-            return _Plan("button", text, url=message.button_url, button_text=message.button_text)
-        return _Plan("text", text)
+            return _Plan("button", text, url=message.button_url, button_text=message.button_text,
+                         pick=chosen)
+        return _Plan("text", text, pick=chosen)
 
     template = message.template
     if not template.name:
@@ -491,20 +549,38 @@ async def _plan(config: CampaignConfig, promotion, candidate: Candidate, kitchen
         except RuntimeError:
             return "no_order_link"
     summary = f"[template {template.name}] " + " | ".join(params)
+    if chosen is not None:
+        # The template carries the library text: log what they read.
+        summary = f"[template {template.name}]\n{render.fill(message.text, found)}"
     return _Plan("template", summary.strip(), template=spec, template_values=params,
-                 button_value=button_value)
+                 button_value=button_value, pick=chosen)
 
 
 # --- sending ------------------------------------------------------------------------------------
-async def _send(number: str, plan: _Plan) -> None:
+async def _send(number: str, plan: _Plan) -> str | None:
+    """Send it; Gallabox's id for the message, when it gives one."""
     sender = current_sender()
     if plan.channel == "template":
-        await sender.send_template_only(number, plan.template, *plan.template_values,
-                                        button_value=plan.button_value)
+        result = await sender.send_template_only(number, plan.template, *plan.template_values,
+                                                 button_value=plan.button_value)
     elif plan.channel == "button":
-        await sender.send_cta_url(number, plan.text, url=plan.url, display_text=plan.button_text)
+        result = await sender.send_cta_url(number, plan.text, url=plan.url,
+                                           display_text=plan.button_text)
     else:
-        await sender.send_text(number, plan.text)
+        result = await sender.send_text(number, plan.text)
+    return provider_id(result)
+
+
+def provider_id(result) -> str | None:
+    """The message id in Gallabox's answer to a send."""
+    if not isinstance(result, dict):
+        return None
+    for source in (result, result.get("data") or {}, result.get("message") or {}):
+        if isinstance(source, dict):
+            for name in ("id", "messageId", "message_id", "_id"):
+                if source.get(name):
+                    return str(source[name])[:120]
+    return None
 
 
 async def _deliver(session, campaign: NudgeCampaign, config: CampaignConfig,
@@ -520,7 +596,9 @@ async def _deliver(session, campaign: NudgeCampaign, config: CampaignConfig,
         status=NudgeStatus.DRY_RUN if dry else NudgeStatus.SENDING,
         channel=plan.channel, message=plan.text,
         promo_code=promotion.code if promotion else None, actor=state.actor,
-        sent_at=state.now if dry else None)
+        sent_at=state.now if dry else None,
+        message_code=plan.pick.message.code if plan.pick else None,
+        note=_selection_note(plan.pick)[:200] if plan.pick else None)
     try:
         async with session.begin_nested():
             session.add(row)
@@ -533,23 +611,46 @@ async def _deliver(session, campaign: NudgeCampaign, config: CampaignConfig,
         return "dry_run"
 
     try:
-        await _send(digits(customer.whatsapp_number), plan)
+        row.provider_message_id = await _send(digits(customer.whatsapp_number), plan)
     except Exception as exc:  # noqa: BLE001 - one failed send must not stop the run
         row.status, row.claim_key, row.error = NudgeStatus.FAILED, None, str(exc)[:500]
+        if plan.pick is not None:
+            await followup.record_failed(session, campaign, config.journey, candidate, state.now)
         await session.commit()
         log.error("nudge_send_failed", campaign=campaign.name,
                   customer_id=str(customer.id), error=str(exc))
         return "failed"
 
     row.status, row.sent_at = NudgeStatus.SENT, state.now
+    if plan.pick is not None:
+        journey = await followup.record_sent(session, campaign, config.journey, candidate,
+                                             plan.pick, state.now)
+        journey.timezone, journey.timezone_source = candidate.tz, candidate.tz_source
+        for code, reason in plan.pick.passed or []:
+            await followup.log_skip(session, campaign, candidate, reason, state.now,
+                                    message_code=code)
     await _prepare_their_order(session, config, promotion, candidate)
     await session.commit()
     log.info("nudge_sent", campaign=campaign.name, kind=campaign.kind,
              customer_id=str(customer.id), channel=plan.channel)
 
-    await _record_in_zoho(customer, campaign, config, plan, row, state)
+    await _record_in_zoho(customer, campaign, config, plan, row, state, candidate)
+    if plan.pick is not None:
+        from app.services.nudges import crm_fields
+
+        await crm_fields.sync(session, customer, candidate.journey)
     await session.commit()
     return "sent"
+
+
+def _selection_note(chosen) -> str:
+    """Why this message: the selection reason, and any occasion passed over."""
+    note = chosen.reason
+    if chosen.passed:
+        note += "; passed over " + ", ".join(
+            f"{code} ({followup.PASSED_OVER.get(reason, reason).split(': ', 1)[-1]})"
+            for code, reason in chosen.passed)
+    return note
 
 
 async def _prepare_their_order(session, config: CampaignConfig, promotion: Promotion | None,
@@ -579,7 +680,8 @@ async def _prepare_their_order(session, config: CampaignConfig, promotion: Promo
 
 
 async def _record_in_zoho(customer: Customer, campaign: NudgeCampaign, config: CampaignConfig,
-                          plan: _Plan, row: NudgeSend, state: _State) -> None:
+                          plan: _Plan, row: NudgeSend, state: _State,
+                          candidate: Candidate) -> None:
     """A note and the campaign's tag on their Lead/Contact. Best effort: Zoho
     being down never un-sends a nudge."""
     settings = state.settings
@@ -595,6 +697,15 @@ async def _record_in_zoho(customer: Customer, campaign: NudgeCampaign, config: C
         if settings.zoho_notes and config.zoho.note:
             lines = [f"Campaign: {campaign.name} ({campaign.kind})",
                      f"Sent: {state.now:%d %b %Y %H:%M} UTC, WhatsApp {plan.channel}"]
+            journey = candidate.journey if plan.pick else None
+            if journey is not None:
+                group = BUCKET_LABELS[JourneyBucket(plan.pick.bucket)]
+                lines += [f"Message: {plan.pick.message.code} - {plan.pick.message.title}",
+                          f"Follow-up: month {plan.pick.stage}, {group} group, "
+                          f"send {journey.attempts}",
+                          f"Selected: {_selection_note(plan.pick)}",
+                          f"Their time zone: {candidate.tz} ({candidate.tz_source})",
+                          f"Next follow-up: {followup.next_after_send(journey)}"]
             if row.promo_code:
                 lines.append(f"Coupon: {row.promo_code}")
             if config.zoho.tag:
@@ -654,12 +765,13 @@ async def send_test(session: AsyncSession, campaign: NudgeCampaign, whatsapp_num
     known = customer is not None
     if customer is None:
         customer = Customer(id=uuid.uuid4(), whatsapp_number=number, name="Test Customer")
-    candidate = await _sample_candidate(session, customer, campaign.kind, known=known, now=now)
+    candidate = await _sample_candidate(session, customer, campaign.kind, known=known, now=now,
+                                        campaign_id=campaign.id)
     outlets = await aud.outlets_by_id(session)
     state = _State(now=now, settings=settings, preview=False, dry_run=False, actor=actor,
                    inbound=await aud.last_inbound(session, now), outlets=outlets)
     kitchen = aud.kitchen_of(candidate, outlets)
-    plan = await _plan(config, promotion, candidate, kitchen, state, number)
+    plan = await _plan(session, config, promotion, candidate, kitchen, state, number)
     if isinstance(plan, str):
         hints = {
             "outside_24h_window": "WhatsApp only delivers a normal message within 24 hours "
@@ -671,6 +783,12 @@ async def send_test(session: AsyncSession, campaign: NudgeCampaign, whatsapp_num
                                     "message is used.",
             "template_not_approved": "The template is not approved in Gallabox yet.",
             "no_order_link": "ADMIN_SESSION_SECRET is not set, so no ordering link can be made.",
+            "no_message_available": "No active message in the library fits this journey "
+                                    "(its pool, month and group). Add or switch one on in the "
+                                    "Messages tab.",
+            "no_approved_template": "That phone has not messaged the bot in 24 hours, and none "
+                                    "of the fitting messages has an approved WhatsApp template. "
+                                    "Send the bot any message from it, then test again.",
         }
         return {"sent": False, "reason": plan, "hint": hints.get(plan, "")}
 
@@ -681,15 +799,17 @@ async def send_test(session: AsyncSession, campaign: NudgeCampaign, whatsapp_num
             campaign_id=campaign.id, campaign_name=campaign.name, customer_id=customer.id,
             whatsapp_number=number, kind=campaign.kind, dedupe_key="test",
             status=NudgeStatus.TEST, channel=plan.channel, message=plan.text,
-            promo_code=promotion.code if promotion else None, actor=actor, sent_at=now))
+            promo_code=promotion.code if promotion else None, actor=actor, sent_at=now,
+            message_code=plan.pick.message.code if plan.pick else None))
         await session.flush()
     log.info("nudge_test_sent", campaign=campaign.name, to=number[-4:], actor=actor)
     return {"sent": True, "channel": plan.channel, "message": plan.text,
+            "detail": plan.pick.detail if plan.pick else None,
             "used_sample_data": not known}
 
 
 async def _sample_candidate(session, customer: Customer, kind: str, *, known: bool,
-                            now: datetime) -> Candidate:
+                            now: datetime, campaign_id: uuid.UUID | None = None) -> Candidate:
     facts = (await aud.load_facts(session, [customer.id]))[customer.id] if known else Facts()
     conversation = (await aud.conversations_of(session, [customer.id])).get(customer.id) \
         if known else None
@@ -697,6 +817,10 @@ async def _sample_candidate(session, customer: Customer, kind: str, *, known: bo
     cart = cart_service.read(conversation) if conversation else []
     candidate = Candidate(customer=customer, dedupe_key="test", since=now, facts=facts,
                           conversation=conversation, cart=cart or list(SAMPLE_CART))
+    if kind == NudgeKind.FOLLOW_UP and known and campaign_id is not None:
+        # Their own place in the journey: its month and group pick the message.
+        candidate.journey = (await followup.journeys_for(session, campaign_id,
+                                                         [customer.id])).get(customer.id)
     if kind == NudgeKind.ABANDONED_CHECKOUT:
         order = None
         if known:

@@ -53,3 +53,6 @@ tzfpy==2.1.0
 
 # Draws the PDF bill a customer downloads after paying (services/receipts.py).
 fpdf2==2.8.3
+
+# Reads and writes the nudge message library as Excel (services/nudges/library.py).
+openpyxl==3.1.5

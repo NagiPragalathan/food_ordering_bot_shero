@@ -138,6 +138,14 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
 
     item_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # --- Kitchen partner's share (services/payouts.py) -------------------------
+    # The split rule in force when the order was paid and each dish's share,
+    # so a later rule change cannot alter it; plus any hand-set amount and,
+    # once paid out, the amount the kitchen was paid.
+    payout_split: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    payout_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("partner_payouts.id", ondelete="SET NULL"), index=True)
+
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Order {self.order_number} {self.stage} {self.payment_status}>"
 

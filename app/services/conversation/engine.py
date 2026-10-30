@@ -113,6 +113,7 @@ async def handle_event(session: AsyncSession, event: InboundEvent, *,
         conversation.set(welcome_reply=reply)
     ctx = FlowContext(session=session, customer=customer,
                       conversation=conversation, event=event)
+    await _note_keyword(ctx)
 
     try:
         await _dispatch(ctx, fresh_start=fresh_start)
@@ -132,6 +133,23 @@ async def handle_event(session: AsyncSession, event: InboundEvent, *,
         await _safe_reply(ctx, p.GENERIC_ERROR)
 
     return True
+
+
+async def _note_keyword(ctx: FlowContext) -> None:
+    """ORDER FOOD (any trigger keyword) pauses that customer's follow-up
+    journey while they order (services/nudges/followup.py). Never in the way
+    of the conversation itself."""
+    from app.services import reply_triggers
+    from app.services.nudges import followup
+
+    trigger = reply_triggers.matching(ctx.event.text or "") if ctx.event.text else None
+    if trigger is None:
+        return
+    try:
+        await followup.flow_started(ctx.session, ctx.customer, trigger.keyword.upper())
+    except Exception as exc:  # noqa: BLE001 - the customer still gets their reply
+        log.warning("followup_flow_start_failed", customer_id=str(ctx.customer.id),
+                    error=str(exc))
 
 
 async def _dispatch(ctx: FlowContext, *, fresh_start: bool = False) -> None:
@@ -188,8 +206,12 @@ async def _handle_global_intent(ctx: FlowContext) -> bool:
 
     # STOP / START OFFERS for nudges work from any step: nobody's address or
     # name is the word "stop" on its own (services/nudges/optout.py).
-    from app.services.nudges import optout
+    from app.services.nudges import followup, optout
     if await optout.handle_keyword(ctx):
+        return True
+    # LATER / NO in answer to a follow-up journey's message: it sets when
+    # the next one comes. Never mid-order, where "no" answers the bot.
+    if await followup.handle_reply(ctx):
         return True
 
     # Typed words are ambiguous while capturing free text - somebody living on

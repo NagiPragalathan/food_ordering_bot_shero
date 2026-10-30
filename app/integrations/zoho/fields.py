@@ -52,6 +52,37 @@ SELECTED_OUTLET = "Selected_Outlet"
 DISTANCE_KM = "Distance_KM"
 WHATSAPP_PROFILE_NAME = "WhatsApp_Profile_Name"  # the name on their WhatsApp profile; never used as their name
 
+# SMO retargeting (the developer handoff's section 8), on Leads and Contacts;
+# written by services/nudges/crm_fields.py as a follow-up journey moves.
+R_CONTACT_KEY = "Contact_Key"                     # the normalised WhatsApp number
+R_ENTRY_VERTICAL = "Entry_Vertical"               # "SMO"
+R_OPT_IN = "Marketing_Opt_In"                     # boolean
+R_OPT_IN_SOURCE = "Marketing_Opt_In_Source"
+R_OPT_IN_TIME = "Marketing_Opt_In_Time"
+R_SUPPRESSION = "Suppression_Status"              # None / Opted out / a hold
+R_BUCKET = "Retargeting_Bucket"                   # No / Later / No-response / Engaged / Dead Lead
+R_START = "Retargeting_Start_Date"
+R_ATTEMPTS = "Retargeting_Attempt_Count"
+R_BUCKET_ATTEMPTS = "Bucket_Attempt_Count"
+R_LAST_DATE = "Last_Retargeting_Date"
+R_NEXT_DATE = "Next_Retargeting_Date"
+R_STATUS = "Retargeting_Status"                   # Active / Paused / Suppressed / Completed
+R_ACTIVE_JOURNEY = "Active_Journey"               # SMO / None
+R_LAST_TEMPLATE = "Last_Template_ID"
+R_TEMPLATE_HISTORY = "Recent_Template_History"
+R_TIMEZONE = "Customer_Timezone"
+R_LAST_KEYWORD = "Last_Inbound_Keyword"
+R_FLOW_STATUS = "SMO_Flow_Status"                 # Not started / Active / Completed / Abandoned
+R_LAST_ORDER_DATE = "Last_Order_Date"
+R_LAST_ORDER_STATUS = "Last_Order_Status"
+R_DEAD_REASON = "Dead_Lead_Reason"
+
+RETARGETING_BUCKETS = ("No-response", "Later", "No", "Engaged", "Dead Lead")
+RETARGETING_STATUSES = ("Active", "Paused", "Suppressed", "Completed")
+SUPPRESSION_STATUSES = ("None", "Opted out", "Complaint", "Support issue", "Invalid contact",
+                        "Other hold")
+FLOW_STATUSES = ("Not started", "Active", "Completed", "Abandoned")
+
 # Lead Source options the bot adds; Zoho's defaults have neither. They equal
 # the bot's own `Customer.lead_source` values.
 LEAD_SOURCE_WHATSAPP = "WhatsApp"

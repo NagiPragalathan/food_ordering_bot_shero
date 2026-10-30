@@ -67,6 +67,7 @@
 <!-- Tabs -->
 <div class="mb-5 flex gap-6 overflow-x-auto border-b border-stone-200" role="tablist">
   <button class="tab" role="tab" data-tab="campaigns">Campaigns</button>
+  <button class="tab" role="tab" data-tab="messages">Messages</button>
   <button class="tab" role="tab" data-tab="activity">Activity</button>
   <button class="tab" role="tab" data-tab="results">Results</button>
   <button class="tab" role="tab" data-tab="customer">Customer lookup</button>
@@ -74,6 +75,7 @@
 </div>
 
 <section data-panel="campaigns"></section>
+<section data-panel="messages" hidden></section>
 <section data-panel="activity" hidden></section>
 <section data-panel="results" hidden></section>
 <section data-panel="customer" hidden></section>
@@ -155,7 +157,8 @@
 const API = '/api/nudges';
 const S = {enabled: false, settings: null, reference: null, options: null, campaigns: [],
            last24: {}, stats30: null, tab: 'campaigns', sends: {offset: 0, limit: 25},
-           resultsDays: 30};
+           resultsDays: 30, messages: [], pools: ['SMO'], journeys: {},
+           msgFilter: {pool: '', month: '', bucket: '', status: '', q: ''}};
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,
   (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -176,10 +179,10 @@ const I = {
 const KINDS = {
   abandoned_cart: {label: 'Abandoned cart', short: 'Cart', cls: 'bg-amber-100 text-amber-800', dot: 'bg-amber-500',
     icon: 'M3 3h2l2 12h11l2-8H6M9 20a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z',
-    blurb: 'Dishes left in the cart, no order placed. Usually inside WhatsApp\'s free 24-hour window.'},
+    blurb: 'Recovery: dishes left in the cart, no order placed. Usually inside WhatsApp\'s free 24-hour window.'},
   abandoned_checkout: {label: 'Unpaid order', short: 'Unpaid', cls: 'bg-rose-100 text-rose-800', dot: 'bg-rose-500',
     icon: 'M3 7h18v12H3zM3 11h18M7 15h3',
-    blurb: 'An order was placed but the payment link expired or failed. Their dishes go back in the cart.'},
+    blurb: 'Recovery: an order was placed but the payment link expired or failed. Their dishes go back in the cart.'},
   repeat_purchase: {label: 'Repeat purchase', short: 'Repeat', cls: 'bg-sky-100 text-sky-800', dot: 'bg-sky-500',
     icon: 'M4 12a8 8 0 0113.7-5.7L20 9M20 4v5h-5M20 12a8 8 0 01-13.7 5.7L4 15M4 20v-5h5',
     blurb: 'Ordered before, nothing for a while. A reminder at 14 days, or a win-back with a coupon at 45.'},
@@ -188,17 +191,25 @@ const KINDS = {
     blurb: 'Wrote in but never paid for an order.'},
   targeted_offer: {label: 'Targeted offer', short: 'Offer', cls: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500',
     icon: I.tag, blurb: 'Everyone your audience filters pick, once - an offer for a segment.'},
+  follow_up: {label: 'Follow-up journey', short: 'Follow-up', cls: 'bg-teal-100 text-teal-800', dot: 'bg-teal-500',
+    icon: 'M4 5h16v11H8l-4 4V5zM8 9h8M8 12h5',
+    blurb: 'The SMO six-month journey: people who wrote in but never ordered get a message from your Messages library, month by month, timed by their reply group (No response, Later, No).'},
 };
-
-const STARTERS = [
-  {kind: 'abandoned_cart', name: 'Cart reminder', note: '1 hour after a cart is left'},
-  {kind: 'abandoned_checkout', name: 'Unpaid order follow-up', note: '3 hours after a link lapses'},
-  {kind: 'repeat_purchase', name: '14-day reminder', note: 'Two weeks after the last order'},
-  {kind: 'repeat_purchase', name: '45-day win-back', note: 'Lapsed customers, add a coupon',
-   config: {trigger: {days_since_last_order: 45}, message: {text: "Hi {first_name}, we miss you at {shop_name}! It's been {days_since_last_order} days - here's something to welcome you back."}}},
-  {kind: 'never_ordered', name: 'First order nudge', note: 'New contacts who never ordered'},
-  {kind: 'targeted_offer', name: 'Offer for a segment', note: 'Needs a coupon'},
-];
+const BUCKETS = [['no_response', 'No response'], ['later', 'Later'], ['no', 'No']];
+// The campaign types the page offers: the SMO journey and the two recovery rules.
+const activeKinds = () => (S.reference.active_kinds || ['follow_up', 'abandoned_cart', 'abandoned_checkout']);
+const CRM_BUCKET_CLS = {'No-response': 'bg-stone-100 text-stone-700', Later: 'bg-sky-100 text-sky-800', No: 'bg-amber-100 text-amber-800',
+                        Engaged: 'bg-emerald-100 text-emerald-800', 'Dead Lead': 'bg-stone-200 text-stone-700'};
+const FLOW_TEXT = {not_started: 'Not started', active: 'ORDER FOOD sent - waiting for the order', completed: 'Ordered', abandoned: 'No order - follow-ups resumed'};
+const BUCKET_HELP = {
+  no_response: 'Everyone starts here: no answer to the follow-ups yet.',
+  later: 'Replied LATER (or a word set in Settings). The wait starts again from their reply.',
+  no: 'Replied NO: declined for now but still opted in. Fewer messages.',
+};
+const END_TEXT = {ordered: 'Ordered', length_reached: 'Ran its full length', attempt_limit: "Had its group's last send",
+                  declined: 'Replied No (as STOP)', ended_by_team: 'Ended by your team'};
+const JOURNEY_STATUS = {active: ['Running', 'bg-emerald-100 text-emerald-800'], paused: ['Paused', 'bg-stone-100 text-stone-600'],
+                        converted: ['Ordered', 'bg-brand-50 text-brand-700'], ended: ['Ended', 'bg-stone-100 text-stone-600']};
 
 const REASONS = {
   trigger_not_met: 'Not in this trigger (no cart, not lapsed...)', opted_out: 'Replied STOP',
@@ -212,6 +223,14 @@ const REASONS = {
   outside_24h_window: 'No message from them in 24 h, and no template set',
   us_marketing_blocked: 'US number - Meta blocks marketing templates', template_not_approved: 'Template not approved yet',
   no_order_link: 'Ordering link unavailable',
+  not_due: 'Not due yet - waiting for their next follow-up date', journey_paused: 'Follow-ups paused by your team',
+  journey_converted: 'Ordered - follow-ups done', journey_ended: 'Follow-up journey ended',
+  journey_finished: 'Follow-up journey ran its full length', ordering_now: 'Part-way through an order',
+  chatted_recently: 'Messaged the bot recently - follow-ups wait', no_message_available: 'No library message fits (pool, month, group)',
+  no_approved_template: 'Outside 24 h, and no fitting message has an approved template',
+  on_hold: 'On hold by your team (complaint or support issue)', in_ordering_flow: 'Sent ORDER FOOD - follow-ups wait for the order',
+  occasion_cutoff_passed: "Occasion message: its ordering cutoff has passed", occasion_not_in_area: "Occasion message: not for their kitchen's area",
+  occasion_dish_unavailable: 'Occasion message: none of its dishes is on the menu', run_cap: 'Run limit reached - next run',
 };
 const STATUS = {
   sent: ['Sent', 'bg-emerald-100 text-emerald-800'], would_send: ['Would send', 'bg-emerald-100 text-emerald-800'],
@@ -221,22 +240,11 @@ const STATUS = {
 };
 const statusChip = (s) => { const [t, c] = STATUS[s] || [s, 'bg-stone-100 text-stone-600']; return `<span class="chip ${c}">${esc(t)}</span>`; };
 
-const AUDIENCE_LABELS = {
-  min_paid_orders: 'At least … paid orders', max_paid_orders: 'At most … paid orders',
-  min_total_spent: 'Spent at least ($)', max_total_spent: 'Spent at most ($)',
-  last_order_within_days: 'Ordered within the last … days', last_order_older_than_days: 'Last order more than … days ago',
-  signed_up_within_days: 'Joined within the last … days', signed_up_older_than_days: 'Joined more than … days ago',
-  cuisines: 'Cuisine', kitchens: 'Kitchen', postal_codes: 'ZIP codes (prefixes, e.g. 088)',
-  lead_stages: 'Zoho lead stage', lead_sources: 'Lead source', has_email: 'Has an email address',
-  ordered_dishes: 'Has ordered any of these dishes', country_codes: 'Only these country codes',
-  exclude_country_codes: 'Never these country codes', whatsapp_numbers: 'Only these WhatsApp numbers',
-  exclude_whatsapp_numbers: 'Never these WhatsApp numbers',
-};
 function reasonText(r) {
   if (!r) return '';
   const i = r.indexOf(':');
   const key = i < 0 ? r : r.slice(0, i), extra = i < 0 ? '' : r.slice(i + 1).trim();
-  if (key === 'audience') return `Audience: ${AUDIENCE_LABELS[extra] || extra}`;
+  if (key === 'audience') return `Audience: ${extra}`;
   if (key === 'coupon') return `Coupon: ${extra}`;
   return REASONS[key] || r;
 }
@@ -263,6 +271,20 @@ async function api(path, {method = 'GET', body} = {}) {
   const init = {method, credentials: 'same-origin', headers: {Accept: 'application/json'}};
   if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
   const res = await fetch(API + path, init);
+  let data = null;
+  try { data = await res.json(); } catch (_) { /* empty body */ }
+  if (res.status === 401) { signedOut(); throw new ApiError('Your sign-in has expired.', 401); }
+  if (!res.ok) {
+    const d = data && data.detail;
+    throw new ApiError(typeof d === 'string' ? d : Array.isArray(d) ? d.map(x => x.msg).join('; ') : `Request failed (${res.status})`, res.status);
+  }
+  return data;
+}
+// A file and form fields, as multipart (the import).
+async function upload(path, fields) {
+  const form = new FormData();
+  Object.entries(fields).forEach(([k, v]) => form.append(k, v));
+  const res = await fetch(API + path, {method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'}, body: form});
   let data = null;
   try { data = await res.json(); } catch (_) { /* empty body */ }
   if (res.status === 401) { signedOut(); throw new ApiError('Your sign-in has expired.', 401); }
@@ -348,19 +370,26 @@ function confirmBox(title, html, label, kind = 'primary') {
 
 // --- loading ------------------------------------------------------------------------------
 async function loadAll() {
-  const [overview, reference, options, stats] = await Promise.all([
-    api(''), S.reference ? Promise.resolve(S.reference) : api('/reference'), api('/options'), api('/stats?days=30')]);
+  const [overview, reference, options, stats, library, journeys] = await Promise.all([
+    api(''), S.reference ? Promise.resolve(S.reference) : api('/reference'), api('/options'), api('/stats?days=30'),
+    api('/messages'), api('/journeys/summary')]);
   S.enabled = overview.enabled; S.settings = overview.settings; S.campaigns = overview.campaigns;
   S.last24 = overview.last_24_hours || {}; S.reference = reference; S.options = options; S.stats30 = stats;
+  takeLibrary(library); S.journeys = journeys.campaigns || {};
   renderSwitch(); renderKpis(); renderCampaigns();
   if (S.tab !== 'campaigns') showTab(S.tab);
 }
 async function refreshCampaigns() {
-  const [overview, stats] = await Promise.all([api(''), api('/stats?days=30')]);
+  const [overview, stats, journeys] = await Promise.all([api(''), api('/stats?days=30'), api('/journeys/summary')]);
   S.enabled = overview.enabled; S.campaigns = overview.campaigns; S.last24 = overview.last_24_hours || {};
-  S.settings = overview.settings; S.stats30 = stats;
+  S.settings = overview.settings; S.stats30 = stats; S.journeys = journeys.campaigns || {};
   renderSwitch(); renderKpis(); renderCampaigns();
 }
+function takeLibrary(library) {
+  S.messages = library.messages; S.columns = library.columns; S.libraryDays = library.stats_days;
+  S.pools = [...new Set([...(library.pools || []), ...((S.options && S.options.pools) || [])])];
+}
+async function refreshLibrary() { takeLibrary(await api('/messages')); }
 
 // --- master switch ------------------------------------------------------------------------
 function renderSwitch() {
@@ -426,9 +455,12 @@ function renderKpis() {
 // --- tabs ---------------------------------------------------------------------------------
 function showTab(name) {
   S.tab = name; store('nudges.tab', name);
+  // The address names the tab, so a link can open it (/admin/nudges#messages).
+  if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
   document.querySelectorAll('[role=tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
   document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
   if (name === 'campaigns') renderCampaigns();
+  if (name === 'messages') renderMessages();
   if (name === 'activity') renderActivity();
   if (name === 'results') renderResults();
   if (name === 'customer') renderCustomerTab();
@@ -445,12 +477,45 @@ function triggerSummary(c) {
     case 'abandoned_checkout': return `${t.after_minutes} min after the link ${(t.payment_statuses || []).join(' or ')} · up to ${t.within_hours} h`;
     case 'repeat_purchase': return `${t.days_since_last_order}${t.max_days_since_last_order ? `-${t.max_days_since_last_order}` : '+'} days after their last order`;
     case 'never_ordered': return `${t.days_since_signup}${t.max_days_since_signup ? `-${t.max_days_since_signup}` : '+'} days after they first wrote, no order yet`;
+    case 'follow_up': {
+      const j = c.config.journey || {};
+      return `Never ordered, from ${t.days_since_signup} day${t.days_since_signup === 1 ? '' : 's'} after they first wrote · ${j.length_days} days of follow-ups (${Math.max(1, Math.floor(j.length_days / j.stage_days))} months)`;
+    }
     default: return 'Everyone the audience matches, once';
   }
 }
-function audienceCount(c) {
-  const a = c.config.audience || {};
-  return Object.values(a).filter((v) => v !== null && !(Array.isArray(v) && !v.length)).length;
+// The library's active messages in a pool, by month ("any" for none).
+function poolCounts(pool) {
+  const counts = {}, active = S.messages.filter((m) => m.pool === pool && m.is_active);
+  active.forEach((m) => { const k = m.month || 'any'; counts[k] = (counts[k] || 0) + 1; });
+  return {total: active.length, counts, templated: active.filter((m) => m.wa_template).length,
+          approved: active.filter((m) => m.wa_approved).length};
+}
+// Day of each send in one reply group, from entering it, up to `limit` days.
+function timeline(cadence, limit, startAtZero) {
+  const days = []; let day = startAtZero ? 0 : null, done = 0;
+  const steps = (cadence && cadence.steps) || [];
+  const gap = (n) => {   // the wait before send n+1, after n sends (followup.Cadence.days_until)
+    if (cadence.max_attempts && n >= cadence.max_attempts) return null;
+    let covered = 0;
+    for (const s of steps) { if (s.times == null || s.times === '') return +s.every_days; covered += +s.times; if (n + 1 <= covered) return +s.every_days; }
+    return null;
+  };
+  if (day === 0) { days.push(0); done = 1; } else { const g = gap(0); if (g == null) return days; day = g; days.push(Math.round(day * 10) / 10); done = 1; }
+  while (days.length < 60) {
+    const g = gap(done); if (g == null || !(g > 0)) break;
+    day += g; if (day >= limit) break;
+    days.push(Math.round(day * 10) / 10); done += 1;
+  }
+  return days;
+}
+function journeyChips(c) {
+  const j = S.journeys[c.id];
+  if (!j || !j.total) return '<span class="text-xs text-stone-500">Nobody in it yet - a journey starts with its first message.</span>';
+  const b = j.by_crm_bucket || {}, st = j.by_status || {};
+  const chip = (label, n, cls = 'bg-stone-100 text-stone-700') => n ? `<span class="chip ${cls}">${label} ${n}</span>` : '';
+  return [...['No-response', 'Later', 'No', 'Engaged', 'Dead Lead'].map((k) => chip(k, b[k], CRM_BUCKET_CLS[k])),
+          chip('Due now', j.due_now, 'bg-emerald-100 text-emerald-800'), chip('Paused by team', st.paused)].join(' ');
 }
 function scheduleSummary(c) {
   const s = c.config.schedule || {}, w = s.send_window || S.settings.send_window;
@@ -462,10 +527,17 @@ function renderCampaigns() {
   const stats = Object.fromEntries((S.stats30.campaigns || []).filter((e) => e.campaign_id).map((e) => [e.campaign_id, e]));
   const head = `
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div class="text-sm text-stone-600">${S.campaigns.length ? 'Highest priority goes first when a customer matches more than one.' : ''}</div>
+      <div class="text-sm text-stone-600">${S.campaigns.length ? 'One scheduler sends every campaign - nobody gets two nudges the same day.' : ''}</div>
       <div class="flex flex-wrap gap-2">
         <button type="button" class="btn btn-ghost" id="preview-all">${icon(I.eye)}Preview all</button>
         <button type="button" class="btn btn-ghost" id="run-all" ${S.enabled ? '' : 'disabled title="Turn nudges on first"'}>${icon(I.play)}Run now</button>
+        <button type="button" class="btn btn-ghost" id="camp-import">${icon('M12 3v12M7 10l5 5 5-5M5 21h14')}Import</button>
+        ${S.campaigns.length ? `<details class="relative" id="camp-export">
+          <summary class="btn btn-ghost cursor-pointer list-none">${icon('M12 21V9M7 14l5-5 5 5M5 3h14')}Export</summary>
+          <div class="absolute right-0 z-20 mt-1 w-48 rounded-xl border border-stone-200 bg-white p-1 text-sm shadow-card">
+            ${[['xlsx', 'Excel (.xlsx)'], ['csv', 'CSV'], ['json', 'JSON']].map(([fmt, l]) => `<a class="block rounded-lg px-3 py-2 text-stone-700 hover:bg-stone-50" href="${API}/campaigns/export?format=${fmt}" download>${l}</a>`).join('')}
+          </div>
+        </details>` : ''}
         <button type="button" class="btn btn-primary" id="new-campaign">${icon(I.plus)}New campaign</button>
       </div>
     </div>`;
@@ -474,15 +546,12 @@ function renderCampaigns() {
       <div class="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center">
         <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">${icon(I.send, 'h-6 w-6')}</div>
         <h3 class="mt-3 text-base font-semibold text-stone-900">No campaigns yet</h3>
-        <p class="mx-auto mt-1 max-w-md text-sm text-stone-600">Start from one of these. Every campaign starts paused, so creating one never messages anybody.</p>
-        <div class="mx-auto mt-5 grid max-w-3xl gap-3 text-left sm:grid-cols-2 lg:grid-cols-3">
-          ${STARTERS.map((s, i) => `
-            <button type="button" data-starter="${i}" class="group rounded-xl border border-stone-200 p-4 text-left transition hover:border-brand-300 hover:bg-brand-50/40">
-              <span class="chip ${KINDS[s.kind].cls}">${esc(KINDS[s.kind].label)}</span>
-              <div class="mt-2 font-semibold text-stone-900">${esc(s.name)}</div>
-              <div class="text-xs text-stone-500">${esc(s.note)}</div>
-            </button>`).join('')}
+        <p class="mx-auto mt-1 max-w-xl text-sm text-stone-600">Set up the <b>SMO six-month follow-up journey</b> - when it starts, the stages, how often each reply group is messaged - and, if you want them, the <b>recovery</b> reminders for a cart left or an order not paid. Or write them in a spreadsheet and import them. Every campaign starts paused, so nothing is sent until you switch it on.</p>
+        <div class="mt-5 flex flex-wrap justify-center gap-2">
+          <button type="button" class="btn btn-primary" id="empty-new">${icon(I.plus)}New campaign</button>
+          <button type="button" class="btn btn-ghost" id="empty-import">${icon('M12 3v12M7 10l5 5 5-5M5 21h14')}Import from Excel, CSV or JSON</button>
         </div>
+        <p class="mt-3 text-xs text-stone-500">Not sure of the layout? Download an example to edit: <a class="font-medium text-brand-700 underline" href="${API}/campaigns/sample?format=xlsx" download>Excel</a> · <a class="font-medium text-brand-700 underline" href="${API}/campaigns/sample?format=csv" download>CSV</a> · <a class="font-medium text-brand-700 underline" href="${API}/campaigns/sample?format=json" download>JSON</a></p>
       </div>`;
   } else {
     box.innerHTML = head + `<div class="grid gap-4 xl:grid-cols-2">${S.campaigns.map((c) => campaignCard(c, stats[c.id])).join('')}</div>`;
@@ -490,16 +559,15 @@ function renderCampaigns() {
   $('new-campaign').addEventListener('click', pickKind);
   $('preview-all').addEventListener('click', (e) => runPreview(null, e.currentTarget));
   $('run-all').addEventListener('click', (e) => runNow(null, e.currentTarget));
-  box.querySelectorAll('[data-starter]').forEach((b) => b.addEventListener('click', () => {
-    const s = STARTERS[+b.dataset.starter]; openEditor(null, s.kind, s.name, s.config);
-  }));
+  $('camp-import').addEventListener('click', openCampaignImport);
+  if ($('empty-new')) $('empty-new').addEventListener('click', pickKind);
+  if ($('empty-import')) $('empty-import').addEventListener('click', openCampaignImport);
   box.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', (e) => campaignAction(b.dataset.act, b.dataset.id, e.currentTarget)));
 }
 function campaignCard(c, st) {
   const k = KINDS[c.kind] || {label: c.kind, cls: 'bg-stone-100 text-stone-700', icon: I.send};
   const text = (c.config.message || {}).text || '';
   const tmpl = ((c.config.message || {}).template || {}).name;
-  const filters = audienceCount(c);
   return `
   <article class="flex flex-col rounded-2xl border ${c.is_active ? 'border-stone-200' : 'border-stone-200/70'} bg-white shadow-card">
     <div class="flex items-start gap-3 p-4">
@@ -508,21 +576,19 @@ function campaignCard(c, st) {
         <div class="flex flex-wrap items-center gap-1.5">
           <span class="chip ${k.cls}">${esc(k.label)}</span>
           ${c.is_active ? '<span class="chip bg-emerald-100 text-emerald-800">Active</span>' : '<span class="chip bg-stone-100 text-stone-600">Paused</span>'}
-          ${c.priority ? `<span class="chip bg-stone-100 text-stone-600">Priority ${c.priority}</span>` : ''}
-          ${c.promotion_code ? `<span class="chip bg-brand-50 text-brand-700">${icon(I.tag, 'h-3 w-3')}${esc(c.promotion_code)}</span>` : ''}
         </div>
         <h3 class="mt-1.5 truncate text-base font-semibold text-stone-900">${esc(c.name)}</h3>
         <div class="mt-0.5 text-xs text-stone-500">${esc(triggerSummary(c))}</div>
       </div>
       <button type="button" class="switch" role="switch" aria-checked="${c.is_active}" data-act="toggle" data-id="${c.id}" title="${c.is_active ? 'Pause' : 'Activate'}"><span></span></button>
     </div>
+    ${c.kind === 'follow_up' ? followUpCardBody(c) : `
     <div class="mx-4 rounded-xl bg-stone-50 px-3 py-2.5 text-sm text-stone-700">
       <div class="line-clamp-3 whitespace-pre-line">${esc(text)}</div>
-    </div>
+    </div>`}
     <div class="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3 text-xs text-stone-500">
       <span>${icon('M12 8v4l3 2M12 22a10 10 0 100-20 10 10 0 000 20z', 'inline h-3.5 w-3.5 -mt-0.5')} ${esc(scheduleSummary(c))}</span>
-      <span>${filters ? `${filters} audience filter${filters === 1 ? '' : 's'}` : 'No audience filters'}</span>
-      <span>${tmpl ? `Template: ${esc(tmpl)}` : 'No template (24 h window only)'}</span>
+      <span>${c.kind === 'follow_up' ? 'A template per message' : tmpl ? `Template: ${esc(tmpl)}` : 'No template (24 h window only)'}</span>
     </div>
     <div class="mt-3 grid grid-cols-3 border-t border-stone-100 text-center">
       <div class="py-2.5"><div class="text-lg font-semibold text-stone-900">${st ? st.sent : 0}</div><div class="text-[11px] text-stone-500">sent · 30 d</div></div>
@@ -540,6 +606,16 @@ function campaignCard(c, st) {
       <button type="button" class="btn btn-danger !px-2.5 !py-1.5 text-xs" data-act="delete" data-id="${c.id}" title="Delete">${icon(I.trash)}</button>
     </div>
   </article>`;
+}
+function followUpCardBody(c) {
+  const j = c.config.journey || {}, pc = poolCounts(j.pool);
+  const nr = timeline(j.no_response, j.length_days, true);
+  return `
+    <div class="mx-4 space-y-2 rounded-xl bg-stone-50 px-3 py-2.5 text-sm text-stone-700">
+      <div><b>${pc.total}</b> active message${pc.total === 1 ? '' : 's'} in the <b>${esc(j.pool)}</b> pool${pc.total ? ` · ${pc.approved} with an approved template` : ' - <span class="text-red-700">add some in the Messages tab</span>'}</div>
+      <div class="text-xs text-stone-600">No response: day ${nr.slice(0, 8).join(', ')}${nr.length > 8 ? ', …' : ''} · then by reply group</div>
+      <div class="flex flex-wrap gap-1">${journeyChips(c)}</div>
+    </div>`;
 }
 async function campaignAction(act, id, button) {
   const c = S.campaigns.find((x) => x.id === id);
@@ -565,9 +641,10 @@ async function campaignAction(act, id, button) {
   } catch (e) { toast(e.message, 'error'); }
 }
 function pickKind() {
-  openModal({title: 'What should this campaign do?', wide: true, actions: [{label: 'Cancel', kind: 'ghost'}], body: `
+  openModal({title: 'Who is this campaign for?', wide: true, actions: [{label: 'Cancel', kind: 'ghost'}], body: `
+    <p class="mb-3 text-sm text-stone-600">This only decides who can get it. Everything else - when it starts, the stages, how often, the messages, the limits - you set next.</p>
     <div class="grid gap-3 sm:grid-cols-2">
-      ${Object.entries(KINDS).map(([kind, k]) => `
+      ${activeKinds().map((kind) => [kind, KINDS[kind]]).map(([kind, k]) => `
         <button type="button" data-kind="${kind}" class="flex gap-3 rounded-xl border border-stone-200 p-4 text-left transition hover:border-brand-300 hover:bg-brand-50/40">
           <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${k.cls}">${icon(k.icon, 'h-5 w-5')}</span>
           <span><span class="block font-semibold text-stone-900">${esc(k.label)}</span><span class="mt-0.5 block text-xs leading-snug text-stone-600">${esc(k.blurb)}</span></span>
@@ -587,7 +664,7 @@ function outcomesTable(report, {showSkipped = true} = {}) {
     <tbody>${rows.map((o) => `<tr>
       <td><div class="font-medium text-stone-900">${esc(o.name || 'No name')}</div><div class="text-xs text-stone-500">+${esc(o.whatsapp_number)}</div></td>
       <td class="text-xs text-stone-600">${esc(o.campaign)}</td>
-      <td>${statusChip(o.status)}${o.channel ? `<div class="mt-1 text-[11px] text-stone-500">${esc(o.channel === 'template' ? 'template' : o.channel === 'button' ? 'message + button' : 'message')}</div>` : ''}</td>
+      <td>${statusChip(o.status)}${o.channel ? `<div class="mt-1 text-[11px] text-stone-500">${esc(o.channel === 'template' ? 'template' : o.channel === 'button' ? 'message + button' : 'message')}</div>` : ''}${o.detail ? `<div class="mt-1 whitespace-nowrap text-[11px] text-teal-700">${esc(o.detail)}</div>` : ''}</td>
       <td class="max-w-md text-sm">${o.status === 'skipped' ? `<span class="text-stone-600">${esc(reasonText(o.reason))}</span>` : `<div class="whitespace-pre-line text-stone-800">${wa(o.message || '')}</div>`}</td>
     </tr>`).join('')}</tbody></table></div>
     ${report.outcomes_truncated ? `<p class="mt-2 text-xs text-stone-500">${report.outcomes_truncated} more not shown.</p>` : ''}`;
@@ -639,7 +716,7 @@ function testSend(c) {
       try {
         const r = await api(`/campaigns/${c.id}/test`, {method: 'POST', body: {whatsapp_number: number}});
         $('test-result').innerHTML = r.sent
-          ? `<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900"><b>Sent</b> as ${esc(r.channel === 'template' ? 'a template' : r.channel === 'button' ? 'a message with a button' : 'a message')}${r.used_sample_data ? ', with sample data' : ''}.<div class="mt-2 whitespace-pre-line rounded-lg bg-white p-2.5 text-stone-800">${wa(r.message)}</div></div>`
+          ? `<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900"><b>Sent</b> as ${esc(r.channel === 'template' ? 'a template' : r.channel === 'button' ? 'a message with a button' : 'a message')}${r.used_sample_data ? ', with sample data' : ''}${r.detail ? ` - ${esc(r.detail)}` : ''}.<div class="mt-2 whitespace-pre-line rounded-lg bg-white p-2.5 text-stone-800">${wa(r.message)}</div></div>`
           : `<div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><b>Not sent:</b> ${esc(reasonText(r.reason))}.<div class="mt-1">${esc(r.hint || '')}</div></div>`;
       } catch (e) {
         $('test-result').innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">${esc(e.message)}</div>`;
@@ -745,23 +822,15 @@ function drawEditor() {
   const c = E.config, k = KINDS[E.kind];
   $('ed-kicker').textContent = `${E.id ? 'Edit' : 'New'} · ${k.label}`;
   $('ed-title').textContent = E.name || 'Untitled';
-  const coupons = S.options.coupons;
   const triggerOpts = S.reference.kinds[E.kind].trigger_options;
   const m = c.message, t = m.template, s = c.schedule, l = c.limits;
 
   const basics = `
     <div class="grid gap-4 sm:grid-cols-2">
       <div class="sm:col-span-2"><label class="lbl">Campaign name</label>${inputHtml('name', E.name, 'text', 'maxlength="120"')}<p class="help">Only your team sees this - and Zoho, on each customer's timeline.</p></div>
-      <div><label class="lbl">Kind</label>
-        <select class="field" id="ed-kind">${Object.entries(KINDS).map(([key, v]) => `<option value="${key}" ${key === E.kind ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select>
+      <div class="sm:col-span-2"><label class="lbl">Type</label>
+        <select class="field" id="ed-kind">${activeKinds().map((key) => `<option value="${key}" ${key === E.kind ? 'selected' : ''}>${esc(KINDS[key].label)}</option>`).join('')}</select>
         <p class="help">${esc(k.blurb)}</p></div>
-      <div><label class="lbl">Priority</label>${inputHtml('priority', E.priority, 'int', 'type="number" min="-1000" max="1000"')}<p class="help">Higher goes first when a customer matches several campaigns in one run.</p></div>
-      <div class="sm:col-span-2"><label class="lbl">Coupon</label>
-        <select class="field" data-path="promotion_code" data-type="text">
-          <option value="">No coupon</option>
-          ${coupons.map((p) => `<option value="${esc(p.code)}" ${p.code === E.promotion_code ? 'selected' : ''}>${esc(p.code)} - ${esc(p.headline)} · ${esc(p.title)}${p.status !== 'live' ? ` (${esc(p.status)})` : ''}${p.placement === 'hidden' ? ' · hidden' : ''}</option>`).join('')}
-        </select>
-        <p class="help">Make codes on the <a class="font-medium text-brand-700 underline" href="/admin/promotions" target="_blank">Offers page</a>. A <b>hidden</b> coupon is ideal: only the people you message can use it.</p></div>
       <div class="sm:col-span-2">${boolField('is_active', 'Active', E.is_active, 'Paused campaigns never send. Nothing sends at all while the master switch is off.')}</div>
     </div>`;
 
@@ -772,51 +841,6 @@ function drawEditor() {
       `<label class="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-2 text-sm"><input type="checkbox" data-check="${path}" value="${v}" ${(value || []).includes(v) ? 'checked' : ''} class="h-4 w-4 rounded border-stone-300 text-brand-600">${lbl}</label>`).join('')}</div></div>`;
     return numberField(path, meta.label, value, {unit: meta.unit, help: meta.help, type: meta.type === 'money' ? 'money' : 'int', step: meta.type === 'money' ? '0.01' : 1, placeholder: meta.optional ? 'No limit' : ''});
   }).join('')}</div>` : '<p class="text-sm text-stone-600">A targeted offer has no timing: everyone your audience picks qualifies, once each (see Limits). Use the audience below and the schedule to aim it.</p>';
-
-  const a = c.audience;
-  const opt = S.options;
-  const audience = `
-    <p class="mb-4 text-sm text-stone-600">Every filter you leave empty lets everyone through. They all apply together.</p>
-    <div class="space-y-5">
-      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Order history</div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          ${numberField('config.audience.min_paid_orders', AUDIENCE_LABELS.min_paid_orders, a.min_paid_orders, {placeholder: 'Any'})}
-          ${numberField('config.audience.max_paid_orders', AUDIENCE_LABELS.max_paid_orders, a.max_paid_orders, {placeholder: 'Any'})}
-          ${numberField('config.audience.min_total_spent', AUDIENCE_LABELS.min_total_spent, a.min_total_spent, {type: 'money', step: '0.01', placeholder: 'Any'})}
-          ${numberField('config.audience.max_total_spent', AUDIENCE_LABELS.max_total_spent, a.max_total_spent, {type: 'money', step: '0.01', placeholder: 'Any'})}
-          ${numberField('config.audience.last_order_within_days', AUDIENCE_LABELS.last_order_within_days, a.last_order_within_days, {min: 1, placeholder: 'Any'})}
-          ${numberField('config.audience.last_order_older_than_days', AUDIENCE_LABELS.last_order_older_than_days, a.last_order_older_than_days, {min: 1, placeholder: 'Any'})}
-          <div class="sm:col-span-2">${tagField('config.audience.ordered_dishes', AUDIENCE_LABELS.ordered_dishes, a.ordered_dishes, {list: 'dl-dishes', help: 'Dish names or menu codes; any one of them counts.'})}</div>
-        </div></div>
-      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">When they joined</div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          ${numberField('config.audience.signed_up_within_days', AUDIENCE_LABELS.signed_up_within_days, a.signed_up_within_days, {min: 1, placeholder: 'Any'})}
-          ${numberField('config.audience.signed_up_older_than_days', AUDIENCE_LABELS.signed_up_older_than_days, a.signed_up_older_than_days, {placeholder: 'Any'})}
-        </div></div>
-      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Taste and place</div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          ${tagField('config.audience.cuisines', AUDIENCE_LABELS.cuisines, a.cuisines, {list: 'dl-cuisines'})}
-          <div><label class="lbl">${AUDIENCE_LABELS.kitchens}</label><div class="flex flex-wrap gap-2">${opt.kitchens.length ? opt.kitchens.map((kk) =>
-            `<label class="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-2 text-sm"><input type="checkbox" data-check="config.audience.kitchens" value="${esc(kk.code)}" ${(a.kitchens || []).includes(kk.code) ? 'checked' : ''} class="h-4 w-4 rounded border-stone-300 text-brand-600">${esc(kk.name)}</label>`).join('') : '<span class="text-sm text-stone-500">No kitchens yet</span>'}</div>
-            <p class="help">Their chosen kitchen, or the one their last order came from. None ticked: any.</p></div>
-          <div class="sm:col-span-2">${tagField('config.audience.postal_codes', AUDIENCE_LABELS.postal_codes, a.postal_codes)}</div>
-        </div></div>
-      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Zoho and contact</div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <div class="sm:col-span-2"><label class="lbl">${AUDIENCE_LABELS.lead_stages}</label><div class="flex flex-wrap gap-2">${S.reference.lead_stages.map((st) =>
-            `<label class="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-1.5 text-xs"><input type="checkbox" data-check="config.audience.lead_stages" value="${esc(st)}" ${(a.lead_stages || []).includes(st) ? 'checked' : ''} class="h-3.5 w-3.5 rounded border-stone-300 text-brand-600">${esc(st)}</label>`).join('')}</div>
-            <p class="help">The stage the bot keeps in step with Zoho. None ticked: any.</p></div>
-          ${tagField('config.audience.lead_sources', AUDIENCE_LABELS.lead_sources, a.lead_sources, {list: 'dl-sources'})}
-          ${triField('config.audience.has_email', AUDIENCE_LABELS.has_email, a.has_email)}
-        </div></div>
-      <div><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Phone numbers</div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          ${tagField('config.audience.country_codes', AUDIENCE_LABELS.country_codes, a.country_codes, {help: '1 = US and Canada, 91 = India. Empty: any.'})}
-          ${tagField('config.audience.exclude_country_codes', AUDIENCE_LABELS.exclude_country_codes, a.exclude_country_codes)}
-          ${tagField('config.audience.whatsapp_numbers', AUDIENCE_LABELS.whatsapp_numbers, a.whatsapp_numbers, {help: 'With country code. Empty: everyone.'})}
-          ${tagField('config.audience.exclude_whatsapp_numbers', AUDIENCE_LABELS.exclude_whatsapp_numbers, a.exclude_whatsapp_numbers)}
-        </div></div>
-    </div>`;
 
   const chips = placeholdersFor(E.kind, !!E.promotion_code).map((p) => `<button type="button" data-ph="${p.name}" ${p.ok ? '' : 'disabled'} title="${esc(p.ok ? p.description : p.why)}"
       class="rounded-lg border px-2 py-1 text-[11px] font-mono ${p.ok ? 'border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100' : 'cursor-not-allowed border-stone-200 bg-stone-50 text-stone-400'}">{${p.name}}</button>`).join('');
@@ -853,6 +877,10 @@ function drawEditor() {
       </div>
     </div>`;
 
+  const followUp = E.kind === 'follow_up';
+  const message_ = followUp ? followUpMessageHtml(m) : message;
+  const journey = followUp ? journeyHtml(c.journey) : '';
+
   const ownHours = !!s.send_window;
   const win = s.send_window || S.settings.send_window;
   const schedule = `
@@ -868,10 +896,6 @@ function drawEditor() {
       <div><label class="lbl">Days</label>
         <div class="flex flex-wrap gap-1.5">${DAYS.map(([d, lbl]) => `<button type="button" class="daybtn rounded-lg border border-stone-200 px-3 py-1.5 text-sm font-medium text-stone-600" data-day="${d}" aria-pressed="${(s.days || []).includes(d)}">${lbl}</button>`).join('')}</div>
         <p class="help">None selected: every day.</p></div>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <div><label class="lbl">Starts</label><input type="datetime-local" class="field" data-when="starts_at" value="${localInput(s.starts_at)}"><p class="help">Empty: straight away. Your computer's time.</p></div>
-        <div><label class="lbl">Ends</label><input type="datetime-local" class="field" data-when="ends_at" value="${localInput(s.ends_at)}"><p class="help">Empty: no end. Good for a limited-time offer.</p></div>
-      </div>
     </div>`;
 
   const limits = `
@@ -881,40 +905,103 @@ function drawEditor() {
       ${numberField('config.limits.daily_cap', 'Most sends per day, everyone together', l.daily_cap, {min: 1, placeholder: 'No limit'})}
       ${numberField('config.limits.per_run_cap', 'Most sends per 5-minute run', l.per_run_cap, {min: 1, placeholder: 'No limit'})}
     </div>
-    <p class="mt-3 text-xs text-stone-500">On top of these, the shop-wide limits in Settings apply across all campaigns: ${S.settings.max_per_customer_per_day} per customer per day, ${S.settings.max_per_customer_per_week} per week, at least ${S.settings.min_hours_between} hours apart.</p>`;
-
-  const offer = E.promotion_code ? `
-    <div class="grid gap-3 sm:grid-cols-2">
-      ${boolField('config.offer.auto_apply', 'Apply the code for them', c.offer.auto_apply, 'Their ordering page opens with it already applied (never replaces a code they chose).')}
-      ${boolField('config.offer.require_eligible', 'Skip people who cannot use it', c.offer.require_eligible, 'First order only, already used, used up, wrong kitchen...')}
-    </div>` : '<p class="text-sm text-stone-600">Pick a coupon in Basics to set how it is offered.</p>';
-
-  const zoho = `
-    <div class="grid gap-4 sm:grid-cols-2">
-      <div><label class="lbl">Tag on their Lead/Contact</label>${inputHtml('config.zoho.tag', c.zoho.tag, 'opt', 'maxlength="50" placeholder="No tag"')}<p class="help">Build Zoho views and email follow-ups from it. Zoho creates the tag the first time.</p></div>
-      <div class="pt-6">${boolField('config.zoho.note', 'Add a note to their timeline', c.zoho.note, 'The campaign, time, coupon and exact message.')}</div>
-    </div>`;
-
-  const advanced = `
-    <p class="mb-2 text-sm text-stone-600">The whole campaign set-up as JSON - every option, exactly as saved. Edit it and press Apply to load it into the form above.</p>
-    <textarea id="ed-json" class="field font-mono text-xs" rows="14" spellcheck="false"></textarea>
-    <div class="mt-2 flex gap-2"><button type="button" class="btn btn-ghost" id="ed-json-refresh">Reload from the form</button><button type="button" class="btn btn-ghost" id="ed-json-apply">Apply JSON</button></div>`;
+    <p class="mt-3 text-xs text-stone-500">Across all campaigns, nobody gets more than one nudge a day.</p>`;
 
   $('ed-form').innerHTML =
-    section('basics', 'Basics', 'Name, kind, coupon, on or off', basics) +
-    section('trigger', 'When it fires', 'What has to happen first', trigger) +
-    section('audience', 'Who gets it', 'Filters on order history, taste, place and contact', audience, false) +
-    section('message', 'Message', 'What they read, the button, and the template for later', message) +
-    section('schedule', 'When it may send', 'Hours, days, and the dates it runs', schedule, false) +
-    section('limits', 'Limits', 'How often, and how many', limits, false) +
-    section('offer', 'Coupon', 'How the code is offered', offer, false) +
-    section('zoho', 'Zoho', 'What is recorded on their CRM record', zoho, false) +
-    section('advanced', 'Advanced: edit as JSON', 'For anything, all at once', advanced, false) +
-    `<datalist id="dl-dishes">${opt.dishes.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>
-     <datalist id="dl-cuisines">${opt.cuisines.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>
-     <datalist id="dl-sources">${opt.lead_sources.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>`;
+    section('basics', 'Basics', 'Name, type, on or off', basics) +
+    section('trigger', followUp ? 'Who joins' : 'When it fires', followUp ? 'People who wrote in and never paid' : 'What has to happen first', trigger) +
+    (followUp ? section('journey', 'Follow-up timing', 'How long, which messages, and each reply group\'s steps', journey) : '') +
+    section('message', 'Message', followUp ? 'From your Messages library, and the button under it' : 'What they read, the button, and the template for later', message_) +
+    section('schedule', 'When it may send', 'Hours and days, in the customer\'s time', schedule, false) +
+    (followUp ? '' : section('limits', 'Limits', 'How often one customer gets it', limits, false)) +
+    `<datalist id="dl-pools">${S.pools.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>`;
   wireEditor();
   drawPreview();
+}
+
+function followUpMessageHtml(m) {
+  return `
+    <div class="rounded-xl border border-teal-200 bg-teal-50/60 p-4 text-sm leading-relaxed text-stone-700">
+      Each follow-up uses <b>one message from your Messages library</b> (the pool chosen under Follow-up timing).
+      In the journey's first month it picks from month 1's messages, then month 2's, and so on - at random, or in ID order - never one of the customer's last few.
+      An occasion message (one with From/Until dates) goes first while it runs.
+      <div class="mt-2">Outside WhatsApp's 24-hour window only messages with an <b>approved WhatsApp template</b> can go; set each message's template name in the library.</div>
+    </div>
+    <div class="mt-3" id="ed-pool-counts"></div>
+    <div class="mt-5 grid gap-4 sm:grid-cols-2">
+      <div class="sm:col-span-2"><label class="lbl">Button under the message (inside the 24-hour window)</label>
+        <div class="seg inline-flex rounded-xl bg-stone-100 p-1 text-sm" data-seg="config.message.button">
+          ${[['none', 'No button - the message asks for ORDER FOOD'], ['order_link', 'Their ordering page'], ['url', 'A link of mine']].map(([v, lbl]) =>
+            `<button type="button" data-value="${v}" aria-pressed="${m.button === v}" class="rounded-lg px-3 py-1.5 font-medium text-stone-600">${lbl}</button>`).join('')}
+        </div></div>
+      ${m.button !== 'none' ? `<div><label class="lbl">Button text</label>${inputHtml('config.message.button_text', m.button_text, 'text', 'maxlength="20"')}<p class="help">Up to 20 characters.</p></div>` : ''}
+      ${m.button === 'url' ? `<div><label class="lbl">Link</label>${inputHtml('config.message.button_url', m.button_url, 'opt', 'placeholder="https://..."')}</div>` : ''}
+    </div>`;
+}
+
+function poolCountsHtml(pool) {
+  const pc = poolCounts(pool), months = Math.max(1, Math.floor(E.config.journey.length_days / E.config.journey.stage_days));
+  if (!pc.total) return `<div class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">No active messages in the <b>${esc(pool)}</b> pool yet. Add or import them in the <b>Messages</b> tab - until then this journey sends nothing.</div>`;
+  const cells = [];
+  for (let i = 1; i <= months; i++) cells.push(`<span class="chip ${pc.counts[i] ? 'bg-stone-100 text-stone-700' : 'bg-amber-100 text-amber-800'}">Month ${i}: ${pc.counts[i] || 0}</span>`);
+  if (pc.counts.any) cells.push(`<span class="chip bg-stone-100 text-stone-700">Any month: ${pc.counts.any}</span>`);
+  return `<div class="text-xs font-semibold text-stone-600">${pc.total} active in the ${esc(pool)} pool · ${pc.approved} with an approved template</div><div class="mt-1.5 flex flex-wrap gap-1.5">${cells.join('')}</div>`;
+}
+
+function journeyHtml(j) {
+  const bucketCard = ([key, label]) => {
+    const cad = j[key];
+    const rows = cad.steps.map((st, i) => `
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="w-14 shrink-0 text-xs text-stone-500">${i === 0 ? 'Every' : 'then every'}</span>
+        <input class="field !w-20" type="number" min="0.5" step="0.5" data-path="config.journey.${key}.steps.${i}.every_days" data-type="float" value="${esc(st.every_days)}">
+        <span class="text-xs text-stone-500">days,</span>
+        <input class="field !w-20" type="number" min="1" step="1" data-path="config.journey.${key}.steps.${i}.times" data-type="int" value="${esc(st.times ?? '')}" placeholder="∞">
+        <span class="text-xs text-stone-500">${i === cad.steps.length - 1 ? 'times (empty: until the end)' : 'times'}</span>
+        ${cad.steps.length > 1 ? `<button type="button" class="btn btn-ghost !px-2 !py-1" data-step-del="${key}:${i}" aria-label="Remove step">${icon(I.x)}</button>` : ''}
+      </div>`).join('');
+    return `
+      <div class="rounded-xl border border-stone-200 p-4">
+        <div class="flex flex-wrap items-baseline justify-between gap-2"><div class="text-sm font-semibold text-stone-900">${label}</div><div class="text-[11px] text-stone-500">${esc(BUCKET_HELP[key])}</div></div>
+        <div class="mt-3 space-y-2">${rows}</div>
+        <div class="mt-2 flex flex-wrap items-center gap-3">
+          <button type="button" class="btn btn-ghost !py-1 text-xs" data-step-add="${key}" ${cad.steps.length >= 10 ? 'disabled' : ''}>${icon(I.plus)}Add a step</button>
+          <label class="flex items-center gap-2 text-xs text-stone-600">At most <input class="field !w-24 !py-1" type="number" min="1" data-path="config.journey.${key}.max_attempts" data-type="int" value="${esc(cad.max_attempts ?? '')}" placeholder="no cap"> sends in this group</label>
+        </div>
+        <div class="mt-3 text-xs text-stone-600" data-timeline="${key}"></div>
+      </div>`;
+  };
+  return `
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div><label class="lbl">Message pool</label>${inputHtml('config.journey.pool', j.pool, 'text', 'list="dl-pools" maxlength="60"')}<p class="help">Which library messages this journey uses (the Pool column in the library).</p></div>
+      ${numberField('config.journey.length_days', 'Journey length', j.length_days, {unit: 'days', min: 1, help: '183 = six months, counted from their first follow-up. Then the journey ends.'})}
+      ${numberField('config.journey.stage_days', 'Days per month stage', j.stage_days, {unit: 'days', min: 1, help: 'Month 1 messages for this long, then month 2\'s...'})}
+      <div><label class="lbl">How a message is picked</label>
+        <div class="seg inline-flex rounded-xl bg-stone-100 p-1 text-sm" data-seg="config.journey.pick">
+          ${[['random', 'At random'], ['in_order', 'In ID order']].map(([v, lbl]) => `<button type="button" data-value="${v}" aria-pressed="${j.pick === v}" class="rounded-lg px-3 py-1.5 font-medium text-stone-600">${lbl}</button>`).join('')}
+        </div><p class="help">At random from the month's messages that fit, or the next one they have not had.</p></div>
+      ${numberField('config.journey.avoid_repeat', 'Never repeat any of their last', j.avoid_repeat, {unit: 'messages', min: 0})}
+      ${numberField('config.journey.avoid_angle_repeat', 'Nor the same angle as their last', j.avoid_angle_repeat, {unit: 'messages', min: 0, help: 'No near-identical message back to back (the Angle column in the library).'})}
+      ${numberField('config.journey.pause_after_chat_hours', 'Wait after they message the bot', j.pause_after_chat_hours, {type: 'float', step: '0.5', unit: 'hours', help: 'No sales message in the middle of a conversation. Anyone part-way through an order is always skipped.'})}
+      ${numberField('config.journey.resume_after_days', 'After ORDER FOOD with no order, resume after', j.resume_after_days, {type: 'float', step: '0.5', min: 0.5, unit: 'days', help: 'ORDER FOOD pauses their follow-ups while they order; an order ends the journey.'})}
+      <div class="sm:col-span-2">${boolField('config.journey.borrow_other_months', "Borrow from the nearest month when this month's messages are used up", j.borrow_other_months)}</div>
+    </div>
+    <div class="mt-5 mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Timing by reply group</div>
+    <p class="mb-3 text-sm text-stone-600">Each step is "every N days, so many times". The steps run in order, and the last may repeat until the journey ends. A reply moves the customer to that group, and its steps start again from the reply.</p>
+    <div class="space-y-3">${BUCKETS.map(bucketCard).join('')}</div>`;
+}
+
+function drawTimelines() {
+  if (!E || !E.config.journey) return;
+  const j = E.config.journey;
+  document.querySelectorAll('[data-timeline]').forEach((el) => {
+    const key = el.dataset.timeline, days = timeline(j[key], j.length_days, key === 'no_response');
+    el.innerHTML = days.length
+      ? `<span class="font-semibold">${key === 'no_response' ? 'Sends on day' : 'Sends on day (after their reply)'}:</span> ${days.join(' · ')}${days.length >= 60 ? ' …' : ''} <span class="text-stone-400">(${days.length} send${days.length === 1 ? '' : 's'} within ${j.length_days} days)</span>`
+      : '<span class="text-amber-700">No sends - check the steps.</span>';
+  });
+  const counts = $('ed-pool-counts');
+  if (counts) counts.innerHTML = poolCountsHtml(j.pool);
 }
 
 function wireEditor() {
@@ -986,6 +1073,20 @@ function wireEditor() {
   if (addParam) addParam.addEventListener('click', () => {
     E.config.message.template.params = [...(E.config.message.template.params || []), '']; drawEditorKeepOpen();
   });
+  form.querySelectorAll('[data-step-add]').forEach((b) => b.addEventListener('click', () => {
+    const steps = E.config.journey[b.dataset.stepAdd].steps, last = steps[steps.length - 1];
+    // The new step goes last, so the one before it needs a count.
+    if (last.times == null) last.times = 3;
+    steps.push({every_days: Math.max(+last.every_days || 1, 1) * 2, times: null});
+    drawEditorKeepOpen();
+  }));
+  form.querySelectorAll('[data-step-del]').forEach((b) => b.addEventListener('click', () => {
+    const [key, i] = b.dataset.stepDel.split(':');
+    const steps = E.config.journey[key].steps;
+    steps.splice(+i, 1);
+    if (steps.length && +i >= steps.length) steps[steps.length - 1].times = null;
+    drawEditorKeepOpen();
+  }));
   form.querySelectorAll('[data-ph]').forEach((b) => b.addEventListener('click', () => {
     const target = lastText && document.body.contains(lastText) ? lastText : form.querySelector('[data-path="config.message.text"]');
     const token = `{${b.dataset.ph}}`, start = target.selectionStart ?? target.value.length, end = target.selectionEnd ?? start;
@@ -1001,17 +1102,14 @@ function wireEditor() {
     E.kind = next;
     E.config.trigger = defaultsFor(next).trigger;
     if (E.config.message.text === oldDefault) E.config.message.text = defaultsFor(next).message.text;
+    if (next === 'follow_up') {
+      // Its words come from the library; the default text only names that.
+      E.config.journey = defaultsFor(next).journey;
+      E.config.message.text = defaultsFor(next).message.text;
+    } else {
+      delete E.config.journey;
+    }
     drawEditorKeepOpen();
-  });
-  const json = $('ed-json');
-  json.value = JSON.stringify(E.config, null, 2);
-  $('ed-json-refresh').addEventListener('click', () => { json.value = JSON.stringify(E.config, null, 2); });
-  $('ed-json-apply').addEventListener('click', () => {
-    try {
-      const parsed = JSON.parse(json.value);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('It must be one JSON object.');
-      E.config = deepMerge(defaultsFor(E.kind), parsed); drawEditorKeepOpen(); toast('Loaded into the form. Save to keep it.');
-    } catch (err) { toast(`That JSON does not read: ${err.message}`, 'error'); }
   });
 }
 function redrawTags(box) {
@@ -1033,8 +1131,9 @@ function drawEditorKeepOpen() {
 }
 
 function sampleValues() {
-  const coupon = S.options.coupons.find((p) => p.code === E.promotion_code);
-  const t = E.config.trigger || {};
+  // Also used by the library's message editor, when no campaign is open.
+  const coupon = E ? S.options.coupons.find((p) => p.code === E.promotion_code) : null;
+  const t = (E && E.config.trigger) || {};
   const name = 'Asha Menon';
   return {
     name, first_name: 'Asha', shop_name: S.settings.shop_name,
@@ -1056,8 +1155,43 @@ function fill(text, values, problems) {
     problems.add(name); return m;
   });
 }
+function bubble(text, buttonText) {
+  return `
+    <div class="wa-bg rounded-xl p-3">
+      <div class="max-w-[95%] rounded-lg rounded-tl-none bg-white px-3 py-2 text-[13.5px] leading-snug text-stone-900 shadow-sm">
+        <div class="whitespace-pre-line break-words">${wa(text) || '<span class="text-stone-400">Write a message...</span>'}</div>
+        <div class="mt-1 text-right text-[10px] text-stone-400">12:05</div>
+      </div>
+      ${buttonText ? `<div class="mt-1.5 flex items-center justify-center gap-1.5 rounded-lg bg-white py-2 text-[13px] font-medium text-sky-600 shadow-sm">${icon(I.link, 'h-3.5 w-3.5')}${esc(buttonText)}</div>` : ''}
+    </div>`;
+}
+function checksHtml(checks) {
+  return checks.map(([kind, text]) => `<div class="mb-2 flex gap-2 rounded-xl border p-3 text-xs leading-snug ${kind === 'error' ? 'border-red-200 bg-red-50 text-red-800' : kind === 'warn' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-stone-200 bg-white text-stone-600'}">${icon(I.info, 'h-4 w-4 shrink-0')}<span>${esc(text)}</span></div>`).join('');
+}
+function drawFollowUpPreview() {
+  const j = E.config.journey, m = E.config.message;
+  const pool = S.messages.filter((x) => x.pool === j.pool && x.is_active && (!x.buckets.length || x.buckets.includes('no_response')));
+  const example = pool.filter((x) => !x.starts_on && !x.ends_on).sort((a, b) => (a.month || 99) - (b.month || 99) || a.code.localeCompare(b.code, undefined, {numeric: true}))[0] || pool[0];
+  const values = sampleValues();
+  const text = example ? fill(example.body, values, new Set()).replace(/[ \t]{2,}/g, ' ').trim() : '';
+  $('ed-preview').innerHTML = example
+    ? `<div class="mb-2 text-xs text-stone-500">Example: <span class="font-mono font-semibold text-stone-700">${esc(example.code)}</span> · ${example.month ? `month ${example.month}` : 'any month'} · ${esc(example.title)}</div>
+       ${bubble(text, m.button !== 'none' ? m.button_text : '')}
+       <p class="mt-2 text-[11px] text-stone-500">Each send picks its own message from the library. Outside the 24-hour window it goes as the message's approved template${example.wa_template ? ` (here <span class="font-mono">${esc(example.wa_template)}</span>${example.wa_approved ? ', approved' : ', not approved yet'})` : ' - this one has none, so it can only go inside the window'}.</p>`
+    : '<div class="rounded-xl bg-stone-50 p-6 text-center text-sm text-stone-500">No active messages in this pool yet.</div>';
+  const checks = [];
+  if (!poolCounts(j.pool).total) checks.push(['error', `The ${j.pool} pool has no active messages: add or import them in the Messages tab.`]);
+  if (S.options.order_food_starts_bot === false) checks.push(['warn', 'In keyword mode, ORDER FOOD does not start the bot yet. Add it as a trigger keyword on the Bot replies page - every library message asks for it.']);
+  if (S.settings.block_marketing_templates_to_us) checks.push(['info', 'US (+1) numbers only get follow-ups inside the 24-hour window while Meta holds back marketing templates there (Settings).']);
+  const last = (key) => { const st = j[key].steps; return st[st.length - 1]; };
+  BUCKETS.forEach(([key, label]) => { if (last(key).times != null && last(key).times !== '' && !j[key].max_attempts) checks.push(['info', `${label}: the last step has a count, so the journey ends after it.`]); });
+  if (!E.is_active) checks.push(['info', 'Saved paused: it will not send until you activate it.']);
+  $('ed-checks').innerHTML = checksHtml(checks);
+  drawTimelines();
+}
 function drawPreview() {
   if (!E) return;
+  if (E.kind === 'follow_up') return drawFollowUpPreview();
   const m = E.config.message, values = sampleValues(), problems = new Set();
   const available = new Set(placeholdersFor(E.kind, !!E.promotion_code).filter((p) => p.ok).map((p) => p.name));
   const body = fill(m.text, values, problems).replace(/\s+\n/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
@@ -1086,8 +1220,7 @@ function drawPreview() {
 
 async function saveEditor(andPreview) {
   const button = andPreview ? $('ed-save-preview') : $('ed-save');
-  const body = {name: E.name, kind: E.kind, priority: E.priority || 0, is_active: !!E.is_active,
-                promotion_code: E.promotion_code || null, config: E.config};
+  const body = {name: E.name, kind: E.kind, is_active: !!E.is_active, config: E.config};
   busy(button, true, 'Saving');
   $('ed-error').classList.add('hidden');
   try {
@@ -1102,6 +1235,362 @@ async function saveEditor(andPreview) {
 }
 $('ed-save').addEventListener('click', () => saveEditor(false));
 $('ed-save-preview').addEventListener('click', () => saveEditor(true));
+
+// --- messages: the follow-up library -------------------------------------------------------
+const bucketLabel = (b) => (BUCKETS.find(([k]) => k === b) || [b, b])[1];
+const numericSort = (a, b) => a.localeCompare(b, undefined, {numeric: true});
+function filteredMessages() {
+  const f = S.msgFilter, q = f.q.trim().toLowerCase();
+  return S.messages.filter((m) =>
+    (!f.pool || m.pool === f.pool) &&
+    (!f.month || (f.month === 'any' ? !m.month : String(m.month) === f.month)) &&
+    (!f.bucket || !m.buckets.length || m.buckets.includes(f.bucket)) &&
+    (!f.status || (f.status === 'on' ? m.is_active : !m.is_active)) &&
+    (!q || [m.code, m.title, m.angle, m.body, m.occasion, m.wa_template].some((v) => (v || '').toLowerCase().includes(q))));
+}
+function renderMessages() {
+  const box = panel('messages'), f = S.msgFilter;
+  const exportQs = f.pool ? `&pool=${encodeURIComponent(f.pool)}` : '';
+  const head = `
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <p class="max-w-3xl text-sm text-stone-600">The messages your <b>follow-up journeys</b> send. Each month of a journey picks from that month's messages, and each customer's reply group can have its own. Add them one by one, or bring them all in from Excel, CSV or JSON.</p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-ghost" id="msg-import">${icon('M12 3v12M7 10l5 5 5-5M5 21h14')}Import</button>
+        <details class="relative" id="msg-export">
+          <summary class="btn btn-ghost cursor-pointer list-none">${icon('M12 21V9M7 14l5-5 5 5M5 3h14')}Export</summary>
+          <div class="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-stone-200 bg-white p-1 text-sm shadow-card">
+            ${[['xlsx', 'Excel (.xlsx)'], ['csv', 'CSV'], ['json', 'JSON']].map(([fmt, l]) => `<a class="block rounded-lg px-3 py-2 text-stone-700 hover:bg-stone-50" href="${API}/messages/export?format=${fmt}${exportQs}" download>${l}${f.pool ? ` - ${esc(f.pool)} only` : ''}</a>`).join('')}
+          </div>
+        </details>
+        <button type="button" class="btn btn-primary" id="msg-new">${icon(I.plus)}New message</button>
+      </div>
+    </div>`;
+  if (!S.messages.length) {
+    box.innerHTML = head + `
+      <div class="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center">
+        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-50 text-teal-700">${icon(KINDS.follow_up.icon, 'h-6 w-6')}</div>
+        <h3 class="mt-3 text-base font-semibold text-stone-900">No messages yet</h3>
+        <p class="mx-auto mt-1 max-w-md text-sm text-stone-600">Import your content plan (for example the 54 SMO messages M1-01 to M6-09) from an Excel, CSV or JSON file, or write the first one here.</p>
+        <div class="mt-5 flex flex-wrap justify-center gap-2">
+          <button type="button" class="btn btn-primary" data-empty="import">${icon('M12 3v12M7 10l5 5 5-5M5 21h14')}Import a file</button>
+          <button type="button" class="btn btn-ghost" data-empty="new">${icon(I.plus)}Write one</button>
+          <a class="btn btn-ghost" href="${API}/messages/sample?format=xlsx" download>Download a sample sheet</a>
+        </div>
+      </div>`;
+    wireMessagesHead(box);
+    box.querySelectorAll('[data-empty]').forEach((b) => b.addEventListener('click', () => (b.dataset.empty === 'import' ? openImport() : openMessageEditor(null))));
+    return;
+  }
+  const months = [...new Set(S.messages.map((m) => m.month).filter(Boolean))].sort((a, b) => a - b);
+  const active = S.messages.filter((m) => m.is_active);
+  const noTemplate = active.filter((m) => !m.wa_template).length, unapproved = active.filter((m) => m.wa_template && !m.wa_approved).length;
+  const list = filteredMessages();
+  const groups = new Map();
+  list.forEach((m) => { const k = `${m.pool}\u0000${m.month || 99}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); });
+  const manyPools = new Set(S.messages.map((m) => m.pool)).size > 1;
+  const sel = (id, value, options) => `<select class="field !w-auto" id="${id}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(value) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  box.innerHTML = head + `
+    <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+      ${[['Messages', `${S.messages.length}`], ['Active', `${active.length}`], ['Without a template', `${noTemplate}`], ['Template not approved', `${unapproved}`]].map(([l, v]) =>
+        `<div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card"><div class="text-xs text-stone-500">${l}</div><div class="mt-1 text-2xl font-semibold text-stone-900">${v}</div></div>`).join('')}
+    </div>
+    ${noTemplate || unapproved ? `<div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">${noTemplate ? `<b>${noTemplate}</b> active message${noTemplate === 1 ? ' has' : 's have'} no WhatsApp template: ${noTemplate === 1 ? 'it' : 'they'} can only go to customers who messaged the bot in the last 24 hours. ` : ''}${unapproved ? `<b>${unapproved}</b> template${unapproved === 1 ? ' is' : 's are'} not approved in Gallabox yet. ` : ''}Submit each message's text as a template in Gallabox, then put its name here.</div>` : ''}
+    <div class="mb-4 flex flex-wrap items-end gap-3">
+      <div class="min-w-[14rem] flex-1"><label class="lbl">Search</label><input class="field" id="mf-q" placeholder="ID, title, words in the message…" value="${esc(S.msgFilter.q)}"></div>
+      <div><label class="lbl">Pool</label>${sel('mf-pool', f.pool, [['', 'All pools'], ...S.pools.map((p) => [p, p])])}</div>
+      <div><label class="lbl">Month</label>${sel('mf-month', f.month, [['', 'All months'], ...months.map((m) => [String(m), `Month ${m}`]), ['any', 'Any month']])}</div>
+      <div><label class="lbl">Group</label>${sel('mf-bucket', f.bucket, [['', 'All groups'], ...BUCKETS])}</div>
+      <div><label class="lbl">Status</label>${sel('mf-status', f.status, [['', 'On and off'], ['on', 'Active'], ['off', 'Switched off']])}</div>
+    </div>
+    ${list.length ? [...groups.entries()].map(([k, msgs]) => {
+      const [pool, month] = k.split('\u0000');
+      return `<div class="mb-6"><div class="mb-2 flex items-baseline gap-2"><h3 class="text-sm font-semibold text-stone-900">${manyPools ? `${esc(pool)} · ` : ''}${month === '99' ? 'Any month' : `Month ${month}`}</h3><span class="text-xs text-stone-500">${msgs.length} message${msgs.length === 1 ? '' : 's'}</span></div>
+        <div class="grid gap-3 lg:grid-cols-2">${msgs.map(messageCard).join('')}</div></div>`;
+    }).join('') : '<div class="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">No messages match these filters.</div>'}`;
+  wireMessagesHead(box);
+  let typing;
+  $('mf-q').addEventListener('input', (e) => { S.msgFilter.q = e.target.value; clearTimeout(typing); typing = setTimeout(() => { renderMessages(); const q = $('mf-q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); });
+  [['mf-pool', 'pool'], ['mf-month', 'month'], ['mf-bucket', 'bucket'], ['mf-status', 'status']].forEach(([id, key]) =>
+    $(id).addEventListener('change', (e) => { S.msgFilter[key] = e.target.value; renderMessages(); }));
+  box.querySelectorAll('[data-mact]').forEach((b) => b.addEventListener('click', (e) => messageAction(b.dataset.mact, b.dataset.id, e.currentTarget)));
+}
+function wireMessagesHead(box) {
+  $('msg-new').addEventListener('click', () => openMessageEditor(null));
+  $('msg-import').addEventListener('click', openImport);
+}
+// The Export menu closes on a click anywhere else.
+document.addEventListener('click', (e) => {
+  ['msg-export', 'camp-export'].forEach((id) => { const d = $(id); if (d && d.open && !d.contains(e.target)) d.open = false; });
+});
+function templateChip(m) {
+  if (!m.wa_template) return '<span class="chip bg-amber-100 text-amber-800" title="Goes only to customers who messaged the bot in the last 24 hours">No template</span>';
+  return m.wa_approved
+    ? `<span class="chip bg-emerald-100 text-emerald-800" title="Approved in Gallabox">${icon(I.check, 'h-3 w-3')}<span class="font-mono">${esc(m.wa_template)}</span></span>`
+    : `<span class="chip bg-stone-100 text-stone-600" title="Not approved in Gallabox yet (or Gallabox could not be asked)"><span class="font-mono">${esc(m.wa_template)}</span> · not approved</span>`;
+}
+function messageCard(m) {
+  const st = m.stats;
+  const chips = [];
+  if (m.buckets.length) chips.push(`<span class="chip bg-sky-100 text-sky-800">${m.buckets.map(bucketLabel).join(', ')} only</span>`);
+  if (m.starts_on || m.ends_on) chips.push(`<span class="chip bg-violet-100 text-violet-800">${esc(m.occasion || 'Dates')}: ${esc(m.starts_on || '…')} → ${esc(m.ends_on || '…')}</span>`);
+  if (m.order_by) chips.push(`<span class="chip bg-violet-100 text-violet-800">Order by ${esc(m.order_by)}</span>`);
+  if ((m.kitchens || []).length) chips.push(`<span class="chip bg-stone-100 text-stone-700" title="Service area">${esc(m.kitchens.join(', '))} only</span>`);
+  if (m.dishes.length) chips.push(`<span class="chip bg-stone-100 text-stone-700" title="${esc(m.dishes.join(', '))}">Needs ${m.dishes.length === 1 ? esc(m.dishes[0]) : `${m.dishes.length} dishes`}</span>`);
+  chips.push(templateChip(m));
+  return `
+  <article class="flex flex-col rounded-2xl border border-stone-200 bg-white shadow-card ${m.is_active ? '' : 'opacity-70'}">
+    <div class="flex items-start gap-3 p-4 pb-2">
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-1.5"><span class="rounded-md bg-teal-50 px-1.5 py-0.5 font-mono text-xs font-semibold text-teal-800">${esc(m.code)}</span>${m.angle ? `<span class="text-xs text-stone-500">${esc(m.angle)}</span>` : ''}</div>
+        <h4 class="mt-1 font-semibold text-stone-900">${esc(m.title)}</h4>
+      </div>
+      <button type="button" class="switch" role="switch" aria-checked="${m.is_active}" data-mact="toggle" data-id="${m.id}" title="${m.is_active ? 'Switch off' : 'Switch on'}"><span></span></button>
+    </div>
+    <div class="mx-4 rounded-xl bg-stone-50 px-3 py-2.5 text-[13px] leading-snug text-stone-700"><div class="line-clamp-5 whitespace-pre-line">${wa(m.body)}</div></div>
+    <div class="flex flex-wrap gap-1.5 px-4 pb-3 pt-3">${chips.join('')}</div>
+    <div class="mt-auto flex flex-wrap items-center gap-1.5 border-t border-stone-100 p-3 pt-2.5">
+      <span class="text-xs text-stone-500">${st ? `${st.sent} sent · ${st.replies} replies · ${st.conversions} orders` : 'Not sent yet'} <span class="text-stone-400">(${S.libraryDays} d)</span></span>
+      <span class="flex-1"></span>
+      <button type="button" class="btn btn-ghost !px-2.5 !py-1.5 text-xs" data-mact="edit" data-id="${m.id}">${icon(I.edit)}Edit</button>
+      <button type="button" class="btn btn-ghost !px-2.5 !py-1.5 text-xs" data-mact="duplicate" data-id="${m.id}" title="Duplicate">${icon(I.copy)}</button>
+      <button type="button" class="btn btn-danger !px-2.5 !py-1.5 text-xs" data-mact="delete" data-id="${m.id}" title="Delete">${icon(I.trash)}</button>
+    </div>
+  </article>`;
+}
+async function messageAction(act, id, button) {
+  const m = S.messages.find((x) => x.id === id);
+  try {
+    if (act === 'edit') return openMessageEditor(m);
+    if (act === 'toggle') {
+      busy(button, true);
+      await api(`/messages/${id}`, {method: 'PATCH', body: {is_active: !m.is_active}});
+      toast(m.is_active ? `${m.code} switched off.` : `${m.code} is active.`);
+    }
+    if (act === 'duplicate') {
+      const copy = await api(`/messages/${id}/duplicate`, {method: 'POST'});
+      toast(`Made ${copy.code} (switched off).`); await refreshLibrary(); renderMessages(); return openMessageEditor(copy);
+    }
+    if (act === 'delete') {
+      if (!await confirmBox('Delete this message?', `<b>${esc(m.code)}</b> - ${esc(m.title)} will be deleted. Sends of it stay in the activity log. To keep it but stop sending it, switch it off instead.`, 'Delete', 'danger')) return;
+      await api(`/messages/${id}`, {method: 'DELETE'}); toast('Deleted.');
+    }
+    await refreshLibrary(); renderMessages();
+  } catch (e) { toast(e.message, 'error'); busy(button, false); }
+}
+
+function nextCode(pool, month) {
+  const prefix = month ? `M${month}-` : 'MSG-';
+  const used = S.messages.filter((m) => m.code.startsWith(prefix)).map((m) => parseInt(m.code.slice(prefix.length), 10)).filter((n) => !isNaN(n));
+  return `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
+}
+let MSG = null;   // the message being edited
+function openMessageEditor(m) {
+  const f = S.msgFilter, month = m ? m.month : (f.month && f.month !== 'any' ? +f.month : 1);
+  MSG = m ? clone(m) : {id: null, code: nextCode(f.pool || 'SMO', month), pool: f.pool || 'SMO', month, title: '', angle: '', body: '',
+                       buckets: [], occasion: '', starts_on: '', ends_on: '', order_by: '', kitchens: [], dishes: [], wa_template: '', wa_params: [], wa_button: 'none', is_active: true};
+  const max = S.reference.message_max || 1024;
+  const chips = Object.entries(S.reference.placeholders).filter(([, p]) => p.kinds.includes('follow_up')).map(([name, p]) =>
+    `<button type="button" data-mph="${name}" title="${esc(p.description)}${name.startsWith('coupon_') ? ' - only sent by a campaign with a coupon' : ''}" class="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 font-mono text-[11px] text-brand-800 hover:bg-brand-100">{${name}}</button>`).join('');
+  const monthOptions = [['', 'Any month'], ...Array.from({length: 12}, (_, i) => [String(i + 1), `Month ${i + 1}`])];
+  openModal({title: m ? `Edit ${m.code}` : 'New message', wide: true, body: `
+    <div id="me-error" class="mb-4 hidden rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"></div>
+    <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div class="space-y-4">
+        <div class="grid gap-4 sm:grid-cols-3">
+          <div><label class="lbl">ID</label><input class="field font-mono uppercase" data-m="code" maxlength="40" value="${esc(MSG.code)}"><p class="help">Never changes; imports match on it.</p></div>
+          <div><label class="lbl">Pool</label><input class="field" data-m="pool" list="dl-mpools" maxlength="60" value="${esc(MSG.pool)}"><datalist id="dl-mpools">${S.pools.map((p) => `<option value="${esc(p)}">`).join('')}</datalist></div>
+          <div><label class="lbl">Month of the journey</label><select class="field" data-m="month">${monthOptions.map(([v, l]) => `<option value="${v}" ${String(MSG.month || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div><label class="lbl">Title</label><input class="field" data-m="title" maxlength="160" value="${esc(MSG.title)}" placeholder="For your team"></div>
+          <div><label class="lbl">Angle</label><input class="field" data-m="angle" maxlength="80" value="${esc(MSG.angle || '')}" placeholder="e.g. Craving, Variety"></div>
+        </div>
+        <div><label class="lbl">Message</label>
+          <textarea class="field font-[inherit]" rows="9" maxlength="${max}" data-m="body" id="me-body">${esc(MSG.body)}</textarea>
+          <div class="mt-1 flex justify-between text-[11px] text-stone-500"><span>*bold* and _italic_ work. End with the call to action, e.g. Send *ORDER FOOD* on WhatsApp.</span><span id="me-count">${MSG.body.length}/${max}</span></div>
+          <div class="mt-2 flex flex-wrap gap-1.5">${chips}</div></div>
+        <div><label class="lbl">Reply groups</label>
+          <div class="flex flex-wrap gap-2">${BUCKETS.map(([k, l]) => `<label class="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-2 text-sm"><input type="checkbox" data-mbucket value="${k}" ${MSG.buckets.includes(k) ? 'checked' : ''} class="h-4 w-4 rounded border-stone-300 text-brand-600">${l}</label>`).join('')}</div>
+          <p class="help">None ticked: every group. Tick some to keep this message for them, e.g. a gentler one for Later.</p></div>
+        <div class="grid gap-4 sm:grid-cols-4">
+          <div><label class="lbl">Occasion</label><input class="field" data-m="occasion" maxlength="80" value="${esc(MSG.occasion || '')}" placeholder="e.g. Diwali"></div>
+          <div><label class="lbl">From</label><input class="field" type="date" data-m="starts_on" value="${esc(MSG.starts_on || '')}"></div>
+          <div><label class="lbl">Order by (cutoff)</label><input class="field" type="date" data-m="order_by" value="${esc(MSG.order_by || '')}"></div>
+          <div><label class="lbl">Until (expiry)</label><input class="field" type="date" data-m="ends_on" value="${esc(MSG.ends_on || '')}"></div>
+          <p class="help sm:col-span-4 !-mt-2">With dates it is an occasion message: only sent between From and Until, never after the ordering cutoff, and it goes before the month's own messages then. A skipped one is logged with the reason.</p>
+        </div>
+        <div><label class="lbl">Service area (kitchens)</label>
+          <div class="flex flex-wrap gap-2">${S.options.kitchens.length ? S.options.kitchens.map((kk) => `<label class="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-2 text-sm"><input type="checkbox" data-mkitchen value="${esc(kk.code)}" ${(MSG.kitchens || []).includes(kk.code) ? 'checked' : ''} class="h-4 w-4 rounded border-stone-300 text-brand-600">${esc(kk.name)}</label>`).join('') : '<span class="text-sm text-stone-500">No kitchens yet</span>'}</div>
+          <p class="help">None ticked: every kitchen. Tick some to send it only to customers of those kitchens, e.g. a local occasion.</p></div>
+        <div><label class="lbl">Only while these dishes are on the menu</label><input class="field" data-m="dishes" list="dl-mdishes" value="${esc(MSG.dishes.join(', '))}" placeholder="Empty: always. Separate dishes with commas"><datalist id="dl-mdishes">${S.options.dishes.map((d) => `<option value="${esc(d)}">`).join('')}</datalist></div>
+        <div class="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+          <div class="text-sm font-semibold text-stone-900">WhatsApp template</div>
+          <p class="mt-1 text-xs leading-relaxed text-stone-700">For customers who have not messaged the bot in 24 hours, WhatsApp only delivers an <b>approved template</b>. Submit this message's text in Gallabox (category Marketing) and put its name here. Without one, this message only goes inside the 24-hour window.</p>
+          <div class="mt-3 grid gap-4 sm:grid-cols-2">
+            <div><label class="lbl">Template name in Gallabox</label><input class="field font-mono" data-m="wa_template" maxlength="120" value="${esc(MSG.wa_template || '')}" placeholder="e.g. smo_m1_01"></div>
+            <div><label class="lbl">Template button</label><select class="field" data-m="wa_button"><option value="none" ${MSG.wa_button === 'none' ? 'selected' : ''}>No button</option><option value="order_link" ${MSG.wa_button === 'order_link' ? 'selected' : ''}>Their ordering page (URL ending in {{1}})</option></select></div>
+            <div class="sm:col-span-2"><label class="lbl">Template values, in order</label><input class="field" data-m="wa_params" value="${esc(MSG.wa_params.join(' | '))}" placeholder="Empty when the template has no {{1}}. e.g. {first_name}"><p class="help">Separate with | . Usually empty.</p></div>
+          </div>
+        </div>
+        <label class="flex items-start gap-3 rounded-xl border border-stone-200 p-3"><input type="checkbox" data-m="is_active" ${MSG.is_active ? 'checked' : ''} class="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600"><span><span class="block text-sm font-medium text-stone-800">Active</span><span class="help block">Only active messages are sent.</span></span></label>
+      </div>
+      <aside class="lg:sticky lg:top-0 lg:self-start"><div class="text-sm font-semibold text-stone-800">What the customer sees</div><div class="mt-2" id="me-preview"></div></aside>
+    </div>`,
+    actions: [{label: 'Cancel', kind: 'ghost'}, {html: `${icon(I.check)}Save`, kind: 'primary', onClick: saveMessage}]});
+  const bodyEl = $('modal-body');
+  bodyEl.querySelectorAll('[data-m]').forEach((el) => {
+    const update = () => {
+      const k = el.dataset.m;
+      MSG[k] = el.type === 'checkbox' ? el.checked : el.value;
+      if (k === 'body') $('me-count').textContent = `${el.value.length}/${max}`;
+      drawMessagePreview();
+    };
+    el.addEventListener('input', update); el.addEventListener('change', update);
+  });
+  bodyEl.querySelectorAll('[data-mbucket]').forEach((el) => el.addEventListener('change', () => {
+    MSG.buckets = [...bodyEl.querySelectorAll('[data-mbucket]')].filter((x) => x.checked).map((x) => x.value);
+  }));
+  bodyEl.querySelectorAll('[data-mkitchen]').forEach((el) => el.addEventListener('change', () => {
+    MSG.kitchens = [...bodyEl.querySelectorAll('[data-mkitchen]')].filter((x) => x.checked).map((x) => x.value);
+  }));
+  bodyEl.querySelectorAll('[data-mph]').forEach((b) => b.addEventListener('click', () => {
+    const t = $('me-body'), token = `{${b.dataset.mph}}`, start = t.selectionStart ?? t.value.length, end = t.selectionEnd ?? start;
+    t.value = t.value.slice(0, start) + token + t.value.slice(end);
+    t.focus(); t.setSelectionRange(start + token.length, start + token.length); t.dispatchEvent(new Event('input'));
+  }));
+  drawMessagePreview();
+}
+function drawMessagePreview() {
+  if (!MSG || !$('me-preview')) return;
+  const problems = new Set(), values = {...sampleValues(), coupon_code: 'WELCOME10', coupon_title: 'Welcome offer', coupon_offer: '10% off', coupon_terms: 'Min order $30', coupon_ends: 'Valid till 30 Nov.'};
+  const text = fill(MSG.body, values, problems).replace(/[ \t]{2,}/g, ' ').trim();
+  const checks = [];
+  if (problems.size) checks.push(['error', `Not a placeholder: ${[...problems].map((p) => `{${p}}`).join(', ')}. Saving will be refused until they come out.`]);
+  if (!/order\s*food/i.test(MSG.body) && MSG.body.trim()) checks.push(['warn', 'The message does not ask them to send ORDER FOOD - the content plan ends every message with it.']);
+  if (/\{coupon_/.test(MSG.body)) checks.push(['info', 'Uses a coupon: only campaigns with a coupon send it.']);
+  if (!MSG.wa_template) checks.push(['info', 'No template: only goes to customers who messaged the bot in the last 24 hours.']);
+  $('me-preview').innerHTML = bubble(text) + `<div class="mt-3">${checksHtml(checks)}</div>`;
+}
+async function saveMessage(button) {
+  const split = (v, sep) => String(v || '').split(sep).map((x) => x.trim()).filter(Boolean);
+  const body = {code: MSG.code, pool: MSG.pool, month: MSG.month ? +MSG.month : null, title: MSG.title, angle: MSG.angle || null,
+                body: MSG.body, buckets: MSG.buckets, occasion: MSG.occasion || null, starts_on: MSG.starts_on || null, ends_on: MSG.ends_on || null,
+                order_by: MSG.order_by || null, kitchens: MSG.kitchens || [],
+                dishes: Array.isArray(MSG.dishes) ? MSG.dishes : split(MSG.dishes, ','), wa_template: MSG.wa_template || null,
+                wa_params: Array.isArray(MSG.wa_params) ? MSG.wa_params : split(MSG.wa_params, '|'), wa_button: MSG.wa_button, is_active: !!MSG.is_active};
+  busy(button, true, 'Saving');
+  try {
+    const saved = MSG.id ? await api(`/messages/${MSG.id}`, {method: 'PATCH', body}) : await api('/messages', {method: 'POST', body});
+    closeModal(); MSG = null;
+    toast(`Saved ${saved.code}${saved.is_active ? '' : ' (switched off)'}.`);
+    await refreshLibrary(); renderMessages();
+  } catch (e) {
+    $('me-error').innerHTML = `<b>Not saved.</b> ${esc(e.message)}`; $('me-error').classList.remove('hidden');
+    $('me-error').scrollIntoView({behavior: 'smooth', block: 'center'});
+  } finally { busy(button, false); }
+}
+
+function openImport() {
+  const cols = S.columns || [];
+  openModal({title: 'Import messages', wide: true, body: `
+    <p class="text-sm leading-relaxed text-stone-600">Bring many messages in at once from <b>Excel (.xlsx)</b>, <b>CSV</b> or <b>JSON</b>. They are matched on their <b>ID</b>: a new ID is added, an ID already here is updated. You see exactly what will change before anything is saved, and rows with a problem are skipped with the reason.</p>
+    <div class="mt-4 grid gap-4 md:grid-cols-2">
+      <div><label class="lbl">File</label><input type="file" id="imp-file" accept=".xlsx,.csv,.json" class="block w-full text-sm text-stone-700 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-brand-700 hover:file:bg-brand-100">
+        <p class="help">Start from a sample - <a class="font-medium text-brand-700 underline" href="${API}/messages/sample?format=xlsx" download>Excel</a> · <a class="font-medium text-brand-700 underline" href="${API}/messages/sample?format=csv" download>CSV</a> · <a class="font-medium text-brand-700 underline" href="${API}/messages/sample?format=json" download>JSON</a> - or Export the library, edit it and import it back.</p></div>
+      <div class="space-y-2">
+        <label class="lbl">What to do</label>
+        <label class="flex items-start gap-2 text-sm"><input type="radio" name="imp-mode" value="upsert" checked class="mt-1"><span>Add new IDs and update existing ones</span></label>
+        <label class="flex items-start gap-2 text-sm"><input type="radio" name="imp-mode" value="add_only" class="mt-1"><span>Only add new IDs - leave existing messages as they are</span></label>
+        <label class="flex items-start gap-2 text-sm"><input type="checkbox" id="imp-off" class="mt-1"><span>Switch off messages in the same pool that are not in the file</span></label>
+      </div>
+    </div>
+    <details class="mt-4 rounded-xl border border-stone-200"><summary class="cursor-pointer px-4 py-2.5 text-sm font-medium text-stone-700">The columns</summary>
+      <div class="border-t border-stone-100 px-4 py-3"><table class="tbl w-full"><tbody>${cols.map((c) => `<tr><td class="whitespace-nowrap font-medium">${esc(c.heading)}</td><td class="text-stone-600">${esc(c.help)}</td></tr>`).join('')}</tbody></table>
+      <p class="mt-2 text-xs text-stone-500">Only ID, Title and Message are needed for a new message. On an update only the columns in the file change - a sheet with just ID and Active switches messages on and off. Headings may be spelled loosely (e.g. "Template ID", "Body", "Text").</p></div></details>
+    <div id="imp-result" class="mt-4"></div>`,
+    actions: [{label: 'Close', kind: 'ghost'}, {html: `${icon(I.eye)}Check the file`, kind: 'primary', onClick: (b) => runImport(b, false)}]});
+}
+async function runImport(button, commit) {
+  const file = $('imp-file').files[0];
+  if (!file) { toast('Choose a file first.', 'warn'); return; }
+  const mode = (document.querySelector('[name="imp-mode"]:checked') || {}).value || 'upsert';
+  busy(button, true, commit ? 'Importing' : 'Checking');
+  try {
+    const r = await upload('/messages/import', {file, mode, turn_off_missing: $('imp-off').checked ? 'true' : 'false', commit: commit ? 'true' : 'false'});
+    drawImportResult(r);
+    if (commit) {
+      toast(`Imported: ${r.counts.create} new, ${r.counts.update} updated${r.turned_off.length ? `, ${r.turned_off.length} switched off` : ''}.`);
+      await refreshLibrary(); renderMessages();
+    }
+  } catch (e) {
+    $('imp-result').innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"><b>Could not read the file.</b> ${esc(e.message)}</div>`;
+  } finally { busy(button, false); }
+}
+function drawImportResult(r, o = {}) {
+  const heading = Object.fromEntries((o.columns || S.columns || []).map((c) => [c.field, c.heading]));
+  const c = r.counts, changes = c.create + c.update + r.turned_off.length;
+  const ACT = {create: ['New', 'bg-emerald-100 text-emerald-800'], update: ['Update', 'bg-sky-100 text-sky-800'], unchanged: ['No change', 'bg-stone-100 text-stone-600'],
+               skip: ['Skipped', 'bg-stone-100 text-stone-600'], error: ['Problem', 'bg-red-100 text-red-700']};
+  const rows = r.rows.slice(0, 300);
+  $('imp-result').innerHTML = `
+    <div class="rounded-xl border ${r.committed ? 'border-emerald-200 bg-emerald-50' : 'border-stone-200 bg-stone-50'} p-4">
+      <div class="text-sm font-semibold text-stone-900">${r.committed ? 'Imported.' : 'Nothing is saved yet - here is what the import would do:'}</div>
+      <div class="mt-2 flex flex-wrap gap-1.5">
+        ${[['New', c.create, 'bg-emerald-100 text-emerald-800'], ['Updated', c.update, 'bg-sky-100 text-sky-800'], ['No change', c.unchanged, 'bg-stone-100 text-stone-700'], ['Skipped', c.skip, 'bg-stone-100 text-stone-700'], ['Problems', c.error, 'bg-red-100 text-red-700'], ['Switched off', r.turned_off.length, 'bg-amber-100 text-amber-800']]
+          .filter(([, n]) => n).map(([l, n, cls]) => `<span class="chip ${cls}">${l}: ${n}</span>`).join('')}
+      </div>
+      ${r.ignored_columns.length ? `<p class="mt-2 text-xs text-stone-600">Columns not used: ${esc(r.ignored_columns.join(', '))}.</p>` : ''}
+      ${r.turned_off.length ? `<p class="mt-2 text-xs text-stone-600">${r.committed ? 'Switched off' : 'Will switch off'}: ${esc(r.turned_off.join(', '))}.</p>` : ''}
+      ${!r.committed && changes ? `<button type="button" class="btn btn-primary mt-3" id="imp-commit">${icon(I.check)}Import ${changes} change${changes === 1 ? '' : 's'}${c.error ? ` (skip ${c.error} with problems)` : ''}</button>` : ''}
+      ${!r.committed && !changes ? '<p class="mt-2 text-sm text-stone-600">Nothing to change.</p>' : ''}
+    </div>
+    <div class="mt-3 max-h-[45vh] overflow-auto rounded-xl border border-stone-200"><table class="tbl w-full">
+      <thead><tr><th>Row</th><th>${o.idLabel || 'ID'}</th><th>${o.titleLabel || 'Title'}</th><th>What happens</th><th>Details</th></tr></thead>
+      <tbody>${rows.map((x) => { const [l, cls] = ACT[x.action] || [x.action, '']; return `<tr>
+        <td class="text-xs text-stone-500">${x.row}</td><td class="${o.idLabel ? 'font-medium' : 'font-mono'} text-xs">${esc(x.code)}</td><td class="text-xs">${esc(x.title || '')}</td>
+        <td><span class="chip ${cls}">${l}</span></td>
+        <td class="text-xs ${x.action === 'error' ? 'text-red-700' : 'text-stone-600'}">${x.error ? esc(x.error) : x.changes.length ? `Changes: ${esc(x.changes.map((f) => heading[f] || f).join(', '))}` : ''}</td></tr>`; }).join('')}</tbody></table></div>
+    ${r.rows.length > rows.length ? `<p class="mt-2 text-xs text-stone-500">${r.rows.length - rows.length} more rows not shown.</p>` : ''}`;
+  const go = $('imp-commit');
+  if (go) go.addEventListener('click', (e) => (o.rerun || runImport)(e.currentTarget, true));
+}
+
+// --- importing campaigns ----------------------------------------------------------------------
+function openCampaignImport() {
+  const cols = S.reference.campaign_columns || [];
+  openModal({title: 'Import campaigns', wide: true, body: `
+    <p class="text-sm leading-relaxed text-stone-600">Write your campaigns in <b>Excel (.xlsx)</b>, <b>CSV</b> or <b>JSON</b> - one row per campaign, with who it is for, when it starts, the follow-up stages and how often each group is messaged, the message, the template and the limits. They are matched on their <b>name</b>: a new name is added, a name already here is updated. New campaigns come in <b>paused</b>. You see exactly what will change before anything is saved.</p>
+    <div class="mt-4 grid gap-4 md:grid-cols-2">
+      <div><label class="lbl">File</label><input type="file" id="imp-file" accept=".xlsx,.csv,.json" class="block w-full text-sm text-stone-700 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-brand-700 hover:file:bg-brand-100">
+        <p class="help">Start from an example - <a class="font-medium text-brand-700 underline" href="${API}/campaigns/sample?format=xlsx" download>Excel</a> · <a class="font-medium text-brand-700 underline" href="${API}/campaigns/sample?format=csv" download>CSV</a> · <a class="font-medium text-brand-700 underline" href="${API}/campaigns/sample?format=json" download>JSON</a> - or Export your campaigns, edit them and import them back.</p></div>
+      <div class="space-y-2">
+        <label class="lbl">What to do</label>
+        <label class="flex items-start gap-2 text-sm"><input type="radio" name="imp-mode" value="upsert" checked class="mt-1"><span>Add new campaigns and update ones with the same name</span></label>
+        <label class="flex items-start gap-2 text-sm"><input type="radio" name="imp-mode" value="add_only" class="mt-1"><span>Only add new campaigns - leave existing ones as they are</span></label>
+      </div>
+    </div>
+    <details class="mt-4 rounded-xl border border-stone-200"><summary class="cursor-pointer px-4 py-2.5 text-sm font-medium text-stone-700">The columns (${cols.length})</summary>
+      <div class="max-h-72 overflow-auto border-t border-stone-100 px-4 py-3"><table class="tbl w-full"><tbody>${cols.map((c) => `<tr><td class="whitespace-nowrap font-medium">${esc(c.heading)}</td><td class="text-stone-600">${esc(c.help)}</td></tr>`).join('')}</tbody></table></div>
+      <p class="border-t border-stone-100 px-4 py-2 text-xs text-stone-500">Only Name and Type are needed for a new campaign; use just the columns you need. Empty cells keep what is saved (or the type's default). A cell with just - clears that setting. Follow-ups are days between messages: <b>3x3, 10x3, 30</b> = every 3 days 3 times, then every 10 days 3 times, then every 30 days.</p></details>
+    <div id="imp-result" class="mt-4"></div>`,
+    actions: [{label: 'Close', kind: 'ghost'}, {html: `${icon(I.eye)}Check the file`, kind: 'primary', onClick: (b) => runCampaignImport(b, false)}]});
+}
+async function runCampaignImport(button, commit) {
+  const file = $('imp-file').files[0];
+  if (!file) { toast('Choose a file first.', 'warn'); return; }
+  const mode = (document.querySelector('[name="imp-mode"]:checked') || {}).value || 'upsert';
+  busy(button, true, commit ? 'Importing' : 'Checking');
+  try {
+    const r = await upload('/campaigns/import', {file, mode, commit: commit ? 'true' : 'false'});
+    drawImportResult(r, {columns: S.reference.campaign_columns, idLabel: 'Campaign', titleLabel: 'Type', rerun: runCampaignImport});
+    if (commit) {
+      toast(`Imported: ${r.counts.create} new (paused), ${r.counts.update} updated.`);
+      await refreshCampaigns();
+    }
+  } catch (e) {
+    $('imp-result').innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"><b>Could not read the file.</b> ${esc(e.message)}</div>`;
+  } finally { busy(button, false); }
+}
 
 // --- activity -----------------------------------------------------------------------------
 async function renderActivity() {
@@ -1126,7 +1615,7 @@ async function renderActivity() {
         <tbody>${data.sends.map((s) => `<tr>
           <td class="whitespace-nowrap text-xs text-stone-600">${esc(when(s.sent_at || s.created_at))}<div class="text-[11px] text-stone-400">${esc(s.actor || '')}</div></td>
           <td><button type="button" class="font-medium text-brand-700 hover:underline" data-lookup="${esc(s.whatsapp_number)}">+${esc(s.whatsapp_number)}</button></td>
-          <td class="text-xs"><div class="font-medium text-stone-800">${esc(s.campaign || '(deleted)')}</div><div class="text-stone-500">${esc((KINDS[s.kind] || {}).label || s.kind)}${s.promo_code ? ` · ${esc(s.promo_code)}` : ''}</div></td>
+          <td class="text-xs"><div class="font-medium text-stone-800">${esc(s.campaign || '(deleted)')}</div><div class="text-stone-500">${esc((KINDS[s.kind] || {}).label || s.kind)}${s.promo_code ? ` · ${esc(s.promo_code)}` : ''}${s.message_code ? ` · <span class="font-mono text-teal-700" title="${esc(s.note || '')}">${esc(s.message_code)}</span>` : ''}</div></td>
           <td>${statusChip(s.status)}${s.channel ? `<div class="mt-1 text-[11px] text-stone-500">${esc(s.channel)}</div>` : ''}${s.error ? `<div class="mt-1 max-w-[14rem] text-[11px] text-red-600">${esc(s.error)}</div>` : ''}</td>
           <td class="max-w-md"><div class="line-clamp-3 whitespace-pre-line text-stone-700" title="${esc(s.message || '')}">${wa(s.message || '')}</div></td>
           <td class="text-xs">${s.zoho_synced ? '<span class="text-emerald-700">Recorded</span>' : s.zoho_error ? `<span class="text-amber-700" title="${esc(s.zoho_error)}">Not recorded</span>` : '<span class="text-stone-400">-</span>'}</td>
@@ -1152,10 +1641,11 @@ async function renderResults() {
     <div id="r-body"><div class="skeleton h-40 rounded-2xl"></div></div>`;
   box.querySelectorAll('[data-days]').forEach((b) => b.addEventListener('click', () => { S.resultsDays = +b.dataset.days; renderResults(); }));
   try {
-    const r = await api(`/stats?days=${S.resultsDays}`), t = r.totals;
+    const [r, d] = await Promise.all([api(`/stats?days=${S.resultsDays}`), api(`/dashboard?days=${S.resultsDays}`)]), t = r.totals;
     const tiles = [['Nudges sent', t.sent], ['Customers reached', t.customers], ['Orders after a nudge', t.conversions], ['Conversion', pct(t.conversion_rate)], ['Revenue', money(t.revenue)], ['Coupon used', t.coupon_uses], ['Failed', t.failed], ['Opted out', r.customers_opted_out]];
     const max = Math.max(1, ...r.campaigns.map((c) => c.conversion_rate));
-    $('r-body').innerHTML = `
+    $('r-body').innerHTML = smoDashboard(d) + `
+      <h3 class="mb-2 mt-6 text-sm font-semibold text-stone-900">Every campaign</h3>
       <div class="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">${tiles.map(([l, v]) => `<div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card"><div class="text-xs text-stone-500">${l}</div><div class="mt-1 text-2xl font-semibold text-stone-900">${v}</div></div>`).join('')}</div>
       ${r.campaigns.length ? `<div class="overflow-x-auto rounded-2xl border border-stone-200 bg-white shadow-card"><table class="tbl w-full">
         <thead><tr><th>Campaign</th><th>Sent</th><th>Customers</th><th>Orders after</th><th>Conversion</th><th>Revenue</th><th>Coupon used</th><th>Failed</th><th>Dry run</th><th>In Zoho</th></tr></thead>
@@ -1164,8 +1654,45 @@ async function renderResults() {
           <td>${c.sent}</td><td>${c.customers}</td><td>${c.conversions}</td>
           <td><div class="flex items-center gap-2"><div class="h-1.5 w-20 overflow-hidden rounded-full bg-stone-100"><div class="h-full rounded-full bg-brand-500" style="width:${Math.round(c.conversion_rate / max * 100)}%"></div></div>${pct(c.conversion_rate)}</div></td>
           <td class="font-medium">${money(c.revenue)}</td><td>${c.coupon_uses}</td><td>${c.failed}</td><td>${c.dry_run}</td><td>${c.zoho_synced}</td></tr>`).join('')}</tbody></table></div>`
-        : '<div class="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">No nudges in this period.</div>'}`;
+        : '<div class="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">No nudges in this period.</div>'}
+      ${(r.messages || []).length ? `
+        <h3 class="mb-2 mt-6 text-sm font-semibold text-stone-900">Follow-up messages</h3>
+        <p class="mb-3 text-xs text-stone-500">Each library message's sends. A reply is the customer writing back within 48 hours; an order is credited as above.</p>
+        <div class="overflow-x-auto rounded-2xl border border-stone-200 bg-white shadow-card"><table class="tbl w-full">
+          <thead><tr><th>Message</th><th>Sent</th><th>Delivered / read</th><th>Failed</th><th>Replies</th><th>ORDER FOOD</th><th>Orders after</th><th>Revenue</th><th>Avg order</th><th>Passed over</th></tr></thead>
+          <tbody>${r.messages.map((x) => { const lib = S.messages.find((m) => m.code === x.code), po = d.passed_over[x.code]; return `<tr>
+            <td><span class="font-mono text-xs font-semibold text-teal-700">${esc(x.code)}</span><div class="text-xs text-stone-600">${esc(lib ? lib.title : '(deleted)')}</div></td>
+            <td>${x.sent}</td><td>${x.delivered} / ${x.read}</td><td>${x.failed}</td><td>${x.replies} <span class="text-xs text-stone-400">(${pct(x.reply_rate)})</span></td>
+            <td>${x.keywords} <span class="text-xs text-stone-400">(${pct(x.keyword_rate)})</span></td><td>${x.conversions}</td><td class="font-medium">${money(x.revenue)}</td>
+            <td>${x.average_order ? money(x.average_order) : '-'}</td><td class="text-xs text-stone-600">${po ? Object.entries(po).map(([k, n]) => `${esc(reasonText(k))}: ${n}`).join('<br>') : '-'}</td></tr>`; }).join('')}</tbody></table></div>
+        <p class="mt-2 text-xs text-stone-500">Delivered and read come from Gallabox's status receipts, once they are switched on in Gallabox (Settings &gt; Webhooks). ORDER FOOD counts customers who sent it within 7 days of the message.</p>` : ''}`;
   } catch (e) { $('r-body').innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">${esc(e.message)}</div>`; }
+}
+
+// The SMO dashboard (handoff section 11): who is where, the ordering flow, Dead Leads, held back.
+function smoDashboard(d) {
+  const j = d.journeys, x = d.sends, holds = Object.values(d.suppressed.holds || {}).reduce((a, b) => a + b, 0);
+  const tile = (l, v, sub = '') => `<div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card"><div class="text-xs text-stone-500">${l}</div><div class="mt-1 text-2xl font-semibold text-stone-900">${v}</div>${sub ? `<div class="text-[11px] text-stone-500">${sub}</div>` : ''}</div>`;
+  const rows = (obj, label = (k) => k) => Object.keys(obj || {}).length ? Object.entries(obj).map(([k, n]) => `<div class="flex justify-between gap-3 py-1"><span class="text-stone-600">${esc(label(k))}</span><b class="text-stone-900">${n}</b></div>`).join('') : '<div class="py-1 text-stone-400">None</div>';
+  const card = (title, body) => `<div class="rounded-2xl border border-stone-200 bg-white p-4 text-sm shadow-card"><div class="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">${title}</div>${body}</div>`;
+  const flow = j.flow || {};
+  return `
+    <h3 class="mb-2 text-sm font-semibold text-stone-900">SMO follow-up journey</h3>
+    <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      ${tile('In the journey', j.total)}${tile('Due now', j.due_now)}${tile('Engaged', (j.by_crm_bucket || {}).Engaged || 0, 'sent ORDER FOOD or ordered')}
+      ${tile('Dead Leads', (j.by_crm_bucket || {})['Dead Lead'] || 0, j.dead_avg_days != null ? `after ${j.dead_avg_days} days on average` : '')}
+      ${tile('Opted out', d.suppressed.opted_out)}${tile('On hold', holds, 'complaint or support issue')}
+    </div>
+    <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      ${card('By retargeting bucket', rows(j.by_crm_bucket))}
+      ${card('Running, by month', rows(j.by_stage, (k) => `Month ${k}`))}
+      ${card('Ordering flow (after a follow-up)', rows({'ORDER FOOD, waiting': flow.active || 0, 'Abandoned - resumed': flow.abandoned || 0, 'Ordered': flow.completed || 0}))}
+      ${card('Dead Leads by reason', rows(Object.fromEntries(Object.entries(j.end_reasons || {}).filter(([k]) => ['length_reached', 'attempt_limit', 'declined'].includes(k))), (k) => END_TEXT[k] || k))}
+      ${card(`Held back (deferred), ${d.days} days`, rows(d.deferred, reasonText))}
+      ${card('Occasion messages passed over', Object.keys(d.passed_over || {}).length ? Object.entries(d.passed_over).map(([code, rs]) => `<div class="py-1"><span class="font-mono text-xs font-semibold text-teal-700">${esc(code)}</span> ${Object.entries(rs).map(([k, n]) => `<span class="text-stone-600">${esc(reasonText(k))}: ${n}</span>`).join(', ')}</div>`).join('') : '<div class="py-1 text-stone-400">None</div>')}
+      ${card(`Sends, ${d.days} days`, rows({Sent: x.sent, Delivered: x.delivered, Read: x.read, Failed: x.failed}))}
+      ${card('Zoho', rows({'Notes that failed': x.zoho_failed, 'Retargeting fields not written': d.zoho_field_failures}))}
+    </div>`;
 }
 
 // --- customer lookup ----------------------------------------------------------------------
@@ -1198,8 +1725,20 @@ async function lookup() {
             <div class="text-sm"><div class="font-medium text-stone-800">${r.opted_out_at ? 'Opted out' : 'Receives nudges'}</div><div class="text-xs text-stone-500">${r.opted_out_at ? `Since ${esc(when(r.opted_out_at))}` : 'They can reply STOP any time'}</div></div>
             <button type="button" class="btn ${r.opted_out_at ? 'btn-ghost' : 'btn-danger'} !py-1.5 text-xs" id="optbtn">${r.opted_out_at ? 'Opt back in' : 'Opt out'}</button>
           </div>
+          <div class="mt-3 rounded-xl border ${r.hold ? 'border-amber-300 bg-amber-50' : 'border-stone-200'} p-3 text-sm">
+            ${r.hold ? `<div class="font-medium text-amber-900">On hold: ${esc(r.hold_label)}</div>
+              <div class="text-xs text-amber-900/80">${r.hold_note ? `${esc(r.hold_note)} · ` : ''}by ${esc(r.hold_by || '')}, ${esc(when(r.hold_at))}. No nudges until it is lifted.</div>
+              <button type="button" class="btn btn-ghost mt-2 !py-1.5 text-xs" id="holdbtn">Lift the hold</button>`
+            : `<div class="font-medium text-stone-800">Hold their nudges</div><div class="text-xs text-stone-500">For an unresolved complaint or support issue, or a number that cannot be reached. Order updates still go.</div>
+              <div class="mt-2 flex flex-wrap gap-2"><select class="field !w-auto !py-1.5 text-xs" id="hold-kind">${Object.entries(r.holds || {}).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select>
+              <input class="field !py-1.5 text-xs" id="hold-note" maxlength="300" placeholder="Note (optional)">
+              <button type="button" class="btn btn-danger !py-1.5 text-xs" id="holdbtn">Hold</button></div>`}
+          </div>
         </div>
         <div class="space-y-5">
+          ${(r.journeys || []).length ? `<div class="rounded-2xl border border-stone-200 bg-white shadow-card">
+            <div class="border-b border-stone-100 px-5 py-3 text-sm font-semibold text-stone-900">Follow-up journeys</div>
+            <ul class="divide-y divide-stone-100">${r.journeys.map(journeyRow).join('')}</ul></div>` : ''}
           <div class="rounded-2xl border border-stone-200 bg-white shadow-card">
             <div class="border-b border-stone-100 px-5 py-3 text-sm font-semibold text-stone-900">Would they get each campaign right now?</div>
             ${r.campaigns.length ? `<ul class="divide-y divide-stone-100">${r.campaigns.map((o) => `<li class="px-5 py-3">
@@ -1214,6 +1753,26 @@ async function lookup() {
           </div>
         </div>
       </div>`;
+    out.querySelectorAll('[data-jact]').forEach((el) => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'click', async () => {
+      const action = el.dataset.jact, body = {action};
+      if (action === 'move') { if (!el.value) return; body.bucket = el.value; }
+      if (action === 'end' && !await confirmBox('End this journey?', 'No more follow-ups from this campaign for this customer. You can restart it later.', 'End it', 'danger')) return;
+      if (action === 'restart' && !await confirmBox('Restart this journey?', 'They start again at month 1 in the No response group, and the first follow-up goes at the next run (within the usual rules).', 'Restart')) return;
+      try {
+        await api(`/journeys/${el.dataset.id}`, {method: 'POST', body});
+        toast({move: 'Moved.', pause: 'Paused.', resume: 'Resumed.', restart: 'Restarted.', end: 'Ended.', due_now: 'Due at the next run.'}[action]);
+        lookup();
+      } catch (err) { toast(err.message, 'error'); }
+    }));
+    $('holdbtn').addEventListener('click', async (e) => {
+      const button = e.currentTarget, number = encodeURIComponent(r.whatsapp_number);
+      busy(button, true);
+      try {
+        if (r.hold) { await api(`/customers/${number}/release`, {method: 'POST'}); toast('Hold lifted.'); }
+        else { await api(`/customers/${number}/hold`, {method: 'POST', body: {hold: $('hold-kind').value, note: $('hold-note').value}}); toast('On hold: no nudges until it is lifted.'); }
+        lookup();
+      } catch (err) { toast(err.message, 'error'); busy(button, false); }
+    });
     $('optbtn').addEventListener('click', async (e) => {
       const button = e.currentTarget, goingOut = !r.opted_out_at;
       if (goingOut && !await confirmBox('Opt this customer out?', 'They will get no more nudges until they reply START OFFERS or you opt them back in. Order updates still reach them.', 'Opt out', 'danger')) return;
@@ -1224,6 +1783,37 @@ async function lookup() {
   } catch (e) {
     out.innerHTML = `<div class="rounded-xl border ${e.status === 404 ? 'border-stone-200 bg-white text-stone-600' : 'border-red-200 bg-red-50 text-red-800'} p-4 text-sm">${esc(e.message)}</div>`;
   }
+}
+
+function journeyRow(j) {
+  const [label, cls] = JOURNEY_STATUS[j.status] || [j.status, 'bg-stone-100 text-stone-600'];
+  const running = j.status === 'active' || j.status === 'paused';
+  const small = 'btn btn-ghost !px-2.5 !py-1 text-xs';
+  const facts = [
+    ['Retargeting bucket', j.crm_bucket], ['Reply group', j.bucket_label], ['Month', `${j.stage} of ${j.stages}`],
+    ['Follow-ups sent', `${j.attempts}${j.bucket_attempts !== j.attempts ? ` (${j.bucket_attempts} in this group)` : ''}`],
+    ['Last message', j.last_message_code ? `${j.last_message_code}, ${when(j.last_sent_at)}` : 'None yet'],
+    running ? ['Next follow-up', when(j.next_due_at)] : ['Ended', `${END_TEXT[j.end_reason] || j.end_reason_text || ''}${j.ended_at ? `, ${when(j.ended_at)}` : ''}`],
+    ['Journey ends', when(j.ends_at)],
+  ];
+  if (j.last_reply) facts.push(['Last reply', `${j.last_reply === 'later' ? 'Later' : 'No'}, ${when(j.last_reply_at)}`]);
+  if (j.last_keyword) facts.push(['Last keyword', j.last_keyword]);
+  facts.push(['Ordering flow', `${FLOW_TEXT[j.flow_status] || j.flow_label}${j.flow_started_at ? `, ${when(j.flow_started_at)}` : ''}`]);
+  if (j.timezone) facts.push(['Their time zone', `${j.timezone}${j.timezone_source === 'fallback' ? ' (fallback - no kitchen yet)' : " (their kitchen's)"}`]);
+  if (j.last_skip_reason) facts.push(['Last held back', `${reasonText(j.last_skip_reason)}, ${when(j.last_skip_at)}`]);
+  if ((j.recent || []).length) facts.push(['Recent messages', j.recent.slice(-6).map((x) => x.code).join(', ')]);
+  facts.push(['Zoho fields', j.zoho_error ? j.zoho_error : j.zoho_synced_at ? `Written ${when(j.zoho_synced_at)}` : 'Not written yet']);
+  return `<li class="px-5 py-4">
+    <div class="flex flex-wrap items-center gap-2"><span class="font-medium text-stone-900">${esc(j.campaign || 'Follow-up')}</span><span class="chip ${cls}">${esc(label)}</span></div>
+    <dl class="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">${facts.map(([k, v]) => `<div class="flex justify-between gap-3"><dt class="text-stone-500">${k}</dt><dd class="text-right font-medium text-stone-800">${esc(v)}</dd></div>`).join('')}</dl>
+    <div class="mt-3 flex flex-wrap items-center gap-1.5">
+      <select class="field !w-auto !py-1 text-xs" data-jact="move" data-id="${j.id}"><option value="">Move to group…</option>${BUCKETS.filter(([k]) => k !== j.bucket).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+      ${j.status === 'active' ? `<button type="button" class="${small}" data-jact="pause" data-id="${j.id}">Pause</button>` : ''}
+      ${j.status === 'paused' ? `<button type="button" class="${small}" data-jact="resume" data-id="${j.id}">Resume</button>` : ''}
+      ${running ? `<button type="button" class="${small}" data-jact="due_now" data-id="${j.id}" title="The next follow-up goes at the next run, within the usual rules">Send next now</button>` : ''}
+      <button type="button" class="${small}" data-jact="restart" data-id="${j.id}">Restart</button>
+      ${running ? `<button type="button" class="btn btn-danger !px-2.5 !py-1 text-xs" data-jact="end" data-id="${j.id}">End</button>` : ''}
+    </div></li>`;
 }
 
 // --- settings -----------------------------------------------------------------------------
@@ -1238,20 +1828,14 @@ function renderSettings() {
   box.innerHTML = `
     <div id="set-error" class="mb-4 hidden rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"></div>
     <div class="grid gap-5 xl:grid-cols-2">
-      ${card('Safety', 'Try things out without messaging customers', `<div class="space-y-4">
+      ${card('Pilot', 'Try it out first: the handoff\'s pilot runs with a limited group', `<div class="space-y-4">
         ${check('dry_run', 'Dry run', 'Runs log who <b>would</b> be sent what, and send nothing. Watch a campaign for a day before going live.')}
         ${tags('test_numbers', 'Only send to these numbers', 'With country code. While set, nobody else is nudged - a live test on real data with your own phones.')}
       </div>`)}
       ${card('Sending hours', 'When nudges may go out, unless a campaign has its own hours', `<div class="grid gap-4 sm:grid-cols-2">
         <div><label class="lbl">From</label><input class="field" type="time" data-skey="send_window.start" value="${esc(D.send_window.start)}"></div>
         <div><label class="lbl">Until</label><input class="field" type="time" data-skey="send_window.end" value="${esc(D.send_window.end)}"></div>
-        <div class="sm:col-span-2"><label class="lbl">Timezone for customers with no kitchen yet</label><input class="field" list="dl-timezones" data-skey="timezone" data-type="text" value="${esc(D.timezone)}"><p class="help">Everyone else is judged by their kitchen's own timezone.</p></div>
-      </div>`)}
-      ${card('Frequency limits', 'Across all campaigns together, so nobody is spammed', `<div class="grid gap-4 sm:grid-cols-2">
-        ${num('max_per_customer_per_day', 'Most nudges per customer per day', {min: 1})}
-        ${num('max_per_customer_per_week', 'Most nudges per customer per week', {min: 1})}
-        ${num('min_hours_between', 'At least this long between two nudges', {type: 'float', step: '0.5', unit: 'hours'})}
-        ${num('max_sends_per_run', 'Most sends in one 5-minute run', {min: 1, help: 'The rest wait for the next run - a gentle pace.'})}
+        <div class="sm:col-span-2"><label class="lbl">Fallback time zone</label><input class="field" list="dl-timezones" data-skey="timezone" data-type="text" value="${esc(D.timezone)}"><p class="help">Customers are sent to in their kitchen's time zone. One with no kitchen yet uses this, and it is recorded as a fallback on their journey and in Zoho.</p></div>
       </div>`)}
       ${card('WhatsApp', 'Rules Meta sets', `<div class="space-y-4">
         ${check('block_marketing_templates_to_us', 'Skip marketing templates to US (+1) numbers', 'Meta currently does not deliver them, so sending one costs money and reaches nobody. Turn this off if Meta lifts the restriction.')}
@@ -1262,13 +1846,20 @@ function renderSettings() {
         <div><label class="lbl">Reply when someone opts out</label><textarea class="field" rows="3" maxlength="1000" data-skey="opt_out_reply" data-type="text">${esc(D.opt_out_reply)}</textarea></div>
         <div><label class="lbl">Reply when someone opts back in</label><textarea class="field" rows="3" maxlength="1000" data-skey="opt_in_reply" data-type="text">${esc(D.opt_in_reply)}</textarea></div>
       </div>`)}
+      ${card('Follow-up replies', 'Answers to a follow-up journey that change when the next one comes', `<div class="space-y-4">
+        ${tags('later_keywords', 'Words that mean "Later"', 'The whole message must be the word. Moves them to the Later group: fewer follow-ups, starting again from their reply.')}
+        <div><label class="lbl">Reply to "Later"</label><textarea class="field" rows="2" maxlength="1000" data-skey="later_reply" data-type="text">${esc(D.later_reply)}</textarea></div>
+        ${tags('no_keywords', 'Words that mean "No"', 'Moves them to the No group: one follow-up a month, at most six (set on the campaign).')}
+        <div><label class="lbl">Reply to "No"</label><textarea class="field" rows="2" maxlength="1000" data-skey="no_reply" data-type="text">${esc(D.no_reply)}</textarea></div>
+        ${check('no_means_opt_out', 'Treat "No" as STOP', 'Off: "No" means "not this time", and they stay on the list. On: it opts them out of all offers and reminders, like STOP.')}
+        <p class="help">Only answered from someone a follow-up has written to, and never while they are part-way through an order - there "no" answers the bot's own question.</p>
+      </div>`)}
       ${card('Zoho', 'What is recorded on customers\' Zoho records', `<div class="space-y-4">
-        ${check('zoho_sync', 'Record nudges in Zoho', 'On their Lead or Contact. If Zoho is down the nudge still goes.')}
+        ${check('zoho_sync', 'Record nudges in Zoho', 'On their Lead or Contact: a note per message, and the SMO retargeting fields (bucket, status, dates, last template, flow, Dead Lead reason). If Zoho is down the nudge still goes.')}
         ${check('zoho_notes', 'Add a timeline note for each nudge')}
         <div><label class="lbl">Tag for customers who opt out</label><input class="field" data-skey="zoho_opt_out_tag" data-type="opt" maxlength="50" value="${esc(D.zoho_opt_out_tag || '')}" placeholder="No tag"></div>
       </div>`)}
-      ${card('Reporting and wording', '', `<div class="grid gap-4 sm:grid-cols-2">
-        ${num('attribution_days', 'Count an order as a result within', {min: 1, unit: 'days of a nudge'})}
+      ${card('Wording', '', `<div class="grid gap-4 sm:grid-cols-2">
         <div><label class="lbl">Shop name in messages</label><input class="field" data-skey="shop_name" data-type="text" maxlength="60" value="${esc(D.shop_name)}"><p class="help">What {shop_name} becomes.</p></div>
       </div>`)}
     </div>
@@ -1321,8 +1912,9 @@ $('refresh').addEventListener('click', async (e) => {
   busy(button, true);
   try { await loadAll(); toast('Up to date.'); } catch (err) { toast(err.message, 'error'); } finally { busy(button, false); }
 });
-const remembered = store('nudges.tab');
-S.tab = ['campaigns', 'activity', 'results', 'customer', 'settings'].includes(remembered) ? remembered : 'campaigns';
+const TABS = ['campaigns', 'messages', 'activity', 'results', 'customer', 'settings'];
+const remembered = [location.hash.slice(1), store('nudges.tab')].find((t) => TABS.includes(t));
+S.tab = remembered || 'campaigns';
 document.querySelectorAll('[role=tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === S.tab)));
 document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== S.tab; });
 loadAll().catch((e) => {

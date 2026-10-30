@@ -22,6 +22,9 @@ does not pick. (Was a single kitchen, decided 23 Sep 2026.)
 The sheet carries PPP and MRP at a consistent 1.53x ratio. MRP is the customer
 price; PPP is stored as `cost_price` for the margin column in the admin menu
 and never reaches a customer, a Stripe charge or a Zoho record.
+The kitchen partner's share of each order is set on the admin Payouts page
+(29 Oct 2026): a percentage of the food, or each dish's PPP
+([kitchen-payouts.md](kitchen-payouts.md)).
 
 ### 4. Menu source — **this database, not the Meta catalogue** (23 Sep 2026)
 The menu is imported from the client's sheet and managed in the admin

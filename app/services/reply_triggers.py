@@ -191,16 +191,19 @@ async def decide(session: AsyncSession, event: InboundEvent,
 
 
 async def _answered_anyway(session: AsyncSession, number: str, message: str) -> bool:
-    """STOP / START OFFERS (services/nudges/optout.py) and coupon commands
-    (handlers/coupons.py) are answered outside an order too: one is the
-    customer's say over offers, the other a reply to one. Only STOP reaches
-    a chat that is with a person."""
+    """STOP / START OFFERS (services/nudges/optout.py), coupon commands
+    (handlers/coupons.py) and LATER / NO to a follow-up (nudges/followup.py)
+    are answered outside an order too: the customer's say over offers, or a
+    reply to one. Only STOP reaches a chat that is with a person."""
     from app.services.conversation.handlers import coupons
-    from app.services.nudges import optout
+    from app.services.nudges import followup, optout
 
     if await optout.keyword(session, message):
         return True
-    return not await _with_a_person(session, number) and await coupons.is_command(session, message)
+    if await _with_a_person(session, number):
+        return False
+    return (await coupons.is_command(session, message)
+            or await followup.is_reply(session, number, message))
 
 
 async def _with_a_person(session: AsyncSession, number: str) -> bool:

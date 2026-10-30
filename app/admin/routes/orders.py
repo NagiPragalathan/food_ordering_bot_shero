@@ -22,7 +22,7 @@ from app.db.models import (
 from app.db.session import get_session
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.client import gallabox
-from app.services import crm_sync, kitchen_alerts
+from app.services import crm_sync, kitchen_alerts, payouts
 from app.services import orders as order_service
 
 log = get_logger(__name__)
@@ -75,7 +75,9 @@ async def orders_index(
         query.order_by(Order.created_at.desc()).limit(PAGE_SIZE)
     )).scalars())
 
-    # Attach the customer and kitchen names for display.
+    # Attach the customer and kitchen names, and the kitchen's share, for display.
+    counted = [order for order in rows if order.payment_status in payouts.COUNTED]
+    shares = {s.order.id: s for s in await payouts.splits(session, counted)}
     enriched = []
     for order in rows:
         customer = await session.get(Customer, order.customer_id)
@@ -87,6 +89,7 @@ async def orders_index(
             "outlet": outlet,
             "next_label": next_action[0] if next_action else None,
             "next_stage": str(next_action[1]) if next_action else None,
+            "split": shares.get(order.id),
         })
 
     counts = {}

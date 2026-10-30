@@ -21,6 +21,7 @@ from app.integrations.gallabox import channel
 from app.schemas.inbound import parse_inbound
 from app.services import allowlist, reply_triggers
 from app.services.conversation.engine import handle_event
+from app.services.nudges import delivery
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -60,6 +61,13 @@ async def gallabox_webhook(
 
     if not isinstance(body, dict):
         return {"status": "ignored", "reason": "unexpected payload"}
+
+    # A delivery or read receipt for a message we sent (Gallabox's
+    # Message.WA.Status.* events), not a message from the customer.
+    event_name = request.headers.get("x-event-name") or str(body.get("event") or "")
+    if delivery.is_status_event(event_name, body):
+        updated = await delivery.record(session, body)
+        return {"status": "ok" if updated else "ignored", "reason": "delivery status"}
 
     event = parse_inbound(body)
 

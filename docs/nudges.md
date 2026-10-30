@@ -1,17 +1,22 @@
 # Retargeting nudges
 
-Automatic WhatsApp reminders and offers that bring customers back:
+WhatsApp nudges, built to the SMO developer handoff
+(`docs/Shero_SMO_Only_Developer_Handoff.pdf`): the six-month SMO follow-up
+journey for people who wrote in but never ordered, plus the "separately
+configured recovery rule" the handoff asks for when someone leaves an order
+unfinished (section 4).
 
-| Kind | Who gets it | Default |
+| Type | Who gets it | Default |
 |---|---|---|
-| `abandoned_cart` | Dishes left in the cart, no order placed | 60 minutes after the cart last changed, carts up to 23 hours old |
-| `abandoned_checkout` | An order placed but never paid (link expired or payment failed) | 3 hours after, up to 3 days; their dishes go back in the cart |
-| `repeat_purchase` | Paid before, nothing since | 14 days after their last order |
-| `never_ordered` | Wrote in, never paid | 1 to 30 days after they first wrote |
-| `targeted_offer` | Everyone the audience filters match | once each |
+| `follow_up` | Wrote in, never paid: the SMO six-month journey, messages from the library | the handoff's plan (see [Follow-up journeys](#follow-up-journeys)) |
+| `abandoned_cart` | Recovery: dishes left in the cart, no order placed | 60 minutes after the cart last changed, carts up to 23 hours old |
+| `abandoned_checkout` | Recovery: an order placed but never paid (link expired or payment failed) | 3 hours after, up to 3 days; their dishes go back in the cart |
 
-You can make as many campaigns as you like. For example, a 14-day reminder
-and a separate 45-day win-back with a coupon, both `repeat_purchase`.
+Those are the only types the page and the API create. The handoff keeps
+post-purchase messages out of its scope and asks for one scheduler, not
+separate workflows writing to the same customer, so the earlier repeat
+purchase, first order and targeted offer types were removed from the page
+(30 Oct 2026). Sends made by them stay in the history.
 
 Everything comes from the bot's own database, which is fast and costs no
 Zoho API calls. Zoho gets a record of every nudge (see [Zoho](#zoho)).
@@ -24,16 +29,29 @@ https://smo.shero.us/admin/nudges).
 Everything below can be done on the page:
 
 - **The master switch**, at the top.
-- **Campaigns**: create from a kind or a ready-made starter, then edit every
-  option. The editor has a live WhatsApp preview, placeholder buttons, and a
-  JSON view of the whole campaign. Each campaign also has activate / pause,
-  preview, test send, run now, duplicate and delete.
+- **Campaigns**: **New campaign** asks who it is for (the type), then every
+  option is yours to set: when it starts, the follow-up stages and how often
+  each reply group is messaged, the message, template, schedule and limits.
+  Nothing is pre-made. **Import** brings campaigns in from Excel, CSV or JSON
+  (one row per campaign, matched on its name; new ones come in paused, and
+  the file is checked row by row before anything is saved), and **Export**
+  writes them out in the same layout. A sample file shows the columns. The
+  editor has a live WhatsApp preview, placeholder buttons, and a JSON view
+  of the whole campaign. Each campaign also has activate / pause, preview,
+  test send, run now, duplicate and delete.
+- **Messages**: the library follow-up journeys pick from. Add, edit,
+  duplicate, switch off or delete messages, or import and export them as
+  Excel, CSV or JSON.
 - **Activity**: every send, filterable by campaign, result and period.
 - **Results**: sends, orders after a nudge, conversion and revenue for each
   campaign.
 - **Customer lookup**: one number's history and opt-out, and why they would
-  or would not get each campaign right now.
+  or would not get each campaign right now. For a follow-up journey it also
+  shows their group, month, sends and next date, with move / pause / resume /
+  send next now / restart / end.
 - **Settings**: every global option.
+
+Each tab has its own address, e.g. https://smo.shero.us/admin/nudges#messages.
 
 The page uses the same endpoints as below, with your dashboard sign-in.
 
@@ -105,8 +123,19 @@ To try it on real data with only your own phone: set
 | POST | `/api/nudges/preview`, `/run` | The same for all active campaigns |
 | GET | `/api/nudges/sends?campaign_id=&customer_id=&status=&days=` | The send log |
 | GET | `/api/nudges/stats?days=30&campaign_id=` | Sends, conversions, revenue |
-| GET | `/api/nudges/customers/{number}` | One customer: history, and why they would or would not get each campaign |
+| GET | `/api/nudges/customers/{number}` | One customer: history, follow-up journeys, and why they would or would not get each campaign |
 | POST | `/api/nudges/customers/{number}/opt-out`, `/opt-in` | |
+| POST | `/api/nudges/campaigns/import` | Multipart `file` (.xlsx, .csv, .json), `mode` (`upsert` / `add_only`), `commit` (false: check only). Matched on name; new campaigns are paused |
+| GET | `/api/nudges/campaigns/export?format=xlsx\|csv\|json` | Every campaign as a file that imports straight back |
+| GET | `/api/nudges/campaigns/sample?format=…` | An example file: a 6-month follow-up, a cart reminder, a win-back |
+| GET / POST | `/api/nudges/messages` | The follow-up message library (with results and template approval) / add one |
+| GET / PATCH / DELETE | `/api/nudges/messages/{id}` | One message |
+| POST | `/api/nudges/messages/{id}/duplicate` | A switched-off copy |
+| POST | `/api/nudges/messages/import` | Multipart `file` (.xlsx, .csv, .json), `mode` (`upsert` / `add_only`), `turn_off_missing`, `commit` (false: check only) |
+| GET | `/api/nudges/messages/export?format=xlsx\|csv\|json&pool=` | The library as a file that imports straight back |
+| GET | `/api/nudges/messages/sample?format=…` | A small file to start from |
+| GET | `/api/nudges/journeys/summary` | Each follow-up campaign: who is in which group, month and status |
+| POST | `/api/nudges/journeys/{id}` | `{"action": "move", "bucket": "later"}`, or `pause`, `resume`, `due_now`, `restart`, `end` |
 
 A mistake comes back as `422` with a sentence saying what is wrong, for
 example `trigger.after_minuts: is not an option (check the spelling)`.
@@ -314,6 +343,139 @@ and gives the first rule that stopped it:
 | `outside_24h_window` | No message from them in 24 hours, and no template set |
 | `us_marketing_blocked` | US number, template needed (see above) |
 | `template_not_approved` | The template isn't approved in Gallabox |
+| `not_due` | Follow-up: waiting for their next date |
+| `journey_paused`, `journey_ended`, `journey_converted`, `journey_finished` | Follow-up: paused by the team, ended, ordered, or ran its length |
+| `ordering_now` | Follow-up: part-way through an order (active in the last 24 hours) |
+| `chatted_recently` | Follow-up: messaged the bot within the journey's wait |
+| `no_message_available` | Follow-up: no active library message fits (pool, month, group, dates, dishes, coupon) |
+| `no_approved_template` | Follow-up: outside the 24-hour window, and none of the fitting messages has an approved template |
+
+## Follow-up journeys
+
+The SMO handoff (`docs/Shero_SMO_Only_Developer_Handoff.pdf`) asks for six
+months of WhatsApp messages to people who wrote in but never ordered, drawn
+from a pool of 54 messages (M1-01 to M6-09), with the timing set by how they
+answer. A `follow_up` campaign does exactly that, with every part editable.
+
+**Who joins**: anyone who first wrote at least `days_since_signup` days ago
+and has never paid. Their journey starts with their first follow-up.
+
+**Which message**: the library's messages in the campaign's `pool`:
+
+1. Month 1's messages for the first 30 days (`stage_days`), then month 2's,
+   up to month 6 (`length_days` 183 / 30). A message with no month fits any.
+2. At random among those that fit (or `in_order` by ID), never one of the
+   customer's last 9 (`avoid_repeat`). The choice is fixed per attempt, so a
+   preview shows the very message that will go.
+3. An occasion message (with From/Until dates) goes first while it runs.
+4. When the month's messages are all used, the nearest month's are borrowed
+   (`borrow_other_months`).
+5. A message is left out if its reply groups don't include theirs, its
+   dishes are all off the menu, or it uses `{coupon_…}` and the campaign has
+   no coupon. Outside the 24-hour window, only messages whose WhatsApp
+   template is approved can go.
+
+**When**: each reply group has its own steps, "every N days, so many times",
+the last running until the journey ends:
+
+| Group | Default | Joined by |
+|---|---|---|
+| No response | day 0, 3, 6, then every 10 days x3, then every 30 | everyone starts here |
+| Later | every 10 days x3 from the reply, then every 30 | replying LATER, NOT NOW, MAYBE LATER, REMIND ME LATER |
+| No | every 30 days from the reply, at most 6 | replying NO, NO THANKS, NOT INTERESTED |
+
+The words and the bot's answers are in Settings, "Follow-up replies". "No"
+means "not this time" (they stay opted in) unless **Treat "No" as STOP** is
+on. A reply only counts from someone a follow-up has written to and who is
+not part-way through an order, where "no" answers the bot's own question.
+The team can also move anyone to a group from the customer lookup.
+
+**When it ends**: a paid order (`converted`), the end of the journey
+(`length_days` after the first send), or the group's last send. The
+customer and their history stay; only this campaign stops ("dead lead").
+STOP pauses every journey for them, as for any nudge.
+
+**Held back**: while they are part-way through an order, or within
+`pause_after_chat_hours` (12) of their last message to the bot, so nobody
+gets a sales message mid-conversation. ORDER FOOD starts the ordering flow
+(it must be a trigger keyword in keyword mode: the editor warns if not).
+
+**Never twice**: each attempt has its own key (`fu:r<round>:<attempt>`), so
+one attempt is sent once however many runs see it. Three failed sends count
+as the attempt, so an unreachable number does not hold the journey still.
+A dry run logs, and leaves the journey where it was.
+
+**Zoho**: every follow-up's note names the message, its month, the group,
+the send number and the next date. A LATER / NO reply and the end of a
+journey are noted too.
+
+### The message library
+
+Messages tab, or `/api/nudges/messages`. Each message has an ID that never
+changes (M1-01), a pool (SMO), a month, a title and angle for the team, the
+text (up to 1,024 characters, with placeholders), optional reply groups,
+occasion dates and dishes, and the name of its approved WhatsApp template.
+
+**Import** an Excel, CSV or JSON file in the same columns as the export:
+
+`ID, Pool, Month, Title, Angle, Message, Groups, Occasion, From, Until,
+Dishes, WhatsApp template, Template values, Template button, Active`
+
+Messages are matched on ID: new IDs are added, known ones updated (or left
+alone with "only add new"). On an update only the columns in the file
+change. The file is checked first and every row shown - new, updated, no
+change, or the problem - and nothing is saved until you press Import. Rows
+with a problem are skipped. "Switch off messages not in the file" turns off
+the rest of the pool. The starter kit's `templates_smo.json` layout
+(`id`, `month`, `title`, `body`) is read too.
+
+`docs/nudge-messages/` has the handoff's 54 messages, word for word, ready
+to import (Excel and JSON), each with a suggested template name
+(`smo_m1_01`...).
+
+**Templates**: outside the 24-hour window WhatsApp delivers only approved
+templates, and Meta holds back marketing templates to US (+1) numbers. So
+each message needs its own template in Gallabox (category Marketing, the
+same text), and its name in the library. Until then a message only reaches
+customers who wrote in the last 24 hours. The Messages tab shows which
+templates are approved.
+
+## The SMO handoff, point by point
+
+How each item of the handoff's acceptance checklist (section 12) and test
+scenarios (section 13) is met. `tests/services/test_smo_handoff.py` checks
+them.
+
+| Handoff | How |
+|---|---|
+| Buckets and cadence (section 7) | No-response every 3 days x3, then 10 days x3, then 30; Later every 10 days x3, then 30; No every 30 days, at most 6. Each step is editable on the campaign. |
+| Six months, attempt limit: Dead Lead | The journey ends after its length (183 days) or its group's last send. It shows as **Dead Lead** with the reason, and the customer and their history are kept. |
+| "No" is not an opt-out | By default No means "not this time" and they stay opted in; Settings can make it STOP. An opt-out is always a suppression, never a bucket. |
+| ORDER FOOD pauses nudges, an order ends them | A trigger keyword marks their journey **Engaged** (ordering flow active): no follow-up while they order. A paid order ends the journey. No order within `resume_after_days` (3): the flow is **abandoned** and follow-ups resume, never straight away (section 4). |
+| Opt-out, complaint hold | STOP blocks every nudge. A **hold** (complaint, support issue, invalid contact, other) set on the Customer lookup blocks every nudge until your team lifts it. |
+| Random pick, no repeats | At random from the month's eligible messages; never one of the last 9, nor the same **angle** as the last 2 (both editable). |
+| Occasions (section 9) | A message with dates is an occasion: only between From and Until, never after its **Order by** cutoff, only in its **service area** (kitchens), only with one of its dishes on the menu. It replaces the month's message for that send, never both. One passed over is logged with the reason. |
+| Held back: skip or defer, with the reason | Every due follow-up held back is logged (`nudge_skips`) with the reason, counted per day, and shown in Results; it is tried again on the next run. |
+| Local time, with the fallback recorded | Sent in the time zone of their kitchen; without one, the Settings time zone, recorded as a fallback on the journey and in Zoho. |
+| Stable template IDs, selection reason | Messages keep their IDs (M1-01 ... M6-09). Each send records why that message was picked. |
+| No duplicates on retries | One claim per attempt (`nudge_sends.claim_key`); a webhook retry is ignored by message id. |
+| Zoho fields (section 8) | The 20 retargeting fields on the Lead or Contact, written as the journey moves (see [Zoho](#zoho)). |
+| Events and dashboard (section 11) | Results: people by retargeting bucket and month, due now, the ordering flow, Dead Leads by reason and time in journey, held back by reason, occasions passed over, per-message sends, delivery and read, failures, replies, ORDER FOOD rate, orders, revenue and average order, opt-outs, holds and Zoho failures. |
+
+Still depends on the client's accounts (handoff section 14):
+
+* **Approved templates.** Each message needs its WhatsApp template approved
+  in Gallabox (category Marketing) to reach someone outside the 24-hour
+  window. Meta currently does not deliver marketing templates to US numbers.
+* **Delivery and read receipts.** Switch on Gallabox's `Message.WA.Status`
+  webhook events (Settings > Webhooks) to this bot's webhook URL. Send one
+  test and check the log: an unreadable receipt is logged by its keys.
+* **Zoho fields.** `python -m scripts.setup_zoho_crm --apply` creates them.
+  Until then the notes carry the same information.
+* **Opt-out in Gallabox.** Every nudge goes through this bot, which never
+  messages an opted-out customer. Gallabox's own broadcasts do not know about
+  it; mark the contact opted out in Gallabox too if you send broadcasts from
+  there.
 
 ## Results
 
@@ -333,11 +495,14 @@ and gives the first rule that stopped it:
 | `app/services/nudges/audience.py` | One finder per kind, plus the audience filters. Local database only |
 | `app/services/nudges/runner.py` | The rules in order, channel choice, claiming, sending, Zoho |
 | `app/services/nudges/optout.py` | STOP / START OFFERS, hooked first in `engine._handle_global_intent` |
-| `app/services/nudges/reports.py` | The log and last-touch attribution |
+| `app/services/nudges/reports.py` | The log and last-touch attribution, also per library message (sends, replies within 48 hours, orders) |
+| `app/services/nudges/followup.py` | Follow-up journeys: who is due, the message pick, the timing per reply group, LATER / NO |
+| `app/services/nudges/library.py` | The message library, and its Excel / CSV / JSON import and export |
 | `app/api/routes/nudges.py` | The endpoints |
 | `app/admin/routes/nudges.py`, `templates/admin/nudges.html` | The page: a shell whose script calls the endpoints. Wrapped in `{% raw %}` because of WhatsApp's `{{1}}` |
 | `app/integrations/zoho/engagement.py` | Notes and tags |
 | Tables | `nudge_settings` (one row; `enabled` is the switch), `nudge_campaigns` (config as JSON), `nudge_sends` (the log), and `customers.nudges_opted_out_at`. Migration `0012_nudges` |
+| Follow-up tables | `nudge_messages` (the library), `nudge_journeys` (one row per customer per follow-up campaign: group, status, attempts, next date, recent messages), `nudge_sends.message_code` / `note`. Migration `0014_followup_journeys` |
 
 **Scheduling.** The `nudges` job runs every 5 minutes: APScheduler on the
 server, `/cron/tick` on Vercel.

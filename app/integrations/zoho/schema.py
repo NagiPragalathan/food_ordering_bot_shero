@@ -76,6 +76,33 @@ PERSON_FIELDS: tuple[tuple[str, dict], ...] = (
     (f.WHATSAPP_PROFILE_NAME, _text("WhatsApp Profile Name", 120)),
 )
 
+# The SMO developer handoff's retargeting fields (section 8), on both Leads
+# and Contacts so they carry over when a Lead converts.
+RETARGETING_FIELDS: tuple[tuple[str, dict], ...] = (
+    (f.R_CONTACT_KEY, _text("Contact Key", 32)),
+    (f.R_ENTRY_VERTICAL, _text("Entry Vertical", 40)),
+    (f.R_OPT_IN, {"field_label": "Marketing Opt In", "data_type": "boolean"}),
+    (f.R_OPT_IN_SOURCE, _text("Marketing Opt In Source", 60)),
+    (f.R_OPT_IN_TIME, _datetime("Marketing Opt In Time")),
+    (f.R_SUPPRESSION, _picklist("Suppression Status", list(f.SUPPRESSION_STATUSES))),
+    (f.R_BUCKET, _picklist("Retargeting Bucket", list(f.RETARGETING_BUCKETS))),
+    (f.R_START, _datetime("Retargeting Start Date")),
+    (f.R_ATTEMPTS, {"field_label": "Retargeting Attempt Count", "data_type": "integer", "length": 9}),
+    (f.R_BUCKET_ATTEMPTS, {"field_label": "Bucket Attempt Count", "data_type": "integer", "length": 9}),
+    (f.R_LAST_DATE, _datetime("Last Retargeting Date")),
+    (f.R_NEXT_DATE, _datetime("Next Retargeting Date")),
+    (f.R_STATUS, _picklist("Retargeting Status", list(f.RETARGETING_STATUSES))),
+    (f.R_ACTIVE_JOURNEY, _picklist("Active Journey", ["SMO", "None"])),
+    (f.R_LAST_TEMPLATE, _text("Last Template ID", 40)),
+    (f.R_TEMPLATE_HISTORY, _textarea("Recent Template History")),
+    (f.R_TIMEZONE, _text("Customer Timezone", 80)),
+    (f.R_LAST_KEYWORD, _text("Last Inbound Keyword", 60)),
+    (f.R_FLOW_STATUS, _picklist("SMO Flow Status", list(f.FLOW_STATUSES))),
+    (f.R_LAST_ORDER_DATE, _datetime("Last Order Date")),
+    (f.R_LAST_ORDER_STATUS, _text("Last Order Status", 40)),
+    (f.R_DEAD_REASON, _text("Dead Lead Reason", 120)),
+)
+
 # The spec's Order data (section 2). Amounts are plain numbers in the CRM's
 # currency field; the bot charges in STRIPE_CURRENCY.
 ORDER_FIELDS: tuple[tuple[str, dict], ...] = (
@@ -144,6 +171,8 @@ VENDOR_FIELDS: tuple[tuple[str, dict], ...] = (
 FIELDS: tuple[FieldSpec, ...] = (
     tuple(FieldSpec(module, api_name, body)
           for module in f.PERSON_MODULES for api_name, body in PERSON_FIELDS)
+    + tuple(FieldSpec(module, api_name, body)
+            for module in f.PERSON_MODULES for api_name, body in RETARGETING_FIELDS)
     + tuple(FieldSpec(ORDERS, api_name, body) for api_name, body in ORDER_FIELDS)
     + tuple(FieldSpec(ORDER_ITEMS, api_name, body) for api_name, body in ORDER_ITEM_FIELDS)
     + tuple(FieldSpec(f.PRODUCTS, api_name, body) for api_name, body in PRODUCT_FIELDS)

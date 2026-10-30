@@ -168,6 +168,30 @@ Fields on **Leads and Contacts**:
 | Cuisine Preference (`Cuisine_Preference`) | Single line | e.g. `Chettinad`, `North Indian` |
 | Bot Stage (`Bot_Stage`) | Picklist, the 11 stages | Where the customer is in the ordering funnel |
 | Bot Stage History (`Bot_Stage_History`) | Multi-line | One line per stage: `2026-09-28 10:04 UTC  Cart Created` |
+
+SMO retargeting fields (the SMO handoff's section 8), on Leads and Contacts,
+written as a customer's follow-up journey moves:
+
+| Field (API name) | Type | Value |
+|---|---|---|
+| Contact Key (`Contact_Key`) | Text | The WhatsApp number |
+| Entry Vertical (`Entry_Vertical`) | Text | SMO |
+| Marketing Opt In (`Marketing_Opt_In`), Source, Time | Boolean, text, date-time | Opted in unless they replied STOP |
+| Suppression Status (`Suppression_Status`) | Picklist | None, Opted out, Complaint, Support issue, Invalid contact, Other hold |
+| Retargeting Bucket (`Retargeting_Bucket`) | Picklist | No-response, Later, No, Engaged, Dead Lead |
+| Retargeting Start Date, Attempt Count, Bucket Attempt Count | Date-time, number | From the journey |
+| Last / Next Retargeting Date | Date-time | Last send, next due |
+| Retargeting Status (`Retargeting_Status`) | Picklist | Active, Paused, Suppressed, Completed |
+| Active Journey (`Active_Journey`) | Picklist | SMO, None |
+| Last Template ID, Recent Template History | Text, multi-line | M1-03; the last ten with times |
+| Customer Timezone (`Customer_Timezone`) | Text | e.g. America/New_York (kitchen) |
+| Last Inbound Keyword (`Last_Inbound_Keyword`) | Text | ORDER FOOD, LATER, NO... |
+| SMO Flow Status (`SMO_Flow_Status`) | Picklist | Not started, Active, Completed, Abandoned |
+| Last Order Date, Last Order Status | Date-time, text | Their latest order |
+| Dead Lead Reason (`Dead_Lead_Reason`) | Text | Ran its full length, Had the last send of its group... |
+
+A CRM without these fields still works: each field Zoho refuses is left out
+and the rest written; the notes carry the same information.
 | Selected Outlet (`Selected_Outlet`) | Single line | Kitchen that serves them |
 | Distance KM (`Distance_KM`) | Decimal | Distance to that kitchen |
 | WhatsApp Profile Name (`WhatsApp_Profile_Name`) | Single line | The name on their WhatsApp profile. Kept apart from First / Last Name, which are always the name the customer typed |

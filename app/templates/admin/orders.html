@@ -110,6 +110,11 @@
                 {{ row.order.promo_code }} −${{ '%.2f' | format(row.order.discount) }}
               </div>
             {% endif %}
+            {% if row.split %}
+              <a href="{{ url_for('admin_payouts') }}?period=all&amp;kitchen={{ row.order.outlet_id or '' }}"
+                 class="mt-0.5 block whitespace-nowrap text-[11px] font-normal text-stone-500 hover:text-brand-700"
+                 title="{{ row.split.rule }}">Kitchen ${{ '%.2f' | format(row.split.kitchen) }} · Shero ${{ '%.2f' | format(row.split.company) }}</a>
+            {% endif %}
           </td>
           <td class="px-4 py-3">{{ ui.payment_badge(row.order.payment_status) }}
             {% if row.order.loyalty_points %}<div class="text-xs text-stone-500">{{ row.order.loyalty_points }} points / {{ row.order.loyalty_state }}</div>{% endif %}

@@ -106,6 +106,16 @@ class Candidate:
     conversation: Conversation | None = None
     cart: list[dict] = field(default_factory=list)
     order: Order | None = None          # the unpaid order, for abandoned_checkout
+    # A follow-up journey (followup.py): their row, why it is not due now,
+    # their last message to the bot, and the library message picked.
+    journey: object | None = None
+    skip: str | None = None
+    last_inbound: datetime | None = None
+    pick: object | None = None
+    # The time zone their send hours were judged in, and where it came from:
+    # "kitchen" (their kitchen's) or "fallback" (the nudge settings').
+    tz: str | None = None
+    tz_source: str | None = None
 
 
 # --- shared loaders -------------------------------------------------------------------
@@ -363,6 +373,8 @@ FINDERS = {
     NudgeKind.REPEAT_PURCHASE: _repeat_purchases,
     NudgeKind.NEVER_ORDERED: _never_ordered,
     NudgeKind.TARGETED_OFFER: _everyone,
+    # The people a follow-up journey covers; followup.py adds where each is.
+    NudgeKind.FOLLOW_UP: _never_ordered,
 }
 
 

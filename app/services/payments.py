@@ -32,7 +32,7 @@ from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
 from app.integrations.stripe_gw import checkout
 from app.services import (crm_sync, dispatch, kitchen_alerts, order_alerts, orders,
-                          loyalty, promotions, receipts, slots)
+                          loyalty, payouts, promotions, receipts, slots)
 from app.services.customers import advance, get_or_create_conversation
 
 log = get_logger(__name__)
@@ -232,6 +232,11 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     order.payment_status = PaymentStatus.PAID
     await loyalty.paid(session, order)
     order.paid_at = datetime.now(timezone.utc)
+    # The kitchen partner's share, by the split rule in force now (Payouts page).
+    try:
+        await payouts.lock(session, order)
+    except Exception as exc:  # noqa: BLE001 - the Payouts page works it out later
+        log.error("payout_split_failed", order_number=order.order_number, error=str(exc))
 
     # 1. Convert the held slot into a booking (spec step 16). A payment that
     # lands after the link lapsed finds its hold released: claim the slot again.

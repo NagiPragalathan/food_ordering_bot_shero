@@ -172,6 +172,7 @@ async def test_the_page_is_served_and_in_the_sidebar(session, monkeypatch):
     assert 'id="switch-card"' in page.text and "/api/nudges" in page.text
     # The script reached the browser whole: Jinja left WhatsApp's {{1}} alone.
     assert "{{${i + 1}}}" in page.text
+    assert 'data-tab="messages"' in page.text and "Follow-up journey" in page.text
     # url_for renders absolute links, so match the path's end, not a whole href.
     offers = client.get("/admin/promotions").text
     assert '/admin/nudges"' in offers
@@ -180,8 +181,98 @@ async def test_the_page_is_served_and_in_the_sidebar(session, monkeypatch):
 async def test_the_reference_lists_every_option(api):
     reference = api.get("/api/nudges/reference").json()
     assert set(reference["kinds"]) == {"abandoned_cart", "abandoned_checkout", "repeat_purchase",
-                                       "never_ordered", "targeted_offer"}
+                                       "never_ordered", "targeted_offer", "follow_up"}
+    journey = reference["kinds"]["follow_up"]["defaults"]["journey"]
+    assert journey["length_days"] == 183 and journey["pool"] == "SMO"
+    assert "journey" not in reference["kinds"]["abandoned_cart"]["defaults"]
     assert "cart_items" in reference["placeholders"]
     assert "ordered_dishes" in reference["audience_filters"]
     assert reference["kinds"]["repeat_purchase"]["trigger_options"] == [
         "days_since_last_order", "max_days_since_last_order"]
+
+
+# --- the follow-up message library ---------------------------------------------------------------
+async def test_a_library_messages_life(api):
+    bad = api.post("/api/nudges/messages", json={"code": "M1-01", "title": "x", "body": "{nope}"})
+    assert bad.status_code == 422 and "not a placeholder" in bad.json()["detail"]
+
+    made = api.post("/api/nudges/messages", json={
+        "code": "m1-01", "month": 1, "title": "Rice is sorted", "wa_template": "smo_m1_01",
+        "body": "Rice is sorted? Send ORDER FOOD on WhatsApp."})
+    assert made.status_code == 201
+    message = made.json()
+    assert message["code"] == "M1-01" and message["wa_approved"] is True
+    url = f"/api/nudges/messages/{message['id']}"
+
+    assert api.patch(url, json={"buckets": ["later"], "is_active": False}).json()["buckets"] == ["later"]
+    copy = api.post(f"{url}/duplicate").json()
+    assert copy["code"] == "M1-01-COPY"
+    listed = api.get("/api/nudges/messages").json()
+    assert [m["code"] for m in listed["messages"]] == ["M1-01", "M1-01-COPY"]
+    assert listed["pools"] == ["SMO"] and listed["columns"][0]["heading"] == "ID"
+    assert api.delete(url).json() == {"deleted": True} and api.get(url).status_code == 404
+
+
+async def test_importing_and_exporting_files(api):
+    sheet = ("ID,Month,Title,Message,Groups\n"
+             "M1-01,1,Rice is sorted,Rice is sorted? Send ORDER FOOD.,\n"
+             "M1-02,1,Same rice,Same rice. Different curry. ORDER FOOD,Later\n"
+             "M1-03,1,,No title here,\n")
+    upload = {"file": ("plan.csv", sheet.encode(), "text/csv")}
+    check = api.post("/api/nudges/messages/import", files=upload).json()
+    assert check["committed"] is False and check["counts"]["create"] == 2 and check["counts"]["error"] == 1
+    assert api.get("/api/nudges/messages").json()["messages"] == []
+
+    done = api.post("/api/nudges/messages/import", files=upload, data={"commit": "true"}).json()
+    assert done["committed"] and len(api.get("/api/nudges/messages").json()["messages"]) == 2
+
+    excel = api.get("/api/nudges/messages/export", params={"format": "xlsx"})
+    assert excel.status_code == 200 and excel.content[:2] == b"PK"
+    assert "attachment" in excel.headers["content-disposition"]
+    exported = api.get("/api/nudges/messages/export", params={"format": "json"}).json()
+    assert [m["id"] for m in exported["messages"]] == ["M1-01", "M1-02"]
+    assert exported["messages"][1]["groups"] == ["Later"]
+    again = api.post("/api/nudges/messages/import",
+                     files={"file": ("back.xlsx", excel.content)}).json()
+    assert again["counts"]["unchanged"] == 2
+
+    assert api.get("/api/nudges/messages/sample", params={"format": "csv"}).status_code == 200
+    assert api.get("/api/nudges/messages/export", params={"format": "pdf"}).status_code == 422
+    broken = api.post("/api/nudges/messages/import", files={"file": ("x.json", b"{oops")})
+    assert broken.status_code == 422 and "not valid JSON" in broken.json()["detail"]
+
+
+async def test_a_follow_up_journey_from_the_api(api, session):
+    from app.db.models import Customer
+
+    api.patch("/api/nudges/settings", json={"send_window": {"start": "00:00", "end": "23:59"}})
+    api.post("/api/nudges/messages", json={"code": "M1-01", "month": 1, "title": "Rice",
+                                           "wa_template": "smo_m1_01", "body": "Rice? ORDER FOOD"})
+    campaign = api.post("/api/nudges/campaigns", json={
+        "name": "SMO follow-up", "kind": "follow_up", "is_active": True,
+        "config": {"journey": {"pause_after_chat_hours": 0}}}).json()
+    assert campaign["config"]["journey"]["no_response"]["steps"][0] == {"every_days": 3.0, "times": 3}
+    session.add(Customer(whatsapp_number="447700900123", name="Asha",
+                         created_at=datetime.now(timezone.utc) - timedelta(days=3)))
+    await session.flush()
+
+    preview = api.post(f"/api/nudges/campaigns/{campaign['id']}/preview").json()
+    assert preview["outcomes"][0]["detail"] == "M1-01 · month 1 · No response"
+
+    api.post("/api/nudges/enable")
+    phone = Phone()
+    with use_sender(phone):
+        assert api.post("/api/nudges/run").json()["totals"]["sent"] == 1
+    assert phone.sent[0]["name"] == "smo_m1_01"
+
+    summary = api.get("/api/nudges/journeys/summary").json()["campaigns"][campaign["id"]]
+    assert summary["by_bucket"] == {"no_response": 1}
+    who = api.get("/api/nudges/customers/447700900123").json()
+    journey = who["journeys"][0]
+    assert (journey["attempts"], journey["last_message_code"], journey["stage"]) == (1, "M1-01", 1)
+
+    moved = api.post(f"/api/nudges/journeys/{journey['id']}", json={"action": "move", "bucket": "later"})
+    assert moved.json()["bucket_label"] == "Later"
+    assert api.post(f"/api/nudges/journeys/{journey['id']}", json={"action": "fly"}).status_code == 422
+    assert api.post("/api/nudges/journeys/nope", json={"action": "end"}).status_code == 404
+    assert api.get("/api/nudges/stats").json()["messages"][0]["code"] == "M1-01"
