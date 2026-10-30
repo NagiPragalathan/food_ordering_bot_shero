@@ -1,4 +1,4 @@
-"""The kitchen hears about a paid order on its delivery day
+"""The kitchen hears about a paid order, with nothing about the customer
 (services/kitchen_alerts.py)."""
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ from decimal import Decimal
 import pytest
 
 from app.db.models import DeliverySlot, Order, OrderStage, PaymentStatus
+from app.integrations.gallabox import fallback
+from app.integrations.gallabox import templates as tpl
 from app.services import kitchen_alerts
 
 pytestmark = pytest.mark.asyncio
@@ -77,11 +79,63 @@ async def test_it_waits_until_the_delivery_day_then_goes_once(
     assert await kitchen_alerts.send_alert(session, due, now=that_morning)
 
     (to, template, values), = sender.sent
-    assert to == "14438011011" and template == "shero_new_order_alert"
+    assert to == "14438011011" and template == "shero_kitchen_order"
     assert "SHO-K-1" in values and "2 x Carrot Sambar" in values[-1]
     assert order.stage == OrderStage.SENT_TO_KITCHEN
     assert order.kitchen_notified_at == that_morning
     assert await kitchen_alerts.due_alerts(session, that_morning) == []
+
+
+async def test_the_partner_gets_the_order_and_nothing_about_the_customer(
+        session, customer, outlet, monkeypatch):
+    """Order code, delivery, kitchen and dishes: no name, number, address or
+    amount (the client: partners must not get the customer's details)."""
+    outlet.kitchen_whatsapp = "14438011011"
+    order = await _paid_order(session, customer, outlet)
+    order.apartment_unit, order.postal_code = "Apt 4", "21075"
+    order.contact_number = "14105550123"
+    sender = Sender()
+    monkeypatch.setattr(kitchen_alerts, "current_sender", lambda: sender)
+
+    assert await kitchen_alerts.send_alert(session, order)
+    (_, template, values), = sender.sent
+    assert template == tpl.KITCHEN_ORDER.name
+    assert values == ("SHO-K-1", "Tue 6 Oct, 6:00 PM", outlet.name, "2 x Carrot Sambar")
+    text = fallback.body_text(tpl.KITCHEN_ORDER, values)
+    for private in (customer.name, customer.whatsapp_number, order.contact_number,
+                    "12 Maple St", "Apt 4", "21075", "20.00", "Customer", "Address",
+                    "Amount"):
+        assert private not in text
+
+
+async def test_until_meta_approves_it_the_team_template_goes_with_the_customer_blanked(
+        session, customer, outlet, monkeypatch):
+    """The kitchen still hears outside the 24-hour window while
+    shero_kitchen_order waits for approval, without the customer's details."""
+    outlet.kitchen_whatsapp = "14438011011"
+    order = await _paid_order(session, customer, outlet)
+    sender = Sender()
+    monkeypatch.setattr(kitchen_alerts, "current_sender", lambda: sender)
+
+    async def approved(name):
+        return name != tpl.KITCHEN_ORDER.name
+    monkeypatch.setattr(kitchen_alerts.template_status, "is_approved", approved)
+
+    assert await kitchen_alerts.send_alert(session, order)
+    (_, template, values), = sender.sent
+    assert template == tpl.ORDER_ALERT.name
+    assert values == ("SHO-K-1", "-", "-", "Tue 6 Oct, 6:00 PM", outlet.name, "-",
+                      "2 x Carrot Sambar")
+
+
+async def test_with_neither_approved_the_partner_template_goes(
+        session, customer, outlet, monkeypatch):
+    """Gallabox unreachable or nothing approved: the client sends the partner
+    template's words as text, never the team's."""
+    async def never(_name):
+        return False
+    monkeypatch.setattr(kitchen_alerts.template_status, "is_approved", never)
+    assert await kitchen_alerts.template() is tpl.KITCHEN_ORDER
 
 
 async def test_a_kitchen_without_whatsapp_stays_pending(

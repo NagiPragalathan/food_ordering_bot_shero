@@ -265,6 +265,25 @@ ORDER_ALERT = TemplateSpec(
     ),
 )
 
+# To the kitchen partner (Kitchens > Kitchen WhatsApp), every paid order
+# (services/kitchen_alerts.py). Only what the kitchen needs to cook it: no
+# customer name, number or address and no amount - Shero arranges the
+# delivery. Starts and ends on words, every value one line, as ORDER_ALERT.
+KITCHEN_ORDER = TemplateSpec(
+    name="shero_kitchen_order",
+    category="UTILITY",
+    trigger="An order is paid - sent to the assigned kitchen's WhatsApp number",
+    params=("order_number", "delivery", "kitchen", "items"),
+    sample_body=(
+        "New order received \U0001F6CE\n\n"
+        "Order: {{1}}\n"
+        "Delivery: {{2}}\n"
+        "Kitchen: {{3}}\n"
+        "Items: {{4}}\n\n"
+        "Thank you - Shero Home Food."
+    ),
+)
+
 ORDER_SUMMARY = TemplateSpec(
     name="order_summary_v2",
     category="UTILITY",
@@ -327,9 +346,11 @@ ALL_TEMPLATES: tuple[TemplateSpec, ...] = (
 # welcome opener (reaching customers before they write in), the web order
 # summary (Pay Now with Change menu / Update location) and the menu link
 # (View Menu with Get new link) and the in-chat welcomes (website or
-# WhatsApp), none of which the spec lists.
+# WhatsApp), the team's and the kitchen's order alerts, none of which the
+# spec lists.
 MANAGED_TEMPLATES: tuple[TemplateSpec, ...] = ALL_TEMPLATES + (
-    WELCOME, ORDER_SUMMARY, MENU_LINK, WELCOME_BACK, WELCOME_NEW, OUT_OF_AREA, ORDER_ALERT)
+    WELCOME, ORDER_SUMMARY, MENU_LINK, WELCOME_BACK, WELCOME_NEW, OUT_OF_AREA, ORDER_ALERT,
+    KITCHEN_ORDER)
 
 BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in MANAGED_TEMPLATES}
 

@@ -1,4 +1,10 @@
-"""Notify the assigned kitchen immediately after payment; retry failed sends."""
+"""Notify the assigned kitchen immediately after payment; retry failed sends.
+
+The kitchen partner gets the order code, delivery time, kitchen and dishes
+(`shero_kitchen_order`) and nothing about the customer: no name, number or
+address, and no amount. Shero arranges the delivery. The team's alert
+(services/order_alerts.py) still carries the full details.
+"""
 
 from __future__ import annotations
 
@@ -9,9 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import Customer, DeliverySlot, Order, OrderStage, Outlet, PaymentStatus
-from app.integrations.gallabox.sender import current_sender
+from app.db.models import DeliverySlot, Order, OrderStage, Outlet, PaymentStatus
+from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
+from app.integrations.gallabox.sender import current_sender
 from app.services import order_alerts
 from app.services import crm_sync, dispatch, orders
 from app.services.slots import as_utc, outlet_tz
@@ -69,7 +76,6 @@ async def send_alert(session: AsyncSession, order: Order, *,
         return False
     now = now or datetime.now(timezone.utc)
     outlet = await session.get(Outlet, order.outlet_id) if order.outlet_id else None
-    customer = await session.get(Customer, order.customer_id)
 
     if not (outlet and outlet.kitchen_whatsapp):
         log.warning("kitchen_alert_skipped", order_number=order.order_number,
@@ -78,15 +84,14 @@ async def send_alert(session: AsyncSession, order: Order, *,
         return False
 
     try:
-        params = order_alerts.values(order, customer, outlet.name)
         # Send every item, splitting large carts into template-sized sections.
         raw = " ".join(order_alerts._items(order).split()) or "-"
         chunks = [raw[i:i + order_alerts.MAX_VALUE]
                   for i in range(0, len(raw), order_alerts.MAX_VALUE)]
+        spec = await template()
         for chunk in chunks:
             await current_sender().send_template(
-                outlet.kitchen_whatsapp, tpl.ORDER_ALERT, *params[:-1], chunk)
-
+                outlet.kitchen_whatsapp, spec, *values(spec, order, outlet.name, chunk))
     except Exception as exc:  # noqa: BLE001 - the order is paid; never fail it on this
         log.error("kitchen_alert_failed", order_number=order.order_number,
                   outlet=outlet.code, error=str(exc))
@@ -99,23 +104,23 @@ async def send_alert(session: AsyncSession, order: Order, *,
     return True
 
 
-def message(order: Order, customer: Customer | None) -> str:
-    lines = [
-        f"New paid order {order.order_number}",
-        f"Slot: {order.slot_label or 'not set'}",
-        "",
-        "Items:",
-    ]
-    for item in order.items or []:
-        lines.append(f"  {item.get('quantity')} x {item.get('name')}")
-    contact = order.contact_number or (customer.whatsapp_number if customer else "")
-    lines += [
-        "",
-        f"Total: {order.total:.2f} {order.currency}",
-        f"Deliver to: {order.delivery_address or ''} {order.apartment_unit or ''}".strip(),
-        f"Contact: {contact}",
-    ]
-    if order.delivery_instructions:
-        lines.append(f"Notes: {order.delivery_instructions}")
-    return "\n".join(lines)
+async def template() -> tpl.TemplateSpec:
+    """KITCHEN_ORDER; until Meta approves it, the approved team alert with the
+    customer's details blanked (`values`), so the kitchen still hears about
+    the order outside WhatsApp's 24-hour window."""
+    if (not await template_status.is_approved(tpl.KITCHEN_ORDER.name)
+            and await template_status.is_approved(tpl.ORDER_ALERT.name)):
+        return tpl.ORDER_ALERT
+    return tpl.KITCHEN_ORDER
 
+
+def values(spec: tpl.TemplateSpec, order: Order, kitchen_name: str,
+           items: str) -> tuple[str, ...]:
+    """The kitchen's message: order code, delivery time, kitchen and dishes.
+    On the team template, the customer, amount and address are "-"."""
+    number, delivery, kitchen = (order_alerts._line(v) for v in
+                                 (order.order_number, order.slot_label, kitchen_name))
+    items = order_alerts._line(items)
+    if spec is tpl.ORDER_ALERT:
+        return number, "-", "-", delivery, kitchen, "-", items
+    return number, delivery, kitchen, items

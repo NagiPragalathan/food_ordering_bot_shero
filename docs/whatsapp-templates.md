@@ -408,6 +408,34 @@ Items: {{7}}
 Full details are on the admin dashboard.
 ```
 
+## `shero_kitchen_order`
+
+- **Category:** Utility
+- **To:** the kitchen partner: the order's kitchen, its Kitchen WhatsApp number
+  (Kitchens page)
+- **Trigger:** an order is paid (`kitchen_alerts.send_alert`), or Send to
+  kitchen / Retry kitchen alert on the Orders page
+- **Parameters:** `{{1}}` = order_number, `{{2}}` = delivery slot,
+  `{{3}}` = kitchen, `{{4}}` = items (a long cart goes as several messages)
+- **Buttons:** none
+
+Nothing about the customer: no name, number or address, and no amount. Until
+Meta approves it, the kitchen gets `shero_new_order_alert` with `{{2}}`,
+`{{3}}` and `{{6}}` (customer, amount, address) as "-".
+
+**Body:**
+
+```
+New order received 🛎
+
+Order: {{1}}
+Delivery: {{2}}
+Kitchen: {{3}}
+Items: {{4}}
+
+Thank you - Shero Home Food.
+```
+
 ---
 
 ## Order and delivery templates
