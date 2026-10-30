@@ -643,13 +643,11 @@ A setting saved on one instance reaches other instances within a minute
 
 ## Payouts
 
-**Payouts** in the sidebar sets how each order's money is split between its
-kitchen partner and Shero. By default the kitchen gets a percentage of the
-food; it can instead get each dish's PPP from the menu sheet, and any kitchen
-can have its own split. The page shows what each kitchen is owed for any
-dates, records the payments you make to kitchens (with a statement to
-download), and can undo a payment recorded by mistake. See the
-[payouts guide](kitchen-payouts.md).
+**Payouts** in the sidebar sets the split between the kitchen partner and
+Shero - the kitchen partner's percentage of the food and Shero's, one split
+for every kitchen or each kitchen's own - and lists every paid order for the
+chosen dates and kitchen with what the kitchen and Shero get, totals and a
+CSV. See the [payouts guide](kitchen-payouts.md).
 
 ## Loyalty rewards
 

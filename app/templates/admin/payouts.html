@@ -2,528 +2,208 @@
 {% import "admin/_macros.html" as ui %}
 {% block title %}Payouts{% endblock %}
 {% block heading %}Payouts{% endblock %}
-{% block subheading %}<p class="text-xs text-stone-500">Each order split between its kitchen partner and Shero</p>{% endblock %}
+{% block subheading %}<p class="text-xs text-stone-500">What each kitchen partner and Shero get from every paid order</p>{% endblock %}
 {% block actions %}
-  {% if tab == 'overview' %}
   <a href="{{ url_for('admin_payouts_csv') }}{% if query %}?{{ query | urlencode }}{% endif %}"
      class="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50">
     <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v3h16v-3"/></svg>
     Download CSV
   </a>
-  {% endif %}
 {% endblock %}
 
 {% macro usd(v) -%}
   {%- if v is not none and v < 0 -%}<span class="text-red-700">−${{ '%.2f' | format(-v) }}</span>
-  {%- elif v is none -%}—
   {%- else -%}${{ '%.2f' | format(v) }}{%- endif -%}
 {%- endmacro %}
-
-{% macro status_badge(s) %}
-  {% if s.status == 'due' %}{{ ui.badge(s.status_label, 'warn') }}
-  {% elif s.status == 'paid_out' %}{{ ui.badge(s.status_label, 'good') }}
-  {% elif s.status == 'upcoming' %}{{ ui.badge(s.status_label, 'info') }}
-  {% elif s.status == 'recover' %}{{ ui.badge(s.status_label, 'bad') }}
-  {% else %}{{ ui.badge(s.status_label) }}{% endif %}
-{% endmacro %}
-
-{# The page's filters, kept when a form is sent. #}
-{% macro keep(extra_tab=None) %}
-  <input type="hidden" name="tab" value="{{ extra_tab or tab }}">
-  {% for k, v in query.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
-{% endmacro %}
+{% macro pct(v) %}{{ '%g' | format(v) }}%{% endmacro %}
 
 {% block content %}
-{% set field = 'w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20' %}
+{% set field = 'rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20' %}
 
-<nav class="mb-5 flex gap-1 overflow-x-auto" aria-label="Payouts sections">
-  {% for key, label in tabs.items() %}
-  <a href="{{ url_with(tab=key if key != 'overview' else None) }}" {% if tab == key %}aria-current="page"{% endif %}
-     class="shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition
-            {{ 'bg-stone-900 text-white shadow-sm' if tab == key else 'bg-white text-stone-600 ring-1 ring-inset ring-stone-200 hover:bg-stone-50' }}">{{ label }}</a>
-  {% endfor %}
-</nav>
-
-{# ======================================================================= #}
-{% if tab == 'overview' %}
-
-<form method="get" class="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-stone-200/70 bg-white p-4 shadow-card">
-  <label class="text-xs font-medium text-stone-500">Dates
-    <select name="period" onchange="this.form.requestSubmit()" class="mt-1 block rounded-lg border border-stone-300 bg-white py-2 pl-3 pr-8 text-sm text-stone-700">
-      {% for key, label in periods.items() %}<option value="{{ key }}" {% if span.key == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
-    </select>
-  </label>
-  {% if span.key == 'custom' %}
-  <label class="text-xs font-medium text-stone-500">From<input type="date" name="start" value="{{ span.start or '' }}" class="mt-1 block rounded-lg border border-stone-300 px-3 py-1.5 text-sm"></label>
-  <label class="text-xs font-medium text-stone-500">To<input type="date" name="end" value="{{ span.end or '' }}" class="mt-1 block rounded-lg border border-stone-300 px-3 py-1.5 text-sm"></label>
-  {% endif %}
-  <label class="text-xs font-medium text-stone-500">Kitchen
-    <select name="kitchen" onchange="this.form.requestSubmit()" class="mt-1 block rounded-lg border border-stone-300 bg-white py-2 pl-3 pr-8 text-sm text-stone-700">
-      <option value="">All kitchens</option>
-      {% for k in kitchens %}<option value="{{ k.id }}" {% if kitchen_id == k.id %}selected{% endif %}>{{ k.name }}</option>{% endfor %}
-    </select>
-  </label>
-  {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
-  <button class="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium hover:bg-stone-50">Show</button>
-  <div class="ml-auto text-right text-xs text-stone-500">
-    <div class="font-semibold text-stone-700">{{ span.label }}</div>
-    by the date the customer paid
-  </div>
-</form>
-
-{% if all_due.due > 0 and not (span.key == 'all' and status == 'due') %}
-<div class="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-  <span><b>{{ usd(all_due.due) }}</b> is due to {{ 'this kitchen' if kitchen_id else 'kitchens' }} for {{ all_due.due_orders }} order(s), counting every date.</span>
-  <a href="{{ url_with(period='all', status='due', start=None, end=None) }}" class="font-semibold underline">Show them</a>
-</div>
-{% endif %}
-
-{% if loose %}
-<div class="mb-4 flex flex-col gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 sm:flex-row sm:items-center">
-  <span class="min-w-0 flex-1">{{ loose }} order(s) here were paid before a split was copied onto them, so they use
-    <b>today's split</b> and will change if it changes. They are fixed when paid out, or now:</span>
-  <form method="post" action="{{ url_for('admin_payouts_apply') }}"
-        onsubmit="return confirm('Copy today\'s split onto every order in this view that is not paid out yet? Amounts set by hand are kept.')">
-    {{ keep() }}
-    <button class="rounded-lg bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800">Use today's split for these orders</button>
+<section class="mb-5 rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  {# --- Which orders ------------------------------------------------------- #}
+  <form method="get" class="flex flex-wrap items-end gap-3 border-b border-stone-100 p-4">
+    <label class="text-xs font-medium text-stone-500">Dates
+      <select name="period" onchange="this.form.requestSubmit()" class="mt-1 block {{ field }} pr-8">
+        {% for key, label in periods.items() %}<option value="{{ key }}" {% if span.key == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    {% if span.key == 'custom' %}
+    <label class="text-xs font-medium text-stone-500">From<input type="date" name="start" value="{{ span.start or '' }}" class="mt-1 block {{ field }}"></label>
+    <label class="text-xs font-medium text-stone-500">To<input type="date" name="end" value="{{ span.end or '' }}" class="mt-1 block {{ field }}"></label>
+    {% endif %}
+    <label class="min-w-[14rem] flex-1 text-xs font-medium text-stone-500">Kitchen
+      <select name="kitchen" onchange="this.form.requestSubmit()" class="mt-1 block w-full {{ field }} pr-8">
+        <option value="">All kitchens</option>
+        {% for k in kitchens %}<option value="{{ k.id }}" {% if kitchen_id == k.id %}selected{% endif %}>{{ k.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50">Show</button>
+    <span class="ml-auto text-right text-sm text-stone-600">{{ span.label }}<span class="block text-xs text-stone-400">by the date the customer paid</span></span>
   </form>
-</div>
-{% endif %}
 
-<div class="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-  {{ ui.stat('Customers paid', usd(totals.paid), totals.orders ~ ' order(s) · food ' ~ ('$%.2f' | format(totals.food)) ~ (' · refunded ' ~ ('$%.2f' | format(totals.refunded)) if totals.refunded else ''), icon='M3 6h18v12H3zM12 15a3 3 0 100-6 3 3 0 000 6z') }}
-  {{ ui.stat("Kitchens' share", usd(totals.kitchen), (('%.1f' | format(totals.kitchen / totals.food * 100)) ~ '% of the food') if totals.food else 'no orders', icon='M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6') }}
-  {{ ui.stat("Shero's share", usd(totals.company), 'after delivery, fees and tax', tone='good', icon='M12 3l3 6 6 1-4 5 1 6-6-3-6 3 1-6-4-5 6-1z') }}
-  {{ ui.stat('Delivery, fees and tax', usd(totals.passed_on), 'passed on to Uber and in tax, not split', icon='M3 7h11v9H3zM14 10h4l3 3v3h-7') }}
-  {{ ui.stat('Due to kitchens', usd(totals.due), totals.due_orders ~ ' order(s) ready to pay' ~ (' · ' ~ ('$%.2f' | format(totals.upcoming)) ~ ' still to deliver' if totals.upcoming else ''), tone='warn' if totals.due else 'default', icon='M12 8v4l3 2M12 21a9 9 0 100-18 9 9 0 000 18z') }}
+  {# --- The split ---------------------------------------------------------- #}
+  <form method="post" action="{{ url_for('admin_payouts_split_save') }}" class="p-4" id="split-form">
+    {% for k, v in query.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <div class="flex flex-wrap items-end gap-x-5 gap-y-3">
+      <label class="flex items-center gap-2 self-center text-sm font-medium text-stone-800">
+        <input type="checkbox" name="same_for_all" id="same-for-all" {% if split.same_for_all %}checked{% endif %}
+               class="h-4 w-4 rounded border-stone-300 text-brand-600">
+        Same split for every kitchen
+      </label>
+      <div id="shared-split" class="flex flex-wrap items-end gap-3">
+        <label class="text-xs font-medium text-stone-500">Kitchen partner gets
+          <span class="mt-1 flex items-center gap-1"><input type="number" name="kitchen_percent" id="kp" min="0" max="100" step="0.01" required value="{{ '%g' | format(split.kitchen_percent) }}" class="w-24 {{ field }} text-right tabular-nums"><span class="text-sm text-stone-600">%</span></span></label>
+        <label class="text-xs font-medium text-stone-500">Shero gets
+          <span class="mt-1 flex items-center gap-1"><input type="number" id="sp" min="0" max="100" step="0.01" value="{{ '%g' | format(split.shero_percent) }}" class="w-24 {{ field }} text-right tabular-nums"><span class="text-sm text-stone-600">%</span></span></label>
+      </div>
+      <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">Save split</button>
+      <p class="basis-full text-xs text-stone-500" id="split-example"></p>
+    </div>
+
+    <div id="per-kitchen" class="mt-4 {% if split.same_for_all %}hidden{% endif %}">
+      <p class="mb-2 text-xs text-stone-500">Each kitchen's own split. A kitchen left empty uses the percentage above.</p>
+      <div class="overflow-x-auto rounded-xl border border-stone-200">
+        <table class="w-full text-sm">
+          <thead class="bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
+            <tr><th class="px-3 py-2 font-medium">Kitchen</th><th class="px-3 py-2 font-medium">Kitchen partner gets</th><th class="px-3 py-2 font-medium">Shero gets</th></tr>
+          </thead>
+          <tbody class="divide-y divide-stone-100">
+            {% for k in kitchens %}
+            {% set own = split.kitchens.get(k.id) %}
+            <tr>
+              <td class="px-3 py-2 text-stone-800">{{ k.name }}</td>
+              <td class="px-3 py-2"><span class="flex items-center gap-1"><input type="number" name="kitchen_percent_{{ k.id }}" data-k min="0" max="100" step="0.01" value="{{ '%g' | format(own) if own is not none else '' }}" placeholder="{{ '%g' | format(split.kitchen_percent) }}" class="w-24 {{ field }} text-right tabular-nums"><span class="text-stone-600">%</span></span></td>
+              <td class="px-3 py-2"><span class="flex items-center gap-1"><input type="number" data-s min="0" max="100" step="0.01" class="w-24 {{ field }} text-right tabular-nums"><span class="text-stone-600">%</span></span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </form>
+</section>
+
+{# --- The totals -------------------------------------------------------------- #}
+<div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+  {{ ui.stat('Customers paid', usd(totals.paid), '%d order%s' | format(totals.orders, '' if totals.orders == 1 else 's')) }}
+  {{ ui.stat('Kitchens get', usd(totals.kitchen), 'of food ' ~ usd(totals.food), 'good') }}
+  {{ ui.stat('Shero gets', usd(totals.shero), 'after coupons, delivery, fees and tax') }}
+  {{ ui.stat('Delivery, fees and tax', usd(totals.passed_on), 'passed on to Uber and tax, not split') }}
 </div>
 
-{% call ui.card('By kitchen', 'What each kitchen earned in these dates, what is already paid, and what is due. Record a payment once you have paid the kitchen.') %}
-  {% if per_kitchen %}
-  <div class="-mx-5 -my-5 overflow-x-auto">
+{% if not kitchen_id and per_kitchen | length > 1 %}
+<section class="mb-5 overflow-hidden rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="border-b border-stone-100 px-5 py-3 text-sm font-semibold text-stone-900">By kitchen</header>
+  <div class="overflow-x-auto">
     <table class="w-full text-sm">
-      <thead class="border-b border-stone-100 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
-        <tr>
-          <th class="px-4 py-2.5 font-medium">Kitchen</th>
-          <th class="px-4 py-2.5 text-right font-medium">Orders</th>
-          <th class="px-4 py-2.5 text-right font-medium">Customers paid</th>
-          <th class="px-4 py-2.5 text-right font-medium">Kitchen share</th>
-          <th class="px-4 py-2.5 text-right font-medium">Shero share</th>
-          <th class="px-4 py-2.5 text-right font-medium">Paid out</th>
-          <th class="px-4 py-2.5 text-right font-medium">Due now</th>
-          <th class="px-4 py-2.5"></th>
-        </tr>
+      <thead class="bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
+        <tr><th class="px-4 py-2 font-medium">Kitchen</th><th class="px-4 py-2 text-right font-medium">Orders</th><th class="px-4 py-2 text-right font-medium">Customers paid</th><th class="px-4 py-2 text-right font-medium">Kitchen gets</th><th class="px-4 py-2 text-right font-medium">Shero gets</th></tr>
       </thead>
       <tbody class="divide-y divide-stone-100">
         {% for outlet_id, t in per_kitchen.items() %}
-        {% set basis_pct = rules.rule_for(outlet_id) %}
-        <tr class="align-top hover:bg-stone-50/70">
-          <td class="px-4 py-3">
-            <div class="font-medium">{{ names.get(outlet_id, 'No kitchen') }}</div>
-            <div class="text-xs text-stone-500">Now: {{ describe(basis_pct[0], basis_pct[1]) }}{% if rules.has_own_rule(outlet_id) %} · own split{% endif %}</div>
-          </td>
-          <td class="px-4 py-3 text-right tabular-nums">{{ t.orders }}</td>
-          <td class="px-4 py-3 text-right tabular-nums">{{ usd(t.paid) }}<div class="text-xs text-stone-500">food {{ usd(t.food) }}</div></td>
-          <td class="px-4 py-3 text-right font-semibold tabular-nums">{{ usd(t.kitchen) }}</td>
-          <td class="px-4 py-3 text-right tabular-nums text-emerald-700">{{ usd(t.company) }}</td>
-          <td class="px-4 py-3 text-right tabular-nums">{{ usd(t.paid_out) }}{% if t.recover %}<div class="text-xs text-red-700">{{ usd(t.recover) }} on refunded orders</div>{% endif %}</td>
-          <td class="px-4 py-3 text-right tabular-nums {% if t.due %}font-semibold text-amber-700{% endif %}">{{ usd(t.due) }}
-            {% if t.upcoming %}<div class="text-xs font-normal text-stone-500">+ {{ usd(t.upcoming) }} to deliver</div>{% endif %}</td>
-          <td class="px-4 py-3 text-right">
-            <div class="flex flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
-              {% if outlet_id %}<a href="{{ url_with(kitchen=outlet_id) }}" class="text-brand-700 underline">Orders</a>{% endif %}
-              {% if outlet_id %}<a href="{{ url_for('admin_payouts_csv') }}?{{ dict(query, kitchen=outlet_id|string) | urlencode }}" class="text-brand-700 underline">Statement</a>{% endif %}
-            </div>
-            {% if t.due > 0 and outlet_id %}
-            <button type="button" data-open="pay-{{ outlet_id }}" aria-expanded="false"
-                    class="mt-2 whitespace-nowrap rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">Record payment</button>
-            {% endif %}
-          </td>
+        <tr>
+          <td class="px-4 py-2"><a class="text-brand-700 hover:underline" href="{{ url_with(kitchen=outlet_id, page=None) }}">{{ names.get(outlet_id, 'No kitchen') }}</a>
+            <span class="block text-xs text-stone-500">Kitchen {{ pct(split.percent_for(outlet_id)) }} · Shero {{ pct(100 - split.percent_for(outlet_id)) }}</span></td>
+          <td class="px-4 py-2 text-right tabular-nums">{{ t.orders }}</td>
+          <td class="px-4 py-2 text-right tabular-nums">{{ usd(t.paid) }}</td>
+          <td class="px-4 py-2 text-right font-semibold tabular-nums text-emerald-700">{{ usd(t.kitchen) }}</td>
+          <td class="px-4 py-2 text-right tabular-nums">{{ usd(t.shero) }}</td>
         </tr>
-        {% if t.due > 0 and outlet_id %}
-        <tr id="pay-{{ outlet_id }}" hidden class="bg-brand-50/40">
-          <td colspan="8" class="px-4 py-4">
-            <form method="post" action="{{ url_for('admin_payouts_pay') }}" class="flex flex-wrap items-end gap-3"
-                  onsubmit='return confirm({{ ("Record " ~ (usd(t.due) | striptags) ~ " paid to " ~ names.get(outlet_id) ~ " for " ~ t.due_orders ~ " order(s)?") | tojson }})'>
-              {{ keep() }}
-              <input type="hidden" name="pay_kitchen" value="{{ outlet_id }}">
-              <input type="hidden" name="expected" value="{{ t.due }}">
-              <p class="w-full text-xs text-stone-600 lg:w-56">Once you have paid {{ names.get(outlet_id) }}: this marks its <b>{{ t.due_orders }}</b> due order(s) in these dates as paid, <b>{{ usd(t.due) }}</b> in all.</p>
-              <label class="flex flex-col text-xs text-stone-500">Paid on<input type="date" name="paid_on" value="{{ today }}" required class="{{ field }} mt-1 !w-40"></label>
-              <label class="flex flex-col text-xs text-stone-500">Reference<input name="reference" maxlength="120" placeholder="e.g. Zelle 4821" class="{{ field }} mt-1 !w-48"></label>
-              <label class="flex min-w-0 flex-1 flex-col text-xs text-stone-500">Note<input name="note" maxlength="500" class="{{ field }} mt-1"></label>
-              <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Record {{ usd(t.due) }} paid</button>
-            </form>
-          </td>
-        </tr>
-        {% endif %}
         {% endfor %}
       </tbody>
     </table>
   </div>
-  {% else %}
-    {{ ui.empty('No paid orders in these dates.') }}
-  {% endif %}
-{% endcall %}
+</section>
+{% endif %}
 
-<section class="mt-5 rounded-2xl border border-stone-200/70 bg-white shadow-card">
-  <header class="flex flex-wrap items-center gap-3 border-b border-stone-100 px-5 py-4">
-    <div class="mr-auto">
-      <h2 class="text-sm font-semibold text-stone-900">Orders</h2>
-      <p class="mt-0.5 text-xs text-stone-500">Open an order to see each dish's share, or to set the kitchen's amount by hand.</p>
-    </div>
+{# --- Every order -------------------------------------------------------------- #}
+<section class="overflow-hidden rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="border-b border-stone-100 px-5 py-3">
+    <h2 class="text-sm font-semibold text-stone-900">Orders</h2>
+    <p class="text-xs text-stone-500">The kitchen gets its percentage of the food. Shero gets what the customer paid, less the kitchen's amount and the delivery, fees and tax. A cancelled or refunded order gives the kitchen nothing.</p>
   </header>
-  <div class="border-b border-stone-100 px-4 py-3">
-    <nav class="-mx-1 flex gap-1 overflow-x-auto px-1" aria-label="Order status">
-      {% for key, label in status_options.items() %}
-      <a href="{{ url_with(status=key or None) }}" {% if status == key %}aria-current="page"{% endif %}
-         class="inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1 text-xs font-medium transition
-                {{ 'bg-stone-900 text-white' if status == key else 'bg-white text-stone-600 ring-1 ring-inset ring-stone-200 hover:bg-stone-50' }}">
-        {{ label }}<span class="rounded-full px-1.5 text-[11px] font-semibold tabular-nums {{ 'bg-white/20' if status == key else 'bg-stone-100 text-stone-500' }}">{{ status_counts[key] }}</span>
-      </a>
-      {% endfor %}
-    </nav>
-  </div>
-
   {% if items %}
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
-      <thead class="border-b border-stone-100 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
+      <thead class="bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
         <tr>
-          <th class="px-4 py-2.5 font-medium">Order</th>
-          <th class="px-4 py-2.5 font-medium">Kitchen</th>
-          <th class="px-4 py-2.5 text-right font-medium">Customer paid</th>
-          <th class="px-4 py-2.5 text-right font-medium">Kitchen share</th>
-          <th class="px-4 py-2.5 text-right font-medium">Shero share</th>
-          <th class="px-4 py-2.5 font-medium">Status</th>
-          <th class="px-4 py-2.5"></th>
+          <th class="px-4 py-2 font-medium">Order</th>
+          <th class="px-4 py-2 font-medium">Kitchen</th>
+          <th class="px-4 py-2 text-right font-medium">Customer paid</th>
+          <th class="px-4 py-2 text-right font-medium">Food</th>
+          <th class="px-4 py-2 text-right font-medium">Delivery, fees, tax</th>
+          <th class="px-4 py-2 text-right font-medium">Kitchen gets</th>
+          <th class="px-4 py-2 text-right font-medium">Shero gets</th>
+          <th class="px-4 py-2 font-medium">Status</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-stone-100">
         {% for s in items %}
-        <tr class="align-top hover:bg-stone-50/70">
-          <td class="px-4 py-3">
-            <div class="whitespace-nowrap font-medium">{{ s.order.order_number }}</div>
-            <div class="whitespace-nowrap text-xs text-stone-500">{{ local(s.order.paid_at) }}</div>
-            <div class="mt-1">{{ ui.stage_badge(s.order.stage) }}</div>
+        {% set o = s.order %}
+        <tr class="align-top">
+          <td class="px-4 py-2.5">
+            <span class="font-mono text-xs font-semibold text-stone-900">{{ o.order_number }}</span>
+            <span class="block text-xs text-stone-500">{{ local(o.paid_at) }}</span>
+            <span class="block max-w-xs text-xs text-stone-500">{% for i in o.items or [] %}{{ i.quantity }} × {{ i.name }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
           </td>
-          <td class="px-4 py-3 text-xs text-stone-600">{{ names.get(s.outlet_id, '—') }}</td>
-          <td class="px-4 py-3 text-right tabular-nums">
-            <div class="font-medium">{{ usd(s.paid) }}</div>
-            <div class="text-xs text-stone-500">food {{ usd(s.food) }}</div>
-            {% if s.discounts %}<div class="text-xs text-emerald-700">− {{ usd(s.discounts) }} {{ s.order.promo_code or 'points' }}</div>{% endif %}
-            {% if s.passed_on %}<div class="text-xs text-stone-500">delivery &amp; tax {{ usd(s.passed_on) }}</div>{% endif %}
-            {% if s.refunded %}<div class="text-xs text-red-700">refunded {{ usd(s.refunded) }}</div>{% endif %}
-          </td>
-          <td class="px-4 py-3 text-right tabular-nums">
-            <div class="font-semibold">{{ usd(s.kitchen) }}</div>
-            <div class="text-xs text-stone-500">{% if s.manual %}set by hand{% elif s.status == 'none' %}refunded{% else %}{{ s.rule }}{% endif %}</div>
-            {% if not s.locked %}<div class="text-[11px] text-sky-700">today's split</div>{% endif %}
-            {% if s.status == 'recover' %}<div class="text-[11px] text-red-700">now owed {{ usd(0) }}</div>{% endif %}
-          </td>
-          <td class="px-4 py-3 text-right tabular-nums text-emerald-700">{{ usd(s.company) }}</td>
-          <td class="px-4 py-3">
-            {{ status_badge(s) }}
-            {% if s.order.payout_id and payout_refs.get(s.order.payout_id) %}
-              {% set p = payout_refs.get(s.order.payout_id) %}
-              <div class="mt-1 text-xs text-stone-500">{{ p.paid_on.strftime('%d %b %Y') }}{% if p.reference %} · {{ p.reference }}{% endif %}</div>
-            {% endif %}
-          </td>
-          <td class="px-4 py-3 text-right">
-            <button type="button" data-open="order-{{ s.order.order_number }}" aria-expanded="false"
-                    class="whitespace-nowrap text-xs font-semibold text-brand-700 hover:underline">Details</button>
-          </td>
-        </tr>
-        <tr id="order-{{ s.order.order_number }}" hidden class="bg-stone-50/70">
-          <td colspan="7" class="px-4 py-4">
-            <div class="grid gap-4 text-xs lg:grid-cols-2">
-              <div>
-                <div class="mb-1.5 font-semibold text-stone-700">Each dish · {{ s.rule }}</div>
-                {% for line in s.lines %}
-                <div class="flex justify-between gap-3 border-b border-stone-200/70 py-1"><span class="min-w-0">{{ line.quantity }} x {{ line.name }} <span class="text-stone-400">${{ line.line_total }}</span></span>
-                  <span class="shrink-0 tabular-nums text-stone-500">{% if line.ppp %}PPP ${{ line.ppp }} each{% else %}{{ '%g' | format(s.percent) }}%{% endif %} → <b class="text-stone-700">${{ line.share }}</b></span></div>
-                {% else %}<div class="text-stone-500">No dish lines kept for this order.</div>{% endfor %}
-                {% if s.discounts and s.discounts_rule == 'shared' %}<p class="mt-1.5 text-stone-500">Less the coupon and points, in proportion to the food.</p>{% endif %}
-                {% if not s.locked %}<p class="mt-1.5 text-sky-700">Worked out with today's split: none was copied onto this order when it was paid.</p>
-                {% else %}{% set by = s.order.payout_split.get('locked_by') %}
-                <p class="mt-1.5 text-stone-400">Split copied onto the order {{ 'at payment' if by in (none, 'payment') else 'by ' ~ by }}, {{ (s.order.payout_split.get('locked_at') or '')[:10] }}.</p>{% endif %}
-              </div>
-              <div>
-                {% if s.manual %}
-                <p class="mb-2 rounded-lg bg-amber-50 p-2 text-amber-900">Set by hand to <b>${{ s.manual.amount }}</b> by {{ s.manual.by }}{% if s.manual.note %}: “{{ s.manual.note }}”{% endif %}</p>
-                {% endif %}
-                {% if s.order.payout_id %}
-                <p class="text-stone-500">Paid out, so it cannot change. Undo the payout on Payout history to change it.</p>
-                {% else %}
-                <form method="post" action="{{ url_for('admin_payouts_order', order_number=s.order.order_number) }}" class="flex flex-wrap items-end gap-2">
-                  {{ keep() }}
-                  <label class="flex flex-col text-stone-500">Kitchen gets ($)<input name="amount" inputmode="decimal" value="{{ '%.2f' | format(s.kitchen) }}" class="{{ field }} mt-1 !w-28"></label>
-                  <label class="flex min-w-0 flex-1 flex-col text-stone-500">Why<input name="note" maxlength="500" value="{{ (s.manual or {}).get('note', '') }}" placeholder="e.g. extra dish cooked" class="{{ field }} mt-1"></label>
-                  <button class="rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700">Save amount</button>
-                  {% if s.manual %}<button name="clear" value="1" class="rounded-lg border border-stone-300 bg-white px-3 py-2 font-semibold text-stone-700 hover:bg-stone-50">Use the split</button>{% endif %}
-                </form>
-                <p class="mt-1.5 text-stone-400">Shero's share is worked out again from what you enter.</p>
-                {% endif %}
-              </div>
-            </div>
-          </td>
+          <td class="px-4 py-2.5 text-stone-700">{{ names.get(s.outlet_id, '—') }}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums">{{ usd(s.paid) }}
+            {% if s.discounts %}<span class="block text-xs text-stone-500">coupon −{{ usd(s.discounts) }}</span>{% endif %}
+            {% if s.refunded %}<span class="block text-xs text-red-700">refunded {{ usd(s.refunded) }}</span>{% endif %}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums">{{ usd(s.food) }}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums text-stone-600">{{ usd(s.passed_on) }}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums"><b class="text-emerald-700">{{ usd(s.kitchen) }}</b><span class="block text-xs text-stone-500">{{ '0%' if s.cancelled else pct(s.percent) }}</span></td>
+          <td class="px-4 py-2.5 text-right tabular-nums"><b class="text-stone-900">{{ usd(s.shero) }}</b><span class="block text-xs text-stone-500">{{ pct(s.shero_percent) }}</span></td>
+          <td class="px-4 py-2.5">{{ ui.stage_badge(o.stage) }}</td>
         </tr>
         {% endfor %}
       </tbody>
+      <tfoot class="border-t-2 border-stone-200 bg-stone-50 font-semibold">
+        <tr>
+          <td class="px-4 py-2.5" colspan="2">Total · {{ totals.orders }} order{{ '' if totals.orders == 1 else 's' }}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums">{{ usd(totals.paid) }}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums">{{ usd(totals.food) }}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums">{{ usd(totals.passed_on) }}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums text-emerald-700">{{ usd(totals.kitchen) }}</td>
+          <td class="px-4 py-2.5 text-right tabular-nums">{{ usd(totals.shero) }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
     </table>
   </div>
   {{ ui.pager(page, url_with) }}
   {% else %}
-    {{ ui.empty('No orders match.') }}
+  {{ ui.empty('No paid orders for these dates' ~ (' at this kitchen' if kitchen_id else '') ~ '.') }}
   {% endif %}
 </section>
 
 <script>
-  // "Details" and "Record payment" open a full-width row under their row.
-  document.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-open]');
-    if (!button) return;
-    const row = document.getElementById(button.dataset.open);
-    row.hidden = !row.hidden;
-    button.setAttribute('aria-expanded', String(!row.hidden));
-    if (!row.hidden) (row.querySelector('input:not([type=hidden])') || row).focus({preventScroll: true});
-  });
-</script>
-
-{# ======================================================================= #}
-{% elif tab == 'rules' %}
-
-<form method="post" action="{{ url_for('admin_payouts_rules_save') }}" id="split-form" class="space-y-5">
-  {{ keep('rules') }}
-
-  {% call ui.card("Kitchen's share", 'What the kitchen partner gets from each order. Shero keeps the rest of what the customer paid, after the delivery, Uber fees and tax it passes on.') %}
-    <div class="grid gap-3 md:grid-cols-2">
-      {% for key, label in bases.items() %}
-      <label class="flex cursor-pointer gap-3 rounded-xl border border-stone-200 p-4 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50/50">
-        <input type="radio" name="basis" value="{{ key }}" {% if rules.basis == key %}checked{% endif %} class="mt-1">
-        <span>
-          <span class="block text-sm font-semibold text-stone-800">{{ label }}</span>
-          {% if key == 'percent' %}
-          <span class="block text-xs text-stone-500">The kitchen gets the same percentage of every dish, e.g. 65% of a $100 order is $65.</span>
-          {% else %}
-          <span class="block text-xs text-stone-500">The kitchen gets each dish's PPP from the menu sheet, times the quantity: an exact amount per dish.</span>
-          {% endif %}
-        </span>
-      </label>
-      {% endfor %}
-    </div>
-    <div class="mt-4 grid gap-4 sm:grid-cols-2">
-      <label class="block text-sm">
-        <span class="mb-1 block text-stone-600">Kitchen's percentage of the food</span>
-        <span class="flex items-center gap-2"><input name="kitchen_percent" id="kitchen-percent" type="number" step="0.01" min="0" max="100" required
-               value="{{ '%g' | format(rules.kitchen_percent) }}" class="{{ field }} !w-32"> <span class="text-stone-500">%</span></span>
-        <span class="mt-1 block text-xs text-stone-500">Shero keeps <b id="company-percent">{{ '%g' | format(100 - rules.kitchen_percent) }}</b>%. With partner prices, this is used only for a dish with no PPP.</span>
-      </label>
-      <div class="rounded-xl bg-stone-50 p-4 text-xs text-stone-600">
-        <div class="font-semibold text-stone-700">Partner prices on the menu</div>
-        {{ coverage.with_ppp }} of {{ coverage.dishes }} dishes have a PPP{% if coverage.average_percent is not none %}, on average <b>{{ coverage.average_percent }}%</b> of the menu price{% endif %}.
-        They come from the PPP column of the menu sheet; change one on the <a href="{{ url_for('admin_menu') }}" class="text-brand-700 underline">Menu</a> page (Cost).
-      </div>
-    </div>
-  {% endcall %}
-
-  {% call ui.card('Coupons and loyalty points', 'Who gives up money when a coupon or points take money off the food. Free-delivery coupons always come out of Shero\'s share.') %}
-    <div class="grid gap-3 md:grid-cols-2">
-      {% for key, label in discount_options.items() %}
-      <label class="flex cursor-pointer gap-3 rounded-xl border border-stone-200 p-4 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50/50">
-        <input type="radio" name="discounts" value="{{ key }}" {% if rules.discounts == key %}checked{% endif %} class="mt-1">
-        <span>
-          <span class="block text-sm font-semibold text-stone-800">{{ label }}</span>
-          <span class="block text-xs text-stone-500" data-discount-example="{{ key }}"></span>
-        </span>
-      </label>
-      {% endfor %}
-    </div>
-  {% endcall %}
-
-  {% call ui.card('When a kitchen is owed', 'Orders count towards what you pay a kitchen from this point. Refunded and cancelled orders owe the kitchen nothing unless you set an amount by hand.') %}
-    <div class="grid gap-3 md:grid-cols-2">
-      {% for key, label in payable_options.items() %}
-      <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-stone-200 p-4 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50/50">
-        <input type="radio" name="payable_after" value="{{ key }}" {% if rules.payable_after == key %}checked{% endif %}>
-        <span class="text-sm font-semibold text-stone-800">{{ label }}</span>
-      </label>
-      {% endfor %}
-    </div>
-  {% endcall %}
-
-  {% call ui.card('Kitchens with their own split', 'For a partner on different terms. Leave both blank to use the split above.') %}
-    {% if kitchens %}
-    <div class="-mx-5 -my-5 overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead class="border-b border-stone-100 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
-          <tr><th class="px-4 py-2.5 font-medium">Kitchen</th><th class="px-4 py-2.5 font-medium">Share worked out from</th><th class="px-4 py-2.5 font-medium">Percentage</th><th class="px-4 py-2.5 font-medium">From a $100 order</th></tr>
-        </thead>
-        <tbody class="divide-y divide-stone-100">
-          {% for k in kitchens %}
-          {% set r = own.get(k.id) %}
-          <tr data-kitchen-row>
-            <td class="px-4 py-3"><div class="font-medium">{{ k.name }}</div>{% if not k.is_active %}<div class="text-xs text-stone-500">paused</div>{% endif %}
-              <input type="hidden" name="rule_kitchen" value="{{ k.id }}"></td>
-            <td class="px-4 py-3">
-              <select name="rule_basis" class="rounded-lg border border-stone-300 bg-white py-2 pl-3 pr-8 text-sm">
-                <option value="">Same as above</option>
-                {% for key, label in bases.items() %}<option value="{{ key }}" {% if r and r.basis == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
-              </select>
-            </td>
-            <td class="px-4 py-3"><span class="flex items-center gap-2"><input name="rule_percent" type="number" step="0.01" min="0" max="100"
-                   value="{{ '%g' | format(r.percent) if r and r.percent is not none else '' }}" placeholder="{{ '%g' | format(rules.kitchen_percent) }}" class="{{ field }} !w-28"> <span class="text-stone-500">%</span></span></td>
-            <td class="px-4 py-3 text-xs text-stone-600" data-kitchen-example></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-      {{ ui.empty('No kitchens yet. Add one on the Kitchens page.') }}
-    {% endif %}
-  {% endcall %}
-
-  <div class="sticky bottom-16 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200 bg-white/95 p-4 shadow-card backdrop-blur lg:bottom-0">
-    <button class="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save split</button>
-    <span class="text-xs text-stone-500">Applies to orders paid from now on. Orders already paid keep their split; you can copy a new one onto them from the Overview.</span>
-  </div>
-</form>
-
-<div class="mt-5 grid gap-5 lg:grid-cols-2">
-  {% call ui.card('Try it', 'An order worked out with the split on this page, before you save it.') %}
-    <div class="grid grid-cols-3 gap-3">
-      <label class="text-xs text-stone-500">Food ($)<input id="try-food" type="number" step="0.01" min="0" value="100" class="{{ field }} mt-1"></label>
-      <label class="text-xs text-stone-500">Coupon / points ($)<input id="try-off" type="number" step="0.01" min="0" value="0" class="{{ field }} mt-1"></label>
-      <label class="text-xs text-stone-500">Delivery &amp; tax ($)<input id="try-delivery" type="number" step="0.01" min="0" value="8" class="{{ field }} mt-1"></label>
-    </div>
-    <dl class="mt-4 grid grid-cols-3 gap-3 text-center">
-      <div class="rounded-xl bg-stone-50 p-3"><dt class="text-[11px] uppercase tracking-wide text-stone-500">Customer pays</dt><dd id="try-paid" class="mt-1 text-lg font-semibold tabular-nums"></dd></div>
-      <div class="rounded-xl bg-brand-50 p-3"><dt class="text-[11px] uppercase tracking-wide text-brand-700">Kitchen gets</dt><dd id="try-kitchen" class="mt-1 text-lg font-semibold tabular-nums text-brand-800"></dd></div>
-      <div class="rounded-xl bg-emerald-50 p-3"><dt class="text-[11px] uppercase tracking-wide text-emerald-700">Shero keeps</dt><dd id="try-company" class="mt-1 text-lg font-semibold tabular-nums text-emerald-800"></dd></div>
-    </dl>
-    <p id="try-note" class="mt-3 text-xs text-stone-500"></p>
-  {% endcall %}
-
-  {% call ui.card('What the saved split gives', 'Food only, no coupon. With partner prices the amount depends on the dishes; shown here at the menu\'s average PPP.') %}
-    <div class="-mx-5 -my-5 overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead class="border-b border-stone-100 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
-          <tr><th class="px-4 py-2.5 font-medium">Rule</th>{% for c in examples[0].cells %}<th class="px-4 py-2.5 text-right font-medium">${{ '%g' | format(c.food) }} of food</th>{% endfor %}</tr>
-        </thead>
-        <tbody class="divide-y divide-stone-100">
-          {% for row in examples %}
-          <tr>
-            <td class="px-4 py-3"><div class="font-medium">{{ row.name }}</div><div class="text-xs text-stone-500">{{ row.rule }}</div></td>
-            {% for c in row.cells %}<td class="px-4 py-3 text-right tabular-nums">{% if row.estimate %}≈ {% endif %}{{ usd(c.kitchen) }}<div class="text-xs text-emerald-700">Shero {{ usd(c.company) }}</div></td>{% endfor %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endcall %}
-</div>
-
-<script>
 (() => {
-  const form = document.getElementById('split-form');
-  const averagePpp = {{ coverage.average_percent if coverage.average_percent is not none else 'null' }};
-  const num = (el) => Math.max(0, parseFloat(el && el.value) || 0);
-  const usd = (v) => (v < 0 ? '−$' : '$') + Math.abs(v).toFixed(2);
-  const round = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
-
-  function share(food, off, basis, pct, mode) {
-    const rate = basis === 'dish_price' && averagePpp !== null ? averagePpp : pct;
-    let kitchen = round(food * rate / 100);
-    if (mode === 'shared' && food > 0 && off > 0) kitchen = round(kitchen * Math.max(0, food - off) / food);
-    return kitchen;
-  }
-
-  function draw() {
-    const basis = (form.querySelector('[name=basis]:checked') || {}).value || 'percent';
-    const mode = (form.querySelector('[name=discounts]:checked') || {}).value || 'company';
-    const pct = Math.min(100, num(document.getElementById('kitchen-percent')));
-    document.getElementById('company-percent').textContent = +(100 - pct).toFixed(2);
-
-    const food = num(document.getElementById('try-food'));
-    const off = Math.min(food, num(document.getElementById('try-off')));
-    const delivery = num(document.getElementById('try-delivery'));
-    const paid = round(food - off + delivery);
-    const kitchen = share(food, off, basis, pct, mode);
-    document.getElementById('try-paid').textContent = usd(paid);
-    document.getElementById('try-kitchen').textContent = usd(kitchen);
-    document.getElementById('try-company').textContent = usd(round(paid - kitchen - delivery));
-    document.getElementById('try-note').textContent = (basis === 'dish_price'
-      ? `Partner prices: the real amount depends on the dishes; this uses the menu's average PPP (${averagePpp ?? '—'}%).`
-      : `${+pct.toFixed(2)}% of the food to the kitchen.`) + ` Delivery and tax (${usd(delivery)}) are passed on, not split.`;
-
-    form.querySelectorAll('[data-discount-example]').forEach((el) => {
-      const k = share(100, 10, basis, pct, el.dataset.discountExample);
-      el.textContent = `$100 of food with a $10 coupon: kitchen ${usd(k)}, Shero ${usd(round(90 - k))}.`;
+  const kp = document.getElementById('kp'), sp = document.getElementById('sp');
+  const same = document.getElementById('same-for-all'), per = document.getElementById('per-kitchen');
+  const example = document.getElementById('split-example');
+  const rest = (v) => (v === '' || isNaN(+v)) ? '' : String(Math.round((100 - +v) * 100) / 100);
+  const describe = () => {
+    const k = +kp.value || 0;
+    example.textContent = `Example: $100 of food - kitchen partner $${k.toFixed(2)}, Shero $${(100 - k).toFixed(2)} (plus delivery, fees and tax, passed on).`;
+    // Kitchens left empty follow the shared percentage.
+    per.querySelectorAll('tr').forEach((row) => {
+      const ki = row.querySelector('[data-k]'), si = row.querySelector('[data-s]');
+      if (ki && ki.value === '') { ki.placeholder = kp.value; si.value = ''; si.placeholder = rest(kp.value); }
     });
-    form.querySelectorAll('[data-kitchen-row]').forEach((row) => {
-      const own = row.querySelector('[name=rule_basis]').value;
-      const ownPct = row.querySelector('[name=rule_percent]').value;
-      const b = own || basis, p = ownPct === '' ? pct : Math.min(100, num(row.querySelector('[name=rule_percent]')));
-      const k = share(100, 0, b, p, mode);
-      row.querySelector('[data-kitchen-example]').textContent =
-        `${b === 'dish_price' ? '≈ ' : ''}kitchen ${usd(k)}, Shero ${usd(round(100 - k))}` + (own || ownPct !== '' ? '' : ' (same as above)');
-    });
-  }
-  document.addEventListener('input', draw);
-  document.addEventListener('change', draw);
-  draw();
+  };
+  kp.addEventListener('input', () => { sp.value = rest(kp.value); describe(); });
+  sp.addEventListener('input', () => { kp.value = rest(sp.value); describe(); });
+  per.querySelectorAll('tr').forEach((row) => {
+    const ki = row.querySelector('[data-k]'), si = row.querySelector('[data-s]');
+    if (!ki) return;
+    si.value = rest(ki.value);
+    ki.addEventListener('input', () => { si.value = rest(ki.value); if (ki.value === '') describe(); });
+    si.addEventListener('input', () => { ki.value = rest(si.value); });
+  });
+  same.addEventListener('change', () => per.classList.toggle('hidden', same.checked));
+  describe();
 })();
 </script>
-
-{# ======================================================================= #}
-{% else %}
-
-{% call ui.card('Payments recorded to kitchens', 'Newest first. Undo a payment recorded by mistake: its orders become due again. The statement lists the orders it paid.') %}
-  {% if history %}
-  <div class="-mx-5 -my-5 overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead class="border-b border-stone-100 bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
-        <tr>
-          <th class="px-4 py-2.5 font-medium">Paid on</th>
-          <th class="px-4 py-2.5 font-medium">Kitchen</th>
-          <th class="px-4 py-2.5 text-right font-medium">Amount</th>
-          <th class="px-4 py-2.5 font-medium">Orders</th>
-          <th class="px-4 py-2.5 font-medium">Reference</th>
-          <th class="px-4 py-2.5 font-medium">Recorded</th>
-          <th class="px-4 py-2.5"></th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-stone-100">
-        {% for p in history %}
-        <tr class="align-top {% if p.voided_at %}text-stone-400{% else %}hover:bg-stone-50/70{% endif %}">
-          <td class="px-4 py-3 font-medium">{{ p.paid_on.strftime('%d %b %Y') }}</td>
-          <td class="px-4 py-3">{{ p.outlet_name }}</td>
-          <td class="px-4 py-3 text-right font-semibold tabular-nums {% if p.voided_at %}line-through{% endif %}">{{ usd(p.amount) }}</td>
-          <td class="px-4 py-3 text-xs">{{ p.order_count }} order(s)
-            {% if p.first_paid_at %}<div class="text-stone-500">paid {{ local(p.first_paid_at)[:11] }}{% if p.last_paid_at and local(p.last_paid_at)[:11] != local(p.first_paid_at)[:11] %} – {{ local(p.last_paid_at)[:11] }}{% endif %}</div>{% endif %}</td>
-          <td class="px-4 py-3 text-xs">{{ p.reference or '—' }}{% if p.note %}<div class="text-stone-500">{{ p.note }}</div>{% endif %}</td>
-          <td class="px-4 py-3 text-xs">{{ p.created_by or '—' }}<div class="text-stone-500">{{ local(p.created_at) }}</div>
-            {% if p.voided_at %}<div class="mt-1">{{ ui.badge('Undone by ' ~ (p.voided_by or '?'), 'bad') }}</div>{% endif %}</td>
-          <td class="px-4 py-3 text-right text-xs">
-            <div class="flex flex-wrap justify-end gap-3">
-              {% if not p.voided_at %}<a href="{{ url_for('admin_payout_csv', payout_id=p.id) }}" class="text-brand-700 underline">Statement</a>
-              <form method="post" action="{{ url_for('admin_payouts_undo', payout_id=p.id) }}"
-                    onsubmit='return confirm({{ ("Undo this payment of " ~ (usd(p.amount) | striptags) ~ " to " ~ p.outlet_name ~ "? Its orders become due again.") | tojson }})'>
-                {{ keep('history') }}
-                <button class="font-semibold text-red-700 underline">Undo</button>
-              </form>{% endif %}
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-    {{ ui.empty('No payments recorded yet. Record one from the Overview once you have paid a kitchen.') }}
-  {% endif %}
-{% endcall %}
-
-{% endif %}
 {% endblock %}
