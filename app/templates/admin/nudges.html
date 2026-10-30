@@ -158,7 +158,7 @@ const API = '/api/nudges';
 const S = {enabled: false, settings: null, reference: null, options: null, campaigns: [],
            last24: {}, stats30: null, tab: 'campaigns', sends: {offset: 0, limit: 25},
            resultsDays: 30, messages: [], pools: ['SMO'], journeys: {},
-           msgFilter: {pool: '', month: '', bucket: '', status: '', q: ''}};
+           msgFilter: {pool: '', month: '', bucket: '', status: '', wa: '', q: ''}};
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,
   (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -387,9 +387,10 @@ async function refreshCampaigns() {
 }
 function takeLibrary(library) {
   S.messages = library.messages; S.columns = library.columns; S.libraryDays = library.stats_days;
+  S.templates = library.templates || {summary: {}, leftovers: [], reachable: true};
   S.pools = [...new Set([...(library.pools || []), ...((S.options && S.options.pools) || [])])];
 }
-async function refreshLibrary() { takeLibrary(await api('/messages')); }
+async function refreshLibrary() { takeLibrary(await api('/messages')); if (S.settings && S.campaigns) renderSwitch(); }
 
 // --- master switch ------------------------------------------------------------------------
 function renderSwitch() {
@@ -398,6 +399,8 @@ function renderSwitch() {
   if (st.dry_run) chips.push('<span class="chip bg-sky-100 text-sky-800">Dry run - nothing is really sent</span>');
   if (st.test_numbers.length) chips.push(`<span class="chip bg-violet-100 text-violet-800">Test mode: only ${st.test_numbers.length === 1 ? '1 test number gets' : `${st.test_numbers.length} test numbers get`} nudges</span>`);
   if (window.NUDGE_BOT_RESTRICTED) chips.push('<span class="chip bg-amber-100 text-amber-800">Bot test mode: whitelisted numbers only</span>');
+  const tc = (S.templates && S.templates.summary) || {}, fix = (tc.rejected || 0) + (tc.not_submitted || 0) + (tc.none || 0) + (tc.text_changed || 0);
+  if (S.messages && S.messages.length) chips.push(`<button type="button" data-tab-link="messages" class="chip ${fix ? 'bg-red-100 text-red-700' : tc.pending ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}" title="Open the Messages tab">WhatsApp templates: ${tc.approved || 0} approved · ${tc.pending || 0} waiting for Meta${fix ? ` · ${fix} need action` : ''}</button>`);
   const active = S.campaigns.filter((c) => c.is_active).length;
   $('switch-card').className = `mb-6 overflow-hidden rounded-2xl border shadow-card ${on ? 'border-emerald-200 bg-gradient-to-r from-emerald-50 to-white' : 'border-stone-200 bg-white'}`;
   $('switch-card').innerHTML = `
@@ -418,6 +421,7 @@ function renderSwitch() {
       </div>
     </div>`;
   $('master').addEventListener('click', toggleMaster);
+  $('switch-card').querySelectorAll('[data-tab-link]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tabLink)));
 }
 async function toggleMaster() {
   const turningOn = !S.enabled;
@@ -1246,6 +1250,7 @@ function filteredMessages() {
     (!f.month || (f.month === 'any' ? !m.month : String(m.month) === f.month)) &&
     (!f.bucket || !m.buckets.length || m.buckets.includes(f.bucket)) &&
     (!f.status || (f.status === 'on' ? m.is_active : !m.is_active)) &&
+    (!f.wa || (f.wa === 'action' ? !['approved', 'pending', 'unknown'].includes(waState(m)) : waState(m) === f.wa)) &&
     (!q || [m.code, m.title, m.angle, m.body, m.occasion, m.wa_template].some((v) => (v || '').toLowerCase().includes(q))));
 }
 function renderMessages() {
@@ -1283,7 +1288,8 @@ function renderMessages() {
   }
   const months = [...new Set(S.messages.map((m) => m.month).filter(Boolean))].sort((a, b) => a - b);
   const active = S.messages.filter((m) => m.is_active);
-  const noTemplate = active.filter((m) => !m.wa_template).length, unapproved = active.filter((m) => m.wa_template && !m.wa_approved).length;
+  const tc = S.templates.summary || {};
+  const needAction = (tc.rejected || 0) + (tc.not_submitted || 0) + (tc.none || 0) + (tc.text_changed || 0);
   const list = filteredMessages();
   const groups = new Map();
   list.forEach((m) => { const k = `${m.pool}\u0000${m.month || 99}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); });
@@ -1291,16 +1297,18 @@ function renderMessages() {
   const sel = (id, value, options) => `<select class="field !w-auto" id="${id}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(value) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   box.innerHTML = head + `
     <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-      ${[['Messages', `${S.messages.length}`], ['Active', `${active.length}`], ['Without a template', `${noTemplate}`], ['Template not approved', `${unapproved}`]].map(([l, v]) =>
-        `<div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card"><div class="text-xs text-stone-500">${l}</div><div class="mt-1 text-2xl font-semibold text-stone-900">${v}</div></div>`).join('')}
+      ${[['Active messages', `${active.length}`, `of ${S.messages.length}`, 'text-stone-900'], ['Approved by Meta', `${tc.approved || 0}`, 'ready to send', 'text-emerald-700'], ['Waiting for Meta', `${tc.pending || 0}`, 'usually minutes to hours', 'text-amber-700'], ['Need action', `${needAction}`, 'rejected or not submitted', needAction ? 'text-red-700' : 'text-stone-900']].map(([l, v, sub, cls]) =>
+        `<div class="rounded-2xl border border-stone-200 bg-white p-4 shadow-card"><div class="text-xs text-stone-500">${l}</div><div class="mt-1 text-2xl font-semibold ${cls}">${v}</div><div class="text-[11px] text-stone-400">${sub}</div></div>`).join('')}
     </div>
-    ${noTemplate || unapproved ? `<div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">${noTemplate ? `<b>${noTemplate}</b> active message${noTemplate === 1 ? ' has' : 's have'} no WhatsApp template: ${noTemplate === 1 ? 'it' : 'they'} can only go to customers who messaged the bot in the last 24 hours. ` : ''}${unapproved ? `<b>${unapproved}</b> template${unapproved === 1 ? ' is' : 's are'} not approved in Gallabox yet. ` : ''}Submit each message's text as a template in Gallabox, then put its name here.</div>` : ''}
+    <div class="mb-4 rounded-xl border border-stone-200 bg-white p-3 text-xs leading-relaxed text-stone-600"><b class="text-stone-800">How sending works.</b> Every message is sent to Meta for approval as a WhatsApp template when you save or import it. A customer who messaged the bot in the last 24 hours gets any message straight away; anyone else only gets an <b>approved</b> one. Meta does not deliver these (Marketing) templates to <b>US numbers</b> at all at the moment, so US customers only get messages within 24 hours of writing to the bot. Changing a message's text submits a new version for approval.${S.templates.reachable === false ? ' <b class="text-red-700">Gallabox could not be reached just now: the statuses below are unknown.</b>' : ''}</div>
+    ${leftoversPanel()}
     <div class="mb-4 flex flex-wrap items-end gap-3">
       <div class="min-w-[14rem] flex-1"><label class="lbl">Search</label><input class="field" id="mf-q" placeholder="ID, title, words in the message…" value="${esc(S.msgFilter.q)}"></div>
       <div><label class="lbl">Pool</label>${sel('mf-pool', f.pool, [['', 'All pools'], ...S.pools.map((p) => [p, p])])}</div>
       <div><label class="lbl">Month</label>${sel('mf-month', f.month, [['', 'All months'], ...months.map((m) => [String(m), `Month ${m}`]), ['any', 'Any month']])}</div>
       <div><label class="lbl">Group</label>${sel('mf-bucket', f.bucket, [['', 'All groups'], ...BUCKETS])}</div>
       <div><label class="lbl">Status</label>${sel('mf-status', f.status, [['', 'On and off'], ['on', 'Active'], ['off', 'Switched off']])}</div>
+      <div><label class="lbl">WhatsApp template</label>${sel('mf-wa', f.wa || '', [['', 'Any'], ['approved', 'Approved'], ['pending', 'Waiting for Meta'], ['action', 'Needs action']])}</div>
     </div>
     ${list.length ? [...groups.entries()].map(([k, msgs]) => {
       const [pool, month] = k.split('\u0000');
@@ -1310,10 +1318,35 @@ function renderMessages() {
   wireMessagesHead(box);
   let typing;
   $('mf-q').addEventListener('input', (e) => { S.msgFilter.q = e.target.value; clearTimeout(typing); typing = setTimeout(() => { renderMessages(); const q = $('mf-q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); });
-  [['mf-pool', 'pool'], ['mf-month', 'month'], ['mf-bucket', 'bucket'], ['mf-status', 'status']].forEach(([id, key]) =>
+  [['mf-pool', 'pool'], ['mf-month', 'month'], ['mf-bucket', 'bucket'], ['mf-status', 'status'], ['mf-wa', 'wa']].forEach(([id, key]) =>
     $(id).addEventListener('change', (e) => { S.msgFilter[key] = e.target.value; renderMessages(); }));
   box.querySelectorAll('[data-mact]').forEach((b) => b.addEventListener('click', (e) => messageAction(b.dataset.mact, b.dataset.id, e.currentTarget)));
+  box.querySelectorAll('[data-leftover]').forEach((b) => b.addEventListener('click', async () => {
+    busy(b, true);
+    try { await api('/templates/leftovers/dismiss', {method: 'POST', body: {name: b.dataset.leftover}}); await refreshLibrary(); renderMessages(); }
+    catch (err) { toast(err.message, 'error'); busy(b, false); }
+  }));
 }
+// Templates no message uses any more: deleted on Meta when it can be, else listed here.
+function leftoversPanel() {
+  const items = S.templates.leftovers || [];
+  if (!items.length) return '';
+  return `<div class="mb-4 rounded-xl border border-stone-300 bg-stone-50 p-3 text-xs text-stone-700">
+    <div class="font-semibold text-stone-900">${items.length} template${items.length === 1 ? '' : 's'} to delete in Gallabox</div>
+    <p class="mt-0.5">${S.templates.can_delete ? 'Meta did not accept the delete for these.' : "Gallabox's API cannot delete templates, so these are listed for you."} They are never sent - no message uses them. Delete each in <a class="font-medium text-brand-700 underline" href="${esc(S.templates.gallabox_url)}" target="_blank" rel="noopener">Gallabox › Templates</a>, then press Done. (A Meta system-user token and WhatsApp Business Account id in the settings would delete them automatically.)</p>
+    <ul class="mt-2 divide-y divide-stone-200">${items.map((i) => `<li class="flex flex-wrap items-center gap-2 py-1.5"><span class="font-mono font-medium text-stone-900">${esc(i.name)}</span><span class="text-stone-500">${esc(i.code)} · ${esc(i.why)}</span><span class="flex-1"></span><button type="button" class="btn btn-ghost !px-2 !py-0.5 text-[11px]" data-leftover="${esc(i.name)}">Done</button></li>`).join('')}</ul>
+  </div>`;
+}
+const WA_STATE = {
+  approved: ['Approved by Meta', 'bg-emerald-100 text-emerald-800'],
+  pending: ['Waiting for Meta', 'bg-amber-100 text-amber-800'],
+  rejected: ['Rejected by Meta', 'bg-red-100 text-red-700'],
+  text_changed: ['Text changed - not submitted', 'bg-red-100 text-red-700'],
+  not_submitted: ['Not submitted', 'bg-red-100 text-red-700'],
+  none: ['Not submitted', 'bg-red-100 text-red-700'],
+  unknown: ['Template status unknown', 'bg-stone-100 text-stone-600'],
+};
+const waState = (m) => (m.wa && m.wa.state) || 'unknown';
 function wireMessagesHead(box) {
   $('msg-new').addEventListener('click', () => openMessageEditor(null));
   $('msg-import').addEventListener('click', openImport);
@@ -1322,11 +1355,21 @@ function wireMessagesHead(box) {
 document.addEventListener('click', (e) => {
   ['msg-export', 'camp-export'].forEach((id) => { const d = $(id); if (d && d.open && !d.contains(e.target)) d.open = false; });
 });
-function templateChip(m) {
-  if (!m.wa_template) return '<span class="chip bg-amber-100 text-amber-800" title="Goes only to customers who messaged the bot in the last 24 hours">No template</span>';
-  return m.wa_approved
-    ? `<span class="chip bg-emerald-100 text-emerald-800" title="Approved in Gallabox">${icon(I.check, 'h-3 w-3')}<span class="font-mono">${esc(m.wa_template)}</span></span>`
-    : `<span class="chip bg-stone-100 text-stone-600" title="Not approved in Gallabox yet (or Gallabox could not be asked)"><span class="font-mono">${esc(m.wa_template)}</span> · not approved</span>`;
+function templateStatus(m) {
+  const key = waState(m), [label, cls] = WA_STATE[key] || WA_STATE.unknown, w = m.wa || {};
+  const what = {
+    approved: 'Goes to any customer, any time - except US numbers outside 24 hours (Meta blocks Marketing templates there).',
+    pending: 'Meta is reviewing it. Until then it only goes to customers who messaged the bot in the last 24 hours.',
+    rejected: `Meta refused it${w.reason ? `: ${w.reason}` : ''}. Change the text and save to submit a new version.`,
+    text_changed: 'The text was changed after it was submitted. Press Submit for approval to send the new text to Meta.',
+    not_submitted: 'Not with Meta yet. Press Submit for approval.',
+    none: 'Not with Meta yet. Press Submit for approval.',
+    unknown: 'Gallabox could not be asked. Refresh the page in a minute.',
+  }[key];
+  const retry = ['rejected', 'text_changed', 'not_submitted', 'none'].includes(key);
+  return `<div class="mx-4 mb-3 rounded-xl border ${key === 'approved' ? 'border-emerald-200 bg-emerald-50/60' : key === 'pending' ? 'border-amber-200 bg-amber-50/60' : key === 'unknown' ? 'border-stone-200 bg-stone-50' : 'border-red-200 bg-red-50/60'} px-3 py-2 text-xs">
+    <div class="flex flex-wrap items-center gap-2"><span class="chip ${cls}">${key === 'approved' ? icon(I.check, 'h-3 w-3') : ''}${esc(label)}</span>${m.wa_template ? `<span class="font-mono text-stone-500">${esc(m.wa_template)}</span>` : ''}<span class="flex-1"></span>${retry ? `<button type="button" class="btn btn-primary !px-2.5 !py-1 text-[11px]" data-mact="submit" data-id="${m.id}">Submit for approval</button>` : ''}</div>
+    <div class="mt-1 text-stone-600">${esc(what)}</div></div>`;
 }
 function messageCard(m) {
   const st = m.stats;
@@ -1336,7 +1379,6 @@ function messageCard(m) {
   if (m.order_by) chips.push(`<span class="chip bg-violet-100 text-violet-800">Order by ${esc(m.order_by)}</span>`);
   if ((m.kitchens || []).length) chips.push(`<span class="chip bg-stone-100 text-stone-700" title="Service area">${esc(m.kitchens.join(', '))} only</span>`);
   if (m.dishes.length) chips.push(`<span class="chip bg-stone-100 text-stone-700" title="${esc(m.dishes.join(', '))}">Needs ${m.dishes.length === 1 ? esc(m.dishes[0]) : `${m.dishes.length} dishes`}</span>`);
-  chips.push(templateChip(m));
   return `
   <article class="flex flex-col rounded-2xl border border-stone-200 bg-white shadow-card ${m.is_active ? '' : 'opacity-70'}">
     <div class="flex items-start gap-3 p-4 pb-2">
@@ -1346,8 +1388,9 @@ function messageCard(m) {
       </div>
       <button type="button" class="switch" role="switch" aria-checked="${m.is_active}" data-mact="toggle" data-id="${m.id}" title="${m.is_active ? 'Switch off' : 'Switch on'}"><span></span></button>
     </div>
-    <div class="mx-4 rounded-xl bg-stone-50 px-3 py-2.5 text-[13px] leading-snug text-stone-700"><div class="line-clamp-5 whitespace-pre-line">${wa(m.body)}</div></div>
-    <div class="flex flex-wrap gap-1.5 px-4 pb-3 pt-3">${chips.join('')}</div>
+    <div class="mx-4 rounded-xl bg-stone-50 px-3 py-2.5 text-[13px] leading-snug text-stone-700"><div class="whitespace-pre-line">${wa(m.body)}</div></div>
+    ${chips.length ? `<div class="flex flex-wrap gap-1.5 px-4 pt-3">${chips.join('')}</div>` : ''}
+    <div class="pt-3">${templateStatus(m)}</div>
     <div class="mt-auto flex flex-wrap items-center gap-1.5 border-t border-stone-100 p-3 pt-2.5">
       <span class="text-xs text-stone-500">${st ? `${st.sent} sent · ${st.replies} replies · ${st.conversions} orders` : 'Not sent yet'} <span class="text-stone-400">(${S.libraryDays} d)</span></span>
       <span class="flex-1"></span>
@@ -1370,9 +1413,16 @@ async function messageAction(act, id, button) {
       const copy = await api(`/messages/${id}/duplicate`, {method: 'POST'});
       toast(`Made ${copy.code} (switched off).`); await refreshLibrary(); renderMessages(); return openMessageEditor(copy);
     }
+    if (act === 'submit') {
+      busy(button, true, 'Submitting');
+      const r = await api(`/messages/${id}/submit`, {method: 'POST'});
+      submitToast(r);
+    }
     if (act === 'delete') {
-      if (!await confirmBox('Delete this message?', `<b>${esc(m.code)}</b> - ${esc(m.title)} will be deleted. Sends of it stay in the activity log. To keep it but stop sending it, switch it off instead.`, 'Delete', 'danger')) return;
-      await api(`/messages/${id}`, {method: 'DELETE'}); toast('Deleted.');
+      const tpl = m.wa_template ? ` Its WhatsApp template <span class="font-mono">${esc(m.wa_template)}</span> ${S.templates.can_delete ? 'is deleted on Meta too' : 'is never sent again and is listed here for you to delete in Gallabox (its API cannot delete templates)'}.` : '';
+      if (!await confirmBox('Delete this message?', `<b>${esc(m.code)}</b> - ${esc(m.title)} will be deleted. Sends of it stay in the activity log.${tpl} To keep it but stop sending it, switch it off instead.`, 'Delete', 'danger')) return;
+      const r = await api(`/messages/${id}`, {method: 'DELETE'});
+      toast(r.template && r.template.deleted ? `Deleted, with its template ${r.template.template}.` : r.template && r.template.listed ? `Deleted. Template ${r.template.template} is listed to delete in Gallabox.` : 'Deleted.');
     }
     await refreshLibrary(); renderMessages();
   } catch (e) { toast(e.message, 'error'); busy(button, false); }
@@ -1425,9 +1475,9 @@ function openMessageEditor(m) {
         <div><label class="lbl">Only while these dishes are on the menu</label><input class="field" data-m="dishes" list="dl-mdishes" value="${esc(MSG.dishes.join(', '))}" placeholder="Empty: always. Separate dishes with commas"><datalist id="dl-mdishes">${S.options.dishes.map((d) => `<option value="${esc(d)}">`).join('')}</datalist></div>
         <div class="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
           <div class="text-sm font-semibold text-stone-900">WhatsApp template</div>
-          <p class="mt-1 text-xs leading-relaxed text-stone-700">For customers who have not messaged the bot in 24 hours, WhatsApp only delivers an <b>approved template</b>. Submit this message's text in Gallabox (category Marketing) and put its name here. Without one, this message only goes inside the 24-hour window.</p>
+          <p class="mt-1 text-xs leading-relaxed text-stone-700">For customers who have not messaged the bot in 24 hours, WhatsApp only delivers an <b>approved template</b>. <b>Saving sends this message's text to Meta for approval</b> (category Marketing); a {placeholder} becomes a template value. Change the text later and a new version is submitted. The status shows on the Messages tab.</p>
           <div class="mt-3 grid gap-4 sm:grid-cols-2">
-            <div><label class="lbl">Template name in Gallabox</label><input class="field font-mono" data-m="wa_template" maxlength="120" value="${esc(MSG.wa_template || '')}" placeholder="e.g. smo_m1_01"></div>
+            <div><label class="lbl">Template name</label><input class="field font-mono" data-m="wa_template" maxlength="120" value="${esc(MSG.wa_template || '')}" placeholder="Filled in when you save"><p class="help">Leave empty: it is named after the ID (smo_m1_01).</p></div>
             <div><label class="lbl">Template button</label><select class="field" data-m="wa_button"><option value="none" ${MSG.wa_button === 'none' ? 'selected' : ''}>No button</option><option value="order_link" ${MSG.wa_button === 'order_link' ? 'selected' : ''}>Their ordering page (URL ending in {{1}})</option></select></div>
             <div class="sm:col-span-2"><label class="lbl">Template values, in order</label><input class="field" data-m="wa_params" value="${esc(MSG.wa_params.join(' | '))}" placeholder="Empty when the template has no {{1}}. e.g. {first_name}"><p class="help">Separate with | . Usually empty.</p></div>
           </div>
@@ -1468,8 +1518,16 @@ function drawMessagePreview() {
   if (problems.size) checks.push(['error', `Not a placeholder: ${[...problems].map((p) => `{${p}}`).join(', ')}. Saving will be refused until they come out.`]);
   if (!/order\s*food/i.test(MSG.body) && MSG.body.trim()) checks.push(['warn', 'The message does not ask them to send ORDER FOOD - the content plan ends every message with it.']);
   if (/\{coupon_/.test(MSG.body)) checks.push(['info', 'Uses a coupon: only campaigns with a coupon send it.']);
-  if (!MSG.wa_template) checks.push(['info', 'No template: only goes to customers who messaged the bot in the last 24 hours.']);
+  if (!MSG.wa_template) checks.push(['info', 'Saving submits it to Meta as a WhatsApp template. Until Meta approves it, it only goes to customers who messaged the bot in the last 24 hours.']);
   $('me-preview').innerHTML = bubble(text) + `<div class="mt-3">${checksHtml(checks)}</div>`;
+}
+// What happened to the template when a message was saved.
+function submitToast(r) {
+  const w = r.wa_submit;
+  if (!w) return toast(`Saved ${r.code}.`);
+  if (w.submitted) return toast(`Saved ${r.code}. Template ${w.name} sent to Meta for approval.`);
+  if (w.already) return toast(`Saved ${r.code}. Its template ${w.name} is ${w.status === 'approved' ? 'approved' : 'with Meta'}.`);
+  toast(`Saved ${r.code}, but the template was not submitted: ${w.error}`, 'error');
 }
 async function saveMessage(button) {
   const split = (v, sep) => String(v || '').split(sep).map((x) => x.trim()).filter(Boolean);
@@ -1482,7 +1540,7 @@ async function saveMessage(button) {
   try {
     const saved = MSG.id ? await api(`/messages/${MSG.id}`, {method: 'PATCH', body}) : await api('/messages', {method: 'POST', body});
     closeModal(); MSG = null;
-    toast(`Saved ${saved.code}${saved.is_active ? '' : ' (switched off)'}.`);
+    submitToast(saved);
     await refreshLibrary(); renderMessages();
   } catch (e) {
     $('me-error').innerHTML = `<b>Not saved.</b> ${esc(e.message)}`; $('me-error').classList.remove('hidden');
@@ -1519,7 +1577,7 @@ async function runImport(button, commit) {
     const r = await upload('/messages/import', {file, mode, turn_off_missing: $('imp-off').checked ? 'true' : 'false', commit: commit ? 'true' : 'false'});
     drawImportResult(r);
     if (commit) {
-      toast(`Imported: ${r.counts.create} new, ${r.counts.update} updated${r.turned_off.length ? `, ${r.turned_off.length} switched off` : ''}.`);
+      toast(`Imported: ${r.counts.create} new, ${r.counts.update} updated${r.turned_off.length ? `, ${r.turned_off.length} switched off` : ''}.${r.templates_to_submit ? ` Submitting ${r.templates_to_submit} template${r.templates_to_submit === 1 ? '' : 's'} to Meta - refresh in a minute to see them.` : ''}`);
       await refreshLibrary(); renderMessages();
     }
   } catch (e) {

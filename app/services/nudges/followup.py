@@ -435,8 +435,12 @@ async def pick(session: AsyncSession, cfg: Journey, candidate: Candidate, *, now
             continue
         fits.append(m)
     if not window_open:
-        # Outside the 24-hour window only an approved template gets through.
-        usable = [m for m in fits if m.wa_template and await template_status.is_approved(m.wa_template)]
+        # Outside the 24-hour window only an approved template gets through,
+        # and only one that still has the message's words.
+        from app.services.nudges import wa_templates
+
+        usable = [m for m in fits if m.wa_template and await template_status.is_approved(m.wa_template)
+                  and await wa_templates.matches(m)]
         if fits and not usable:
             return "no_approved_template"
         fits = usable

@@ -12,10 +12,14 @@ with their emojis, ready to import on the Nudges page:
 | `SMO-54-follow-up-messages.json` | The same, as JSON |
 
 Each message is in the SMO pool, under its month, active, with no reply-group
-limit, and with a suggested WhatsApp template name (`smo_m1_01`...). Create
-each template in Gallabox (category Marketing) with the same text and that
-name. Until a template is approved, its message only goes to customers who
-messaged the bot in the last 24 hours.
+limit, and with its WhatsApp template name (`smo_m1_01`...). All 54 templates
+were submitted to Meta through Gallabox on 30 Oct 2026 (category Marketing,
+the same text, no variables or buttons). Until a template is approved, its
+message only goes to customers who messaged the bot in the last 24 hours; and
+Meta does not deliver Marketing templates to US (+1) numbers at all. Change a
+message's text and its template must be submitted again under a new name.
+Both files carry these notes (the JSON's `read_me`, the Excel "Status and
+limits" sheet); the import ignores them.
 
 An occasion message (with From and Until dates) can also have an **Order by**
 cutoff and a **Kitchens** service area; both are columns in the file and

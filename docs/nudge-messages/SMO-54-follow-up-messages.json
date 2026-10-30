@@ -1,4 +1,13 @@
 {
+  "read_me": [
+    "WhatsApp templates: All 54 templates (smo_m1_01 ... smo_m6_09) were submitted to Meta through Gallabox on 30 Oct 2026: category Marketing, the exact text of each message, no variables, no buttons. Status when submitted: pending approval. Check them in Gallabox > Templates.",
+    "Do not change approved text: A template sends the text Meta approved. If you change a message's text here or on the Nudges page, its template no longer matches: submit a new template (a new name, e.g. smo_m1_01_v2), put that name in the WhatsApp template column, and wait for approval.",
+    "Who gets which: Customer messaged the bot in the last 24 hours: the message goes as a normal WhatsApp message - no template needed. Last message over 24 hours ago: only the approved template can be sent (WhatsApp's rule for every business).",
+    "US (+1) numbers: Meta currently does not deliver Marketing templates to US numbers at all, even approved ones (paused since April 2025, no end date announced). So US customers get these follow-ups only within 24 hours of their last message to the bot. The Nudges setting 'Skip marketing templates to US (+1) numbers' stops wasted sends; turn it off if Meta lifts the restriction.",
+    "Dish names: The handoff says the dish names in the text are examples: check them against the live menu before switching the campaign on.",
+    "Festival messages: M4-01, M4-04 and M4-08 speak of festivals and occasions in general terms and go in month 4 like the rest, as the handoff lists them. For a real festival (e.g. Diwali), add a separate message with From, Until, Order by and Kitchens filled in.",
+    "Importing: Nudges > Messages > Import, choose this file, check, then Import. Importing again updates the messages by ID and changes nothing else. Only the Messages sheet is read."
+  ],
   "exported_at": "2026-10-29T09:11:00+00:00",
   "count": 54,
   "messages": [

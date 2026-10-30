@@ -365,6 +365,8 @@ async def duplicate_message(session: AsyncSession, message: NudgeMessage, *,
                         code=code, created_by=actor, updated_by=actor)
     copy.is_active = False
     copy.title = f"Copy of {message.title}"[:160]
+    # Its own WhatsApp template, submitted when it is saved (wa_templates.py).
+    copy.wa_template, copy.wa_params = None, []
     session.add(copy)
     await session.flush()
     return copy

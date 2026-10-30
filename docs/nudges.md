@@ -147,6 +147,8 @@ number to go live.
 | GET | `/api/nudges/stats?days=30&campaign_id=` | Sends, conversions, revenue |
 | GET | `/api/nudges/customers/{number}` | One customer: history, follow-up journeys, and why they would or would not get each campaign |
 | POST | `/api/nudges/customers/{number}/opt-out`, `/opt-in` | |
+| POST | `/api/nudges/messages/{id}/submit` | Submit the message's WhatsApp template to Meta now (again) |
+| POST | `/api/nudges/templates/leftovers/dismiss` | `{"name"}` - take a template off the "to delete in Gallabox" list |
 | POST | `/api/nudges/customers/{number}/send-now` | Test mode: `{"campaign_id"}` - a test number's next message from that campaign, now ([Test mode](#test-mode-the-flows-on-your-own-phone)) |
 | POST | `/api/nudges/campaigns/import` | Multipart `file` (.xlsx, .csv, .json), `mode` (`upsert` / `add_only`), `commit` (false: check only). Matched on name; new campaigns are paused |
 | GET | `/api/nudges/campaigns/export?format=xlsx\|csv\|json` | Every campaign as a file that imports straight back |
@@ -453,15 +455,33 @@ the rest of the pool. The starter kit's `templates_smo.json` layout
 (`id`, `month`, `title`, `body`) is read too.
 
 `docs/nudge-messages/` has the handoff's 54 messages, word for word, ready
-to import (Excel and JSON), each with a suggested template name
-(`smo_m1_01`...).
+to import (Excel and JSON), each with its template name (`smo_m1_01`...).
 
-**Templates**: outside the 24-hour window WhatsApp delivers only approved
-templates, and Meta holds back marketing templates to US (+1) numbers. So
-each message needs its own template in Gallabox (category Marketing, the
-same text), and its name in the library. Until then a message only reaches
-customers who wrote in the last 24 hours. The Messages tab shows which
-templates are approved.
+**Templates** (`services/nudges/wa_templates.py`): outside the 24-hour
+window WhatsApp delivers only approved templates, so every message gets its
+own, submitted to Meta through Gallabox **when the message is saved** - on
+the page (new or edited), or by an import (after the import, in the
+background). It is named after the message (`smo_m1_01` for M1-01 in the
+SMO pool), category Marketing, with the message's text; a {placeholder}
+becomes {{1}}, {{2}}... and is filled in at send time.
+
+| On the Messages tab | Means |
+|---|---|
+| Approved by Meta | Goes to any customer, any time - except US (+1) numbers outside 24 hours: Meta does not deliver Marketing templates there |
+| Waiting for Meta | Meta is reviewing it; meanwhile only customers who wrote in the last 24 hours get it |
+| Rejected by Meta | With Meta's reason. Change the text and save: a new version is submitted |
+| Text changed | The text no longer matches what was submitted, so the old template is not used. Submit for approval sends the new text |
+| Not submitted | Gallabox could not be reached when it was saved. Submit for approval |
+
+Gallabox's API cannot edit or delete a template. Changed text is therefore a
+new template (`_v2`, `_v3`...), and the old one is listed as "to delete in
+Gallabox". Deleting a message deletes its template on Meta when
+`META_SYSTEM_USER_TOKEN` and `META_WABA_ID` are set; otherwise it is listed
+the same way. A listed template is never sent - no message uses it - and
+drops off the list once it is gone from Gallabox (or press Done). The counts
+show at the top of the Messages tab and on the Nudges header.
+
+The 54 SMO templates were submitted on 30 Oct 2026.
 
 ## The SMO handoff, point by point
 

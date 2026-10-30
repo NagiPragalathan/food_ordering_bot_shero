@@ -57,6 +57,15 @@ def _templates_approved(monkeypatch):
 
     monkeypatch.setattr(template_status, "is_approved", approved)
 
+    # The nudge templates' list (services/nudges/wa_templates.py): unknown,
+    # unless a test gives it rows.
+    from app.services.nudges import wa_templates
+
+    async def no_rows(*, fresh: bool = False):
+        return None
+
+    monkeypatch.setattr(wa_templates, "rows", no_rows)
+
 
 @pytest_asyncio.fixture
 async def session() -> AsyncGenerator[AsyncSession, None]:

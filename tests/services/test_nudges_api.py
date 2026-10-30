@@ -210,7 +210,7 @@ async def test_a_library_messages_life(api):
     listed = api.get("/api/nudges/messages").json()
     assert [m["code"] for m in listed["messages"]] == ["M1-01", "M1-01-COPY"]
     assert listed["pools"] == ["SMO"] and listed["columns"][0]["heading"] == "ID"
-    assert api.delete(url).json() == {"deleted": True} and api.get(url).status_code == 404
+    assert api.delete(url).json()["deleted"] is True and api.get(url).status_code == 404
 
 
 async def test_importing_and_exporting_files(api):

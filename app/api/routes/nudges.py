@@ -43,16 +43,17 @@ import hmac
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import (APIRouter, Body, Depends, File, Form, Header, HTTPException, Query, Request,
-                     Response, UploadFile, status)
+from fastapi import (APIRouter, BackgroundTasks, Body, Depends, File, Form, Header, HTTPException,
+                     Query, Request, Response, UploadFile, status)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.auth import SESSION_COOKIE, get_user, read_session
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.db.models import (Cuisine, Customer, MenuItem, NudgeCampaign, NudgeMessage, NudgeSend,
                            NudgeStatus, Outlet, Promotion)
-from app.db.session import get_session
+from app.db.session import get_session, session_scope
 from app.services import promotions
 from app.services.customers import get_customer
 from app.services.nudges import audience as aud
@@ -60,9 +61,10 @@ from app.services.nudges import config as nudge_config
 from app.integrations.gallabox import template_status
 from app.services import reply_triggers
 from app.services.nudges import (campaign_files, crm_fields, followup, library, optout, reports,
-                                 runner, store)
+                                 runner, store, wa_templates)
 from app.services.nudges.config import NudgeConfigError
 
+log = get_logger(__name__)
 router = APIRouter(prefix="/api/nudges", tags=["nudges"])
 
 
@@ -520,11 +522,14 @@ async def _message(session: AsyncSession, message_id: str):
     return message
 
 
-async def _message_view(session: AsyncSession, message) -> dict:
+async def _message_view(session: AsyncSession, message, submitted: dict | None = None) -> dict:
     await session.refresh(message)
     view = library.view(message)
     view["wa_approved"] = (await template_status.is_approved(message.wa_template)
                            if message.wa_template else None)
+    view["wa"] = wa_templates.state(message, await wa_templates.rows())
+    if submitted is not None:
+        view["wa_submit"] = submitted
     return view
 
 
@@ -537,10 +542,19 @@ async def list_messages(pool: str | None = None, days: int = Query(90, ge=1, le=
     stats = {m["code"]: m for m in (await reports.stats(session, days=days))["messages"]}
     approved = {name: await template_status.is_approved(name)
                 for name in {m.wa_template for m in messages if m.wa_template}}
+    found = await wa_templates.rows()
+    states = {m.id: wa_templates.state(m, found) for m in messages}
     return {
         "messages": [{**library.view(m), "stats": stats.get(m.code),
-                      "wa_approved": approved.get(m.wa_template)}
+                      "wa_approved": approved.get(m.wa_template), "wa": states[m.id]}
                      for m in messages if not pool or m.pool == pool],
+        "templates": {
+            "summary": wa_templates.summary([states[m.id] for m in messages if m.is_active]),
+            "leftovers": await wa_templates.leftovers(session, found),
+            "reachable": found is not None,
+            "can_delete": wa_templates.can_delete(),
+            "gallabox_url": wa_templates.GALLABOX_TEMPLATES,
+        },
         "pools": sorted({m.pool for m in messages} | {library.DEFAULT_POOL}, key=str.lower),
         "stats_days": days,
         "columns": [{"field": name, "heading": heading, "help": library.HELP[name]}
@@ -555,7 +569,9 @@ async def create_message(body: dict = Body(...), session: AsyncSession = Depends
         message = await library.create_message(session, body, actor=actor)
     except NudgeConfigError as exc:
         raise _invalid(exc) from None
-    return await _message_view(session, message)
+    # Every message goes to Meta for approval as soon as it is saved.
+    submitted = await wa_templates.submit(session, message, actor=actor)
+    return await _message_view(session, message, submitted)
 
 
 def _download(content: bytes, media_type: str, name: str) -> Response:
@@ -587,22 +603,40 @@ async def sample_messages(format_: str = Query("xlsx", alias="format"),
 
 
 @router.post("/messages/import")
-async def import_messages(file: UploadFile = File(...), mode: str = Form(library.UPSERT),
+async def import_messages(background: BackgroundTasks, file: UploadFile = File(...),
+                          mode: str = Form(library.UPSERT),
                           turn_off_missing: bool = Form(False), commit: bool = Form(False),
                           session: AsyncSession = Depends(get_session),
                           actor: str = Depends(nudge_actor)) -> dict:
     """Check a file (commit false: nothing changes) or import it (commit true).
 
     Rows with a problem are listed with the reason and skipped; the rest go in.
+    After an import, every message whose template is missing or out of date
+    is submitted to Meta - after the response, as it can take a while.
     """
     raw = await file.read(library.MAX_FILE_BYTES + 1)
     try:
         parsed = library.read_file(file.filename or "", raw)
-        return await library.import_rows(session, parsed, mode=mode,
-                                         turn_off_missing=turn_off_missing, commit=commit,
-                                         actor=actor)
+        result = await library.import_rows(session, parsed, mode=mode,
+                                           turn_off_missing=turn_off_missing, commit=commit,
+                                           actor=actor)
     except NudgeConfigError as exc:
         raise _invalid(exc) from None
+    if commit:
+        await session.commit()
+        found = await wa_templates.rows(fresh=True)
+        waiting = sum(wa_templates.needs_submitting(m, found)
+                      for m in await library.list_messages(session))
+        result["templates_to_submit"] = waiting
+        if waiting:
+            background.add_task(_submit_templates, actor)
+    return result
+
+
+async def _submit_templates(actor: str) -> None:
+    async with session_scope() as session:
+        count = await wa_templates.submit_missing(session, actor=actor)
+    log.info("nudge_templates_submitted_after_import", count=count, actor=actor)
 
 
 @router.get("/messages/{message_id}")
@@ -616,18 +650,41 @@ async def patch_message(message_id: str, body: dict = Body(...),
                         session: AsyncSession = Depends(get_session),
                         actor: str = Depends(nudge_actor)) -> dict:
     message = await _message(session, message_id)
+    before = (message.body, message.wa_button, message.wa_template)
     try:
         await library.update_message(session, message, body, actor=actor)
     except NudgeConfigError as exc:
         raise _invalid(exc) from None
-    return await _message_view(session, message)
+    submitted = None
+    if (message.body, message.wa_button, message.wa_template) != before or not message.wa_template:
+        submitted = await wa_templates.submit(session, message, actor=actor)
+    return await _message_view(session, message, submitted)
+
+
+@router.post("/messages/{message_id}/submit")
+async def submit_message_template(message_id: str, session: AsyncSession = Depends(get_session),
+                                  actor: str = Depends(nudge_actor)) -> dict:
+    """Submit this message's template to Meta now (again, after an error)."""
+    message = await _message(session, message_id)
+    submitted = await wa_templates.submit(session, message, actor=actor)
+    return await _message_view(session, message, submitted)
+
+
+@router.post("/templates/leftovers/dismiss")
+async def dismiss_leftover(body: dict = Body(...), session: AsyncSession = Depends(get_session),
+                           actor: str = Depends(nudge_actor)) -> dict:
+    """Taken off the list of templates to delete in Gallabox (done by hand)."""
+    await wa_templates.dismiss(session, str(body.get("name") or ""))
+    return {"dismissed": True}
 
 
 @router.delete("/messages/{message_id}")
 async def delete_message(message_id: str, session: AsyncSession = Depends(get_session),
                          actor: str = Depends(nudge_actor)) -> dict:
-    await library.delete_message(session, await _message(session, message_id), actor=actor)
-    return {"deleted": True}
+    message = await _message(session, message_id)
+    template = await wa_templates.remove(session, message)
+    await library.delete_message(session, message, actor=actor)
+    return {"deleted": True, "template": template}
 
 
 @router.post("/messages/{message_id}/duplicate", status_code=status.HTTP_201_CREATED)
