@@ -28,6 +28,31 @@ once it's saved: add a new one and choose it instead. **Remove** takes an
 unused message off the list. The template stays in Gallabox until it's
 deleted there.
 
+### Messages already approved on WhatsApp
+
+The 54 SMO follow-up messages (`smo_m1_01` to `smo_m6_09`) are already
+approved. While any of them is not in your list, a bar at the top of the
+Messages tab says how many there are. Use **Add all** to add them, or **Show
+them** to tick the ones you want and add those. No approval is needed,
+and they can be chosen in rules and sequences straight away. They have no
+buttons: the text asks the customer to send ORDER FOOD, and typing *later*
+or *no* works as it does for a tapped button. Only approved marketing
+templates named `smo_...` or `shero_nudge_...` with no variables and no link
+button are offered, since anything else needs values the nudges don't have.
+
+### Knowing what is approved
+
+* Each message shows **Approved**, **Waiting for approval**, **Rejected**
+  or **Not on WhatsApp**. A waiting badge checks again every 30 seconds
+  and turns Approved by itself. **Check approval now** asks Gallabox
+  straight away.
+* The **Messages** tab shows how many messages are waiting.
+* If a rule or sequence that is on uses a message that isn't approved, a
+  warning at the top of every tab names it. Those steps wait until Meta
+  approves it.
+* In the rule and sequence lists, an unapproved message is marked *not
+  approved yet*.
+
 ## Targeting Rules
 
 One row per stage of the ordering funnel (New Enquiry, Cart Created,

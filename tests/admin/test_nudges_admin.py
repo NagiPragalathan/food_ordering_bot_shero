@@ -132,3 +132,43 @@ async def test_the_leads_tab_shows_who_got_what(admin, session, customer):
         assert word in page, word
     assert "Asha Menon" in admin.get("/admin/nudges?tab=leads&bucket=later").text
     assert "Asha Menon" not in admin.get("/admin/nudges?tab=leads&bucket=no").text.split("Messages sent")[0]
+
+
+SMO = [{"name": "smo_m1_01", "text": "Rice is sorted for today's meal? Send ORDER FOOD on WhatsApp.",
+        "buttons": [], "source": "whatsapp"},
+       {"name": "smo_m1_02", "text": "Same rice. Different curry. Send ORDER FOOD to explore the menu.",
+        "buttons": [], "source": "whatsapp"}]
+
+
+async def test_approved_whatsapp_messages_can_be_added(admin, session, monkeypatch):
+    async def addable(taken):
+        return [m for m in SMO if m["name"] not in taken]
+
+    monkeypatch.setattr(messages, "addable", addable)
+    page = admin.get("/admin/nudges?tab=messages").text
+    assert "2 approved messages already on WhatsApp" in page and "Add all 2" in page
+
+    admin.post("/admin/nudges/messages/from-whatsapp", data={"names": ["smo_m1_02"]})
+    admin.post("/admin/nudges/messages/from-whatsapp", data={"all": "on"})
+    cfg = await config.load(session)
+    assert [m.name for m in cfg.messages] == ["smo_m1_02", "smo_m1_01"]
+    assert cfg.messages[0].source == "whatsapp" and cfg.messages[0].button_labels == ()
+    page = admin.get("/admin/nudges?tab=messages").text
+    assert "added from WhatsApp" in page and "No buttons: the customer sends ORDER FOOD" in page
+    assert "Same rice. Different curry. Send ORDER FOOD" in admin.get("/admin/nudges?tab=rules").text
+
+
+async def test_a_rule_waiting_for_approval_is_shown(admin, session, monkeypatch):
+    add_message(admin)
+    admin.post("/admin/nudges/rules", data={
+        f"active_{CART}": "on", f"wait_{CART}": "2", f"message_{CART}": "shero_nudge_cart_reminder"})
+
+    async def pending(*, fresh=False):
+        return {"shero_nudge_cart_reminder": "pending"}
+
+    monkeypatch.setattr(messages, "statuses", pending)
+    page = admin.get("/admin/nudges?tab=rules").text
+    assert "1 waiting" in page and "1 message your rules use is not approved by WhatsApp yet" in page
+    assert 'data-state="pending"' in page
+    assert admin.get("/admin/nudges/statuses").json() == {
+        "statuses": {"shero_nudge_cart_reminder": "pending"}}

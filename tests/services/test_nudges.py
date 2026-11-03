@@ -342,3 +342,34 @@ def test_a_message_is_a_template_with_the_three_buttons():
     assert spec.category == "MARKETING" and spec.quick_replies == ("Order Food", "Later", "No")
     assert spec.params == ("customer_name",) and spec.sample_body.startswith("Hi {{1}},")
     assert messages.name_for("Cart reminder!", {"shero_nudge_cart_reminder"}) == "shero_nudge_cart_reminder_2"
+
+
+def test_which_whatsapp_templates_can_be_added():
+    body = {"type": "BODY", "text": "Rice is sorted? Send ORDER FOOD on WhatsApp."}
+    row = {"name": "smo_m1_01", "status": "APPROVED", "category": "MARKETING", "components": [body]}
+    assert messages.from_template(row) == {"name": "smo_m1_01", "text": body["text"],
+                                           "buttons": [], "source": "whatsapp"}
+    replies = {"type": "BUTTONS", "buttons": [{"type": "QUICK_REPLY", "text": "Order Food"}]}
+    assert messages.from_template({**row, "components": [body, replies]})["buttons"] == ["Order Food"]
+    link = {"type": "BUTTONS", "buttons": [{"type": "URL", "text": "Order", "url": "https://x/{{1}}"}]}
+    for refused in ({**row, "components": [body, link]},                       # needs a link value
+                    {**row, "components": [{"type": "BODY", "text": "Hi {{1}}, hungry?"}]},
+                    {**row, "status": "PENDING"}, {**row, "category": "UTILITY"}):
+        assert messages.from_template(refused) is None
+
+
+async def test_a_message_from_whatsapp_goes_without_buttons(session, customer, phone):
+    data = (await switch_on(session)).model_dump()
+    data["messages"].append({"name": "smo_m1_01", "text": "Rice is sorted? Send ORDER FOOD on WhatsApp.",
+                             "buttons": [], "source": "whatsapp"})
+    for rule in data["rules"]:
+        if rule["stage"] == CART:
+            rule["message"] = "smo_m1_01"
+    await config.save(session, data, "test")
+    at_stage(customer, CART, hours_ago=5)
+
+    await runner.run(session, NOW)
+    assert phone.nudges() == ["smo_m1_01"]
+    assert phone.sent[-1].payload == {"values": [], "buttons": ()}
+    assert messages.spec(Message(name="smo_m1_01", text="Rice is sorted? Send ORDER FOOD.",
+                                 buttons=[])).button_kind == "none"

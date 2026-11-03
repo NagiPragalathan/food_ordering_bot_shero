@@ -40,6 +40,8 @@ DEFAULT_WAIT_HOURS: dict[str, int] = {
                          LeadStage.PAYMENT_FAILED)}
 MAX_HOURS = 24 * 90
 NAME_RE = re.compile(r"^[a-z0-9_]{3,100}$")
+# The buttons on a message written on the Nudges page (services/nudges/replies.py).
+BUTTONS = ("Order Food", "Later", "No")
 
 
 class NudgeConfigError(ValueError):
@@ -47,12 +49,32 @@ class NudgeConfigError(ValueError):
 
 
 class Message(BaseModel):
-    """One WhatsApp template. Its text may hold {name}, the customer's first name."""
+    """One WhatsApp template. Its text may hold {name}, the customer's first name.
+
+    Written on the page: it has the three BUTTONS. Added from WhatsApp (an
+    approved template already there, such as the 54 SMO messages): it keeps
+    the quick replies it was approved with - often none, the text asking the
+    customer to send ORDER FOOD."""
 
     name: str
-    text: str = Field(min_length=10, max_length=900)
+    text: str = Field(min_length=10, max_length=1024)
+    label: str | None = Field(default=None, max_length=80)
+    buttons: list[str] | None = None          # None: BUTTONS
+    source: Literal["page", "whatsapp"] = "page"
     created_at: datetime | None = None
     created_by: str | None = None
+
+    @property
+    def button_labels(self) -> tuple[str, ...]:
+        return BUTTONS if self.buttons is None else tuple(self.buttons)
+
+    @property
+    def title(self) -> str:
+        """What the team calls it: its label, or the start of its text."""
+        if self.label:
+            return self.label
+        first = next((line.strip() for line in self.text.splitlines() if line.strip()), self.name)
+        return first if len(first) <= 60 else first[:57].rstrip() + "..."
 
     @field_validator("name")
     @classmethod

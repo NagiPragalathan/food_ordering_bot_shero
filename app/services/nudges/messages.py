@@ -25,8 +25,10 @@ from app.services.nudges.config import Message
 
 log = get_logger(__name__)
 
-BUTTONS = ("Order Food", "Later", "No")
 PREFIX = "shero_nudge_"
+# Approved templates that can be added to the list as they are: the 54 SMO
+# follow-ups, and messages once made here.
+ADDABLE = ("smo_", PREFIX)
 STATUS_SECONDS = 60
 # Gallabox's words for a template's state -> the page's.
 STATES = {"approved": "approved", "pending": "pending", "in_review": "pending",
@@ -52,7 +54,8 @@ def spec(message: Message) -> TemplateSpec:
         name=message.name, category="MARKETING", trigger="nudge",
         params=("customer_name",) if has_name else (),
         sample_body=message.text.replace("{name}", "{{1}}"),
-        button_kind="quick_reply", quick_replies=BUTTONS)
+        button_kind="quick_reply" if message.button_labels else "none",
+        quick_replies=message.button_labels)
 
 
 def values(message: Message, customer: Customer) -> tuple[str, ...]:
@@ -60,6 +63,40 @@ def values(message: Message, customer: Customer) -> tuple[str, ...]:
         return ()
     first = (customer.name or "").strip().split(" ")[0]
     return (first or "there",)
+
+
+def from_template(row: dict) -> dict | None:
+    """A message from an approved template on Gallabox, or None when it can't
+    be sent as it is: a variable or a link button needs values the nudges
+    don't have."""
+    if str(row.get("status") or "").lower() != "approved" or row.get("category") != "MARKETING":
+        return None
+    body, buttons = "", []
+    for part in row.get("components") or []:
+        if part.get("type") == "BODY":
+            body = str(part.get("text") or "")
+        elif part.get("type") in ("HEADER", "FOOTER") and "{{" in str(part.get("text") or ""):
+            return None
+        elif part.get("type") == "HEADER" and part.get("format") not in (None, "TEXT"):
+            return None
+        elif part.get("type") == "BUTTONS":
+            for button in part.get("buttons") or []:
+                if button.get("type") != "QUICK_REPLY":
+                    return None
+                buttons.append(str(button.get("text") or ""))
+    if not body.strip() or "{{" in body:
+        return None
+    return {"name": row["name"], "text": body.strip(), "buttons": buttons, "source": "whatsapp"}
+
+
+async def addable(taken: set[str]) -> list[dict] | None:
+    """Approved templates that can join the list, not in it yet (None: Gallabox
+    couldn't be asked)."""
+    if await statuses() is None:
+        return None
+    found = (from_template(r) for r in _cache["rows"] or []
+             if str(r.get("name", "")).startswith(ADDABLE) and r.get("name") not in taken)
+    return sorted((m for m in found if m), key=lambda m: m["name"])
 
 
 def preview(message: Message) -> str:

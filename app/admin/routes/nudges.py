@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +22,7 @@ from app.core.logging import get_logger
 from app.db.models import AdminUser, Customer, NudgeBucket, NudgeLead, NudgeSend
 from app.db.session import get_session
 from app.services.nudges import config, messages
-from app.services.nudges.config import BUCKETS, STAGES, Message, NudgeConfigError
+from app.services.nudges.config import BUCKETS, BUTTONS, STAGES, Message, NudgeConfigError
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/nudges", tags=["admin"])
@@ -52,17 +53,34 @@ def _int(value, default: int | None = None) -> int | None:
         raise NudgeConfigError(f"{text!r} is not a whole number") from None
 
 
+def _in_use(cfg: config.NudgeSettings) -> set[str]:
+    """Messages a rule or sequence that is on would send."""
+    used = {r.message for r in cfg.rules if r.active and r.message}
+    for seq in cfg.sequences.values():
+        if seq.active:
+            used |= {n for n in (seq.first_message, seq.follow_up_message) if n}
+    return used
+
+
 @router.get("", name="admin_nudges")
 async def nudges_page(request: Request, tab: str = "rules", stage: str | None = None,
                       bucket: str | None = None, page: int | str | None = None,
-                      session: AsyncSession = Depends(get_session),
+                      fresh: bool = False, session: AsyncSession = Depends(get_session),
                       current_user: AdminUser = Depends(require_admin)):
     tab = tab if tab in TABS else "rules"
     cfg = await config.load(session)
-    statuses = await messages.statuses()
-    context = {"current_user": current_user, "tab": tab, "tabs": TABS, "cfg": cfg, "statuses": statuses, "stages": STAGES,
-               "buckets": BUCKETS, "bucket_names": BUCKET_NAMES, "preview": messages.preview,
-               "buttons": messages.BUTTONS, "hours": range(0, 25)}
+    statuses = await messages.statuses(fresh=fresh)
+    # Not approved yet (or refused): the page counts them, and warns when a
+    # rule that is on would send one.
+    waiting = [m.name for m in cfg.messages
+               if statuses is not None and statuses.get(m.name) != "approved"]
+    context = {"current_user": current_user, "tab": tab, "tabs": TABS, "cfg": cfg,
+               "statuses": statuses, "stages": STAGES, "buckets": BUCKETS,
+               "bucket_names": BUCKET_NAMES, "preview": messages.preview, "buttons": BUTTONS,
+               "hours": range(0, 25), "waiting": waiting,
+               "blocked": sorted(_in_use(cfg) & set(waiting))}
+    if tab == "messages":
+        context["addable"] = await messages.addable({m.name for m in cfg.messages})
     if tab == "leads":
         context.update(await _leads(session, cfg, stage=stage, bucket=bucket, page=page))
         context["url_with"] = partial(listing.url_with, request)
@@ -194,7 +212,7 @@ async def add_message(request: Request, session: AsyncSession = Depends(get_sess
     known = await messages.statuses(fresh=True) or {}
     name = messages.name_for(label, {m.name for m in cfg.messages} | set(known))
     try:
-        message = Message(name=name, text=text, created_at=datetime.now(timezone.utc),
+        message = Message(name=name, text=text, label=label[:80], created_at=datetime.now(timezone.utc),
                           created_by=current_user.email)
     except ValueError as exc:
         return redirect(_url(request, "messages"),
@@ -209,6 +227,42 @@ async def add_message(request: Request, session: AsyncSession = Depends(get_sess
         current_user.email, "messages",
         f"Saved {name} and sent it to WhatsApp for approval ({status}). It can be used in a "
         f"rule once approved, usually within a few minutes to a day.")
+
+
+@router.get("/statuses", name="admin_nudges_statuses")
+async def message_statuses(session: AsyncSession = Depends(get_session),
+                           current_user: AdminUser = Depends(require_admin)):
+    """Each listed message's approval, asked of Gallabox now: the page polls
+    this while a message waits, so its badge turns Approved by itself."""
+    cfg = await config.load(session)
+    statuses = await messages.statuses(fresh=True)
+    if statuses is None:
+        return JSONResponse({"statuses": None})
+    return JSONResponse({"statuses": {m.name: statuses.get(m.name, "missing")
+                                      for m in cfg.messages}})
+
+
+@router.post("/messages/from-whatsapp", name="admin_nudges_message_import")
+async def add_from_whatsapp(request: Request, session: AsyncSession = Depends(get_session),
+                            current_user: AdminUser = Depends(require_admin)):
+    """Add approved templates already on WhatsApp (the SMO messages) to the list."""
+    form = await request.form()
+    cfg = await config.load(session)
+    addable = await messages.addable({m.name for m in cfg.messages})
+    if addable is None:
+        return redirect(_url(request, "messages"), flash=(
+            "error", "Gallabox could not be reached, so nothing was added. Try again shortly."))
+    wanted = set(form.getlist("names"))
+    chosen = addable if form.get("all") == "on" else [m for m in addable if m["name"] in wanted]
+    if not chosen:
+        return redirect(_url(request, "messages"), flash=("error", "Tick the messages to add."))
+    now = datetime.now(timezone.utc)
+    data = cfg.model_dump()
+    data["messages"] = [*data["messages"], *({**m, "created_at": now,
+                                              "created_by": current_user.email} for m in chosen)]
+    return await _save(request, session, data, current_user.email, "messages",
+                       f"Added {len(chosen)} approved message{'s' if len(chosen) != 1 else ''} "
+                       f"from WhatsApp. Choose them in your rules and sequences.")
 
 
 @router.post("/messages/{name}/remove", name="admin_nudges_message_remove")
