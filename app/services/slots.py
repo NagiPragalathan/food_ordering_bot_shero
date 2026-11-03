@@ -270,10 +270,11 @@ async def ensure_slots(session: AsyncSession, outlet: Outlet, *,
     tz = _outlet_tz(outlet)
     today = datetime.now(tz).date()
 
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     existing_result = await session.execute(
         select(DeliverySlot.starts_at).where(
             DeliverySlot.outlet_id == outlet.id,
-            DeliverySlot.starts_at >= datetime.now(timezone.utc) - timedelta(hours=1),
+            DeliverySlot.starts_at >= cutoff,
         )
     )
     existing = {as_utc(dt).astimezone(timezone.utc)
@@ -283,7 +284,10 @@ async def ensure_slots(session: AsyncSession, outlet: Outlet, *,
     for offset in range(days_ahead + 1):
         day = today + timedelta(days=offset)
         for start, end in _windows_for_day(outlet, day, tz):
-            if start.astimezone(timezone.utc) in existing:
+            # A window already under way is never offered. Older ones are not
+            # in `existing`, so making them again duplicated today's past slots
+            # on every call.
+            if start.astimezone(timezone.utc) < cutoff or start.astimezone(timezone.utc) in existing:
                 continue
             session.add(DeliverySlot(
                 outlet_id=outlet.id,
