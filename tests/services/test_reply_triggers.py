@@ -325,7 +325,7 @@ async def test_loyalty_balance_commands_work_in_keyword_mode(session, keywords, 
     assert decision.answer and not decision.fresh_start
 
 
-# --- offers and opt-out, outside an order -----------------------------------------
+# --- coupon commands, outside an order --------------------------------------------
 async def _save5(session):
     from decimal import Decimal
 
@@ -336,25 +336,20 @@ async def _save5(session):
     await session.flush()
 
 
-async def test_stop_and_coupon_replies_are_answered_outside_an_order(session, keywords):
+async def test_coupon_replies_are_answered_outside_an_order(session, keywords):
     await _save5(session)
     await _customer_at(session, ConversationStep.COMPLETED, quiet_for=timedelta(days=3))
 
-    for message in ("STOP", "Start offers", "offers", "save5", "apply SAVE5", "remove coupon"):
+    for message in ("offers", "save5", "apply SAVE5", "remove coupon"):
         assert (await rt.decide(session, text(message), NOW)).answer, message
-    # Not a code that exists, or STOP inside a sentence: still the team's.
-    for message in ("apply for a job", "please stop", "code red"):
+    # Not a code that exists, or STOP: still the team's.
+    for message in ("apply for a job", "code red", "STOP"):
         assert not (await rt.decide(session, text(message), NOW)).answer, message
 
 
-async def test_a_stranger_can_still_say_stop(session, keywords):
-    assert (await rt.decide(session, text("STOP"), NOW)).answer
-
-
-async def test_only_stop_reaches_a_chat_with_a_person(session, keywords):
+async def test_coupon_commands_do_not_reach_a_chat_with_a_person(session, keywords):
     await _save5(session)
     await _customer_at(session, ConversationStep.HANDED_OVER, quiet_for=timedelta(minutes=10))
 
-    assert (await rt.decide(session, text("stop"), NOW)).answer
     assert not (await rt.decide(session, text("offers"), NOW)).answer
     assert not (await rt.decide(session, text("SAVE5"), NOW)).answer

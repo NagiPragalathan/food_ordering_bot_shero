@@ -115,8 +115,7 @@ class Settings(BaseSettings):
     meta_graph_version: str = "v21.0"
     meta_catalog_id: str = ""
     meta_system_user_token: str = ""
-    # The WhatsApp Business Account id. With the token above, a deleted nudge
-    # message's template is deleted on Meta too (services/nudges/wa_templates.py).
+    # The WhatsApp Business Account id, for scripts/submit_templates.py --via-meta.
     meta_waba_id: str = ""
     meta_catalog_cache_ttl_seconds: int = 900
 

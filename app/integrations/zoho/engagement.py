@@ -1,14 +1,7 @@
-"""Engagement on a customer's Zoho record: a timeline note and tags.
+"""A timeline note on a customer's Zoho record.
 
-Each WhatsApp nudge is written onto the customer's Lead or Contact, so the
-team sees in Zoho who was reminded, about what, and with which coupon - and
-can build their own Zoho views and workflows on the tags ("Nudge: Abandoned
-cart", "WhatsApp Opt-out"). On a Zoho plan without the Orders module, each
-order is a note here too (services/crm_sync.py).
-
-Zoho creates a tag the first time it is used, so nothing has to be set up.
-The Free edition has no tags: `unsupported` tells that refusal apart, so the
-note that did go in still counts.
+On a Zoho plan without the Orders module, each order is a note on the
+customer's Lead or Contact (services/crm_sync.py).
 """
 
 from __future__ import annotations
@@ -23,7 +16,6 @@ log = get_logger(__name__)
 
 NOTE_TITLE_MAX = 120
 NOTE_MAX = 30000
-TAG_MAX = 50
 
 
 def _record_path(module: str, record_id: str) -> str:
@@ -48,21 +40,3 @@ async def add_note(module: str, record_id: str, *, title: str, content: str) -> 
     log.info("zoho_note_added", module=module, zoho_id=record_id)
     first = ((result or {}).get("data") or [{}])[0]
     return ((first.get("details") or {}).get("id") if isinstance(first, dict) else None)
-
-
-def unsupported(exc: IntegrationError) -> bool:
-    """Zoho refused because this plan has no such feature or module (the
-    Free edition: no tags, no Orders), not because of the request."""
-    text = str(exc)
-    return "NOT_SUPPORTED_FEATURE" in text or "NO_PERMISSION" in text
-
-
-async def add_tags(module: str, record_id: str, tags: list[str]) -> None:
-    names = [t.strip()[:TAG_MAX] for t in tags if t and t.strip()]
-    if not names:
-        return
-    result = await zoho_client.post(
-        f"{_record_path(module, record_id)}/actions/add_tags",
-        json={"tags": [{"name": name} for name in names]})
-    _raise_on_refusal(result, "tags")
-    log.info("zoho_tags_added", module=module, zoho_id=record_id, tags=names)

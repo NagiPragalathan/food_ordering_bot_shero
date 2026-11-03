@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from app.admin import router as admin_router
 from app.admin.deps import NotAuthenticated
 
-from app.api.routes import (cron, health, media_thumbs, nudges, ops, order_addresses,
+from app.api.routes import (cron, health, media_thumbs, ops, order_addresses,
                             order_web, receipts, pay, webhooks_gallabox, webhooks_stripe)
 from app.core.http_cache import ImmutableStaticFiles
 from app.core.config import settings
@@ -133,8 +133,6 @@ app.mount(media.MEDIA_URL_PREFIX,
 # rather than caching a replaced logo forever.
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(ops.router)
-# Retargeting nudges' JSON API, behind the admin Nudges page (docs/nudges.md).
-app.include_router(nudges.router)
 app.include_router(admin_router)
 
 

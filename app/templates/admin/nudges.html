@@ -1,0 +1,314 @@
+{% extends "admin/base.html" %}
+{% import "admin/_macros.html" as ui %}
+{% block title %}Nudges{% endblock %}
+{% block heading %}Nudges{% endblock %}
+{% block subheading %}<p class="text-xs text-stone-500">WhatsApp messages by stage, and the No / Later / No response follow-ups</p>{% endblock %}
+
+{% set field = 'rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20' %}
+{% set num = field ~ ' w-20 tabular-nums' %}
+{% set button = 'rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700' %}
+
+{% macro wa_status(name) -%}
+  {%- if not name -%}
+  {%- elif statuses is none -%}{{ ui.badge('Status unknown') }}
+  {%- elif name not in statuses -%}{{ ui.badge('Not on WhatsApp', 'bad') }}
+  {%- elif statuses[name] == 'approved' -%}{{ ui.badge('Approved', 'good') }}
+  {%- elif statuses[name] == 'pending' -%}{{ ui.badge('Waiting for approval', 'warn') }}
+  {%- else -%}{{ ui.badge(statuses[name] | capitalize, 'bad') }}{%- endif -%}
+{%- endmacro %}
+
+{% macro message_select(name, value, blank='Choose a message') %}
+<select name="{{ name }}" class="{{ field }} max-w-[15rem] pr-8">
+  <option value="">{{ blank }}</option>
+  {% for m in cfg.messages %}
+  <option value="{{ m.name }}" {% if m.name == value %}selected{% endif %}>{{ m.name }}{% if statuses and statuses.get(m.name) != 'approved' %} (not approved yet){% endif %}</option>
+  {% endfor %}
+</select>
+{% endmacro %}
+
+{% macro switch(name, on) %}
+<label class="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-700">
+  <input type="checkbox" name="{{ name }}" {% if on %}checked{% endif %} class="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+  On
+</label>
+{% endmacro %}
+
+{% block content %}
+{# --- On / off and send hours --------------------------------------------- #}
+<form method="post" action="{{ url_for('admin_nudges_settings') }}"
+      class="mb-5 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-stone-200/70 bg-white px-5 py-4 shadow-card">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <label class="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-stone-800">
+    <input type="checkbox" name="enabled" {% if cfg.enabled %}checked{% endif %} class="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+    Nudges on
+  </label>
+  {{ ui.badge('Sending', 'good') if cfg.enabled else ui.badge('Off: nothing is sent', 'warn') }}
+  <span class="text-sm text-stone-600">Send between
+    <select name="send_from" class="{{ field }}">{% for h in hours if h < 24 %}<option value="{{ h }}" {% if h == cfg.send_from %}selected{% endif %}>{{ '%02d' | format(h) }}:00</option>{% endfor %}</select>
+    and
+    <select name="send_to" class="{{ field }}">{% for h in hours if h > 0 %}<option value="{{ h }}" {% if h == cfg.send_to %}selected{% endif %}>{{ '%02d' | format(h) }}:00</option>{% endfor %}</select>
+  </span>
+  <label class="text-sm text-stone-600">Time zone <input name="timezone" value="{{ cfg.timezone }}" class="{{ field }} w-44"></label>
+  <label class="inline-flex items-center gap-2 text-sm text-stone-600">
+    <input type="checkbox" name="zoho_sync" {% if cfg.zoho_sync %}checked{% endif %} class="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+    Write to Zoho
+  </label>
+  <button class="{{ button }} ml-auto">Save</button>
+</form>
+
+{# --- Tabs -------------------------------------------------------------------- #}
+<nav class="mb-5 inline-flex flex-wrap gap-1 rounded-xl bg-stone-100 p-1">
+  {% for key, label in tabs.items() %}
+  <a href="{{ url_for('admin_nudges') }}?tab={{ key }}"
+     class="rounded-lg px-4 py-1.5 text-sm font-medium {{ 'bg-white text-stone-900 shadow-sm' if tab == key else 'text-stone-600 hover:text-stone-900' }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == 'rules' %}
+{# --- Targeting rules ------------------------------------------------------- #}
+<form method="post" action="{{ url_for('admin_nudges_rules') }}">
+<section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="border-b border-stone-100 px-5 py-4">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-700">Stage retargeting</h2>
+    <p class="mt-0.5 text-xs text-stone-500">Checked every 5 minutes. A message goes once each time a customer enters the stage, inside the send hours.
+      Leave "moved to No response" empty to keep them in the stage. Customers who reached a stage more than 7 days before its wait are left alone.</p>
+  </header>
+  <div class="overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <tr><th class="px-4 py-3">Stage</th><th class="px-4 py-3">Wait time</th><th class="px-4 py-3">Trigger condition</th>
+          <th class="px-4 py-3">Message</th><th class="px-4 py-3">Status</th></tr>
+    </thead>
+    {% for r in cfg.rules %}{% set i = loop.index0 %}
+    <tbody class="border-t border-stone-100 {{ '' if r.active else 'bg-stone-50/40' }}">
+      <tr class="align-top">
+        <td class="px-4 pt-4 font-semibold text-stone-900">{{ r.stage }}</td>
+        <td class="whitespace-nowrap px-4 pt-3"><input name="wait_{{ i }}" type="number" min="1" value="{{ r.wait_hours }}" class="{{ num }}"> hours in stage</td>
+        <td class="px-4 pt-4 text-stone-600">Still in {{ r.stage }}, not yet sent for this stage entry</td>
+        <td class="px-4 pt-3"><div class="flex flex-wrap items-center gap-2">{{ message_select('message_' ~ i, r.message) }} {{ wa_status(r.message) }}</div></td>
+        <td class="px-4 pt-4">{{ switch('active_' ~ i, r.active) }}</td>
+      </tr>
+      <tr class="align-top">
+        <td class="px-4 py-3 text-stone-400">&rarr;</td>
+        <td class="whitespace-nowrap px-4 py-2"><input name="no_response_{{ i }}" type="number" min="1" value="{{ r.no_response_hours or '' }}" placeholder="never" class="{{ num }}"> hours after that message</td>
+        <td class="px-4 py-3 text-stone-600">Still in {{ r.stage }} &rarr; moved to No response</td>
+        <td class="px-4 py-3 font-mono text-xs text-stone-400">&mdash; (stage move only)</td>
+        <td class="px-4 py-3">{{ ui.badge('Active', 'good') if r.active else ui.badge('Off') }}</td>
+      </tr>
+    </tbody>
+    {% endfor %}
+  </table>
+  </div>
+  <div class="flex items-center justify-between gap-3 border-t border-stone-100 px-5 py-4">
+    <p class="text-xs text-stone-500">No messages yet? Write them on the <a class="font-medium text-brand-700 underline" href="{{ url_for('admin_nudges') }}?tab=messages">Messages</a> tab first.</p>
+    <button class="{{ button }}">Save rules</button>
+  </div>
+</section>
+</form>
+
+{% elif tab == 'sequence' %}
+{# --- No / Later / No response ------------------------------------------- #}
+<form method="post" action="{{ url_for('admin_nudges_sequences') }}">
+<div class="grid gap-5 lg:grid-cols-3">
+  {% for b, label in buckets.items() %}{% set s = cfg.sequences[b] %}
+  <section class="flex flex-col rounded-2xl border border-stone-200/70 bg-white p-5 shadow-card">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold uppercase tracking-wide text-stone-900">{{ label }}</h2>
+      {{ switch(b ~ '_active', s.active) }}
+    </div>
+    <div class="mt-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-stone-500">Entry</div>
+      <div class="text-sm font-medium text-stone-800">
+        {% if b == 'no_response' %}No answer to a stage message in time{% elif b == 'later' %}Tapped Later{% else %}Tapped No{% endif %}
+      </div>
+    </div>
+
+    <h3 class="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">First message</h3>
+    <div class="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-stone-600">
+      After <input name="{{ b }}_first_after" type="number" min="1" value="{{ s.first_after }}" class="{{ num }}">
+      <select name="{{ b }}_first_unit" class="{{ field }}">
+        <option value="hours" {% if s.first_unit == 'hours' %}selected{% endif %}>hours</option>
+        <option value="days" {% if s.first_unit == 'days' %}selected{% endif %}>days</option>
+      </select>
+    </div>
+    <div class="mt-2 flex flex-wrap items-center gap-2">{{ message_select(b ~ '_first_message', s.first_message) }} {{ wa_status(s.first_message) }}</div>
+
+    <h3 class="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Follow-ups</h3>
+    <p class="text-[11px] text-stone-400">Leave "times" empty on the last one to repeat it until Dead Lead.</p>
+    {% for k in range(3) %}{% set p = s.phases[k] if k < s.phases|length else none %}
+    <div class="mt-1.5 flex items-center gap-2 text-sm text-stone-600">
+      Every <input name="{{ b }}_every_{{ k }}" type="number" min="1" value="{{ p.every_days if p else '' }}" class="{{ num }}"> days
+      &times; <input name="{{ b }}_times_{{ k }}" type="number" min="1" value="{{ p.times if p and p.times else '' }}" placeholder="{{ 'repeat' if p else '' }}" class="{{ num }}">
+    </div>
+    {% endfor %}
+    <div class="mt-2 flex flex-wrap items-center gap-2">{{ message_select(b ~ '_follow_up_message', s.follow_up_message, 'Same as the first message') }} {{ wa_status(s.follow_up_message) }}</div>
+
+    <ol class="mt-3 space-y-1 border-l-2 border-stone-200 pl-3 text-sm">
+      {% for when in s.timeline() %}
+      <li class="flex items-center gap-2"><span class="w-24 text-stone-500">{{ when }}</span>{{ ui.badge('Message ' ~ loop.index, 'info') }}</li>
+      {% endfor %}
+      {% if s.repeats %}<li class="text-xs text-stone-400">then repeats every {{ s.phases[-1].every_days }} days</li>{% endif %}
+    </ol>
+
+    <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+      <div class="font-semibold">Dead Lead</div>
+      <div class="mt-1 flex flex-wrap items-center gap-1.5">after <input name="{{ b }}_dead_days" type="number" min="1" value="{{ s.dead_after_days or '' }}" placeholder="never" class="{{ num }}"> days,
+        or <input name="{{ b }}_dead_messages" type="number" min="1" value="{{ s.dead_after_messages or '' }}" placeholder="any" class="{{ num }}"> messages</div>
+    </div>
+
+    {% if b != 'no_response' %}
+    <label class="mt-4 block text-xs font-semibold uppercase tracking-wide text-stone-500">Reply when they tap {{ label }}
+      <textarea name="{{ b }}_reply" rows="3" class="mt-1 block w-full {{ field }} font-normal normal-case tracking-normal">{{ s.reply }}</textarea>
+    </label>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+<div class="mt-5 flex justify-end"><button class="{{ button }}">Save sequences</button></div>
+</form>
+
+{% elif tab == 'messages' %}
+{# --- Messages --------------------------------------------------------------- #}
+<div class="grid gap-5 lg:grid-cols-[22rem_1fr]">
+  <form method="post" action="{{ url_for('admin_nudges_message_add') }}" class="self-start rounded-2xl border border-stone-200/70 bg-white p-5 shadow-card">
+    <h2 class="text-sm font-semibold text-stone-900">New message</h2>
+    <p class="mt-0.5 text-xs text-stone-500">Saved as a WhatsApp template and sent to Meta for approval. Once approved, choose it in a rule or sequence.</p>
+    <label class="mt-4 block text-xs font-medium text-stone-500">Name
+      <input name="label" required maxlength="60" placeholder="e.g. Cart reminder" class="mt-1 block w-full {{ field }}"></label>
+    <label class="mt-3 block text-xs font-medium text-stone-500">Message
+      <textarea name="text" required rows="6" maxlength="900" placeholder="Hi {name}, your Shero meal is still in your cart. Would you like to order it today?" class="mt-1 block w-full {{ field }}"></textarea></label>
+    <p class="mt-1 text-[11px] text-stone-400">{name} becomes the customer's first name. It can't be the first or last word.</p>
+    <div class="mt-3 text-xs text-stone-500">Buttons on every message:
+      <div class="mt-1 flex gap-1.5">{% for b in buttons %}<span class="rounded-md border border-stone-300 bg-stone-50 px-2 py-1 text-xs font-medium text-sky-700">{{ b }}</span>{% endfor %}</div>
+    </div>
+    <button class="{{ button }} mt-4 w-full">Save and send for approval</button>
+  </form>
+
+  <section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+    <header class="border-b border-stone-100 px-5 py-4">
+      <h2 class="text-sm font-semibold text-stone-900">Messages</h2>
+      <p class="mt-0.5 text-xs text-stone-500">{% if statuses is none %}Gallabox could not be reached, so approval is not shown right now.{% else %}Approval as WhatsApp reports it. A message's text can't be changed once sent for approval: add a new one instead.{% endif %}</p>
+    </header>
+    {% if cfg.messages %}
+    <ul class="divide-y divide-stone-100">
+      {% for m in cfg.messages %}{% set used = cfg.uses(m.name) %}
+      <li class="flex flex-wrap items-start gap-4 px-5 py-4">
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs font-semibold text-stone-800">{{ m.name }}</span>{{ wa_status(m.name) }}</div>
+          <p class="mt-1.5 max-w-xl whitespace-pre-line rounded-xl rounded-tl-sm bg-emerald-50 px-3 py-2 text-sm text-stone-800">{{ preview(m) }}</p>
+          <div class="mt-1.5 flex gap-1.5">{% for b in buttons %}<span class="rounded-md border border-stone-200 px-2 py-0.5 text-[11px] text-sky-700">{{ b }}</span>{% endfor %}</div>
+          <p class="mt-1.5 text-xs text-stone-500">{% if used %}Used by: {{ used | join(', ') }}{% else %}Not used yet{% endif %}</p>
+        </div>
+        {% if not used %}
+        <form method="post" action="{{ url_for('admin_nudges_message_remove', name=m.name) }}" onsubmit="return confirm('Remove {{ m.name }} from the list?')">
+          <button class="rounded-lg px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-50">Remove</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ ui.empty('No messages yet. Write the first one on the left.') }}{% endif %}
+  </section>
+</div>
+
+{% else %}
+{# --- Leads: who got what ----------------------------------------------- #}
+{% macro send_badge(s) -%}
+  {%- if s.status == 'failed' -%}<span title="{{ s.error }}">{{ ui.badge('Failed', 'bad') }}</span>
+  {%- elif s.delivery_status == 'read' -%}{{ ui.badge('Read', 'good') }}
+  {%- elif s.delivery_status == 'delivered' -%}{{ ui.badge('Delivered', 'good') }}
+  {%- elif s.delivery_status == 'failed' -%}{{ ui.badge('Not delivered', 'bad') }}
+  {%- else -%}{{ ui.badge('Sent', 'info') }}{%- endif -%}
+{%- endmacro %}
+{% macro about(kind, stage, attempt) -%}
+  {%- if kind == 'stage' %}{{ stage }}{% else %}{{ bucket_names.get(kind, kind) }} · message {{ attempt }}{% endif -%}
+{%- endmacro %}
+{% set leads_url = url_for('admin_nudges') ~ '?tab=leads' %}
+
+<div class="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+  {% for b, label in bucket_names.items() %}
+  <a href="{{ leads_url }}&bucket={{ b }}" class="block {{ 'ring-2 ring-brand-500 rounded-2xl' if bucket == b else '' }}">
+    {{ ui.stat(label, in_bucket.get(b, 0), 'in this bucket', 'warn' if b == 'dead' else 'default') }}</a>
+  {% endfor %}
+</div>
+
+<section class="mb-5 rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="border-b border-stone-100 px-5 py-4"><h2 class="text-sm font-semibold text-stone-900">By stage</h2>
+    <p class="mt-0.5 text-xs text-stone-500">Customers in each stage now, and how many got that stage's message. Click a stage to see them.</p></header>
+  <div class="overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <tr><th class="px-4 py-2.5">Stage</th><th class="px-4 py-2.5 text-right">In stage now</th><th class="px-4 py-2.5 text-right">Message sent</th><th class="px-4 py-2.5">Rule</th></tr></thead>
+    <tbody class="divide-y divide-stone-100">
+      {% for r in cfg.rules %}
+      <tr class="{{ 'bg-brand-50/50' if stage == r.stage else '' }}">
+        <td class="px-4 py-2.5"><a class="font-medium text-brand-700 hover:underline" href="{{ leads_url }}&stage={{ r.stage | urlencode }}">{{ r.stage }}</a></td>
+        <td class="px-4 py-2.5 text-right tabular-nums">{{ in_stage.get(r.stage, 0) }}</td>
+        <td class="px-4 py-2.5 text-right tabular-nums">{{ sent_in_stage.get(r.stage, 0) }}</td>
+        <td class="px-4 py-2.5 text-xs text-stone-500">{% if r.active %}{{ ui.badge('On', 'good') }} after {{ r.wait_hours }}h · {{ r.message }}{% else %}{{ ui.badge('Off') }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="mb-5 rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-5 py-4">
+    <div><h2 class="text-sm font-semibold text-stone-900">Leads{% if stage %} in {{ stage }}{% elif bucket %} in {{ bucket_names[bucket] }}{% endif %}</h2>
+      <p class="mt-0.5 text-xs text-stone-500">Everyone the nudges are working on, with their last message and what happens next.</p></div>
+    {% if stage or bucket %}<a href="{{ leads_url }}" class="text-xs font-medium text-brand-700 hover:underline">Show everyone</a>{% endif %}
+  </header>
+  {% if rows %}
+  <div class="overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <tr><th class="px-4 py-2.5">Customer</th><th class="px-4 py-2.5">Stage</th><th class="px-4 py-2.5">Bucket</th>
+          <th class="px-4 py-2.5">Last message</th><th class="px-4 py-2.5">Next</th></tr></thead>
+    <tbody class="divide-y divide-stone-100">
+      {% for c, lead in rows %}{% set s = last.get(c.id) %}
+      <tr class="align-top">
+        <td class="px-4 py-2.5"><div class="font-medium text-stone-900">{{ c.name or 'No name' }}</div><div class="font-mono text-xs text-stone-500">+{{ c.whatsapp_number }}</div></td>
+        <td class="px-4 py-2.5">{{ lead.stage }}</td>
+        <td class="px-4 py-2.5">{% if lead.bucket %}{{ ui.badge(bucket_names.get(lead.bucket, lead.bucket), 'bad' if lead.bucket == 'dead' else 'warn') }}
+          <div class="mt-0.5 text-xs text-stone-500">{{ lead.attempts }} sent{% if lead.bucket_from %} · from {{ lead.bucket_from }}{% endif %}</div>{% else %}<span class="text-stone-400">&mdash;</span>{% endif %}</td>
+        <td class="px-4 py-2.5">{% if s %}<div class="flex flex-wrap items-center gap-1.5"><span class="font-mono text-xs">{{ s.template }}</span>{{ send_badge(s) }}{% if s.reply %}{{ ui.badge('Tapped ' ~ s.reply, 'info') }}{% endif %}</div>
+          <div class="text-xs text-stone-500">{{ local(s.sent_at) }} · {{ about(s.kind, s.stage, s.attempt) }}</div>{% else %}<span class="text-xs text-stone-400">Nothing sent yet</span>{% endif %}</td>
+        <td class="px-4 py-2.5 text-xs">{% if lead.waiting %}<span class="text-amber-700">{{ lead.waiting }}</span>{% endif %}
+          {% if lead.next_due_at %}<div class="text-stone-600">{{ local(lead.next_due_at) }}</div>{% elif not lead.waiting and lead.bucket != 'dead' %}<span class="text-stone-400">&mdash;</span>{% endif %}
+          {% if lead.zoho_error %}<div class="text-red-600" title="{{ lead.zoho_error }}">Zoho: not updated</div>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ ui.pager(pager, url_with) }}
+  {% else %}{{ ui.empty('Nobody here yet. Leads appear once a rule is on and a customer reaches its stage.') }}{% endif %}
+</section>
+
+<section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="border-b border-stone-100 px-5 py-4"><h2 class="text-sm font-semibold text-stone-900">Messages sent</h2>
+    <p class="mt-0.5 text-xs text-stone-500">The latest 100{% if stage %} for {{ stage }}{% elif bucket %} in {{ bucket_names[bucket] }}{% endif %}. Delivered and Read show once Gallabox reports them.</p></header>
+  {% if sends %}
+  <div class="overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <tr><th class="px-4 py-2.5">When</th><th class="px-4 py-2.5">Customer</th><th class="px-4 py-2.5">For</th><th class="px-4 py-2.5">Message</th><th class="px-4 py-2.5">Status</th><th class="px-4 py-2.5">Reply</th></tr></thead>
+    <tbody class="divide-y divide-stone-100">
+      {% for s, c in sends %}
+      <tr>
+        <td class="whitespace-nowrap px-4 py-2.5 text-xs text-stone-600">{{ local(s.sent_at) }}</td>
+        <td class="px-4 py-2.5">{{ c.name or 'No name' }} <span class="font-mono text-xs text-stone-500">+{{ c.whatsapp_number }}</span></td>
+        <td class="px-4 py-2.5 text-xs">{{ about(s.kind, s.stage, s.attempt) }}</td>
+        <td class="px-4 py-2.5 font-mono text-xs">{{ s.template }}</td>
+        <td class="px-4 py-2.5">{{ send_badge(s) }}{% if s.error %}<div class="max-w-xs truncate text-xs text-red-600" title="{{ s.error }}">{{ s.error }}</div>{% endif %}</td>
+        <td class="px-4 py-2.5">{{ ui.badge(s.reply, 'info') if s.reply else '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}{{ ui.empty('No messages sent yet.') }}{% endif %}
+</section>
+{% endif %}
+{% endblock %}

@@ -62,8 +62,7 @@ def start_scheduler() -> AsyncIOScheduler:
         id="kitchen_alerts", max_instances=1, coalesce=True,
         misfire_grace_time=300,
     )
-    # Retargeting nudges. Off unless switched on (services/nudges); a cart
-    # reminder five minutes late is still on time.
+    # Nudges by stage. Off until switched on on the Nudges page.
     scheduler.add_job(
         jobs.send_nudges, IntervalTrigger(minutes=5),
         id="nudges", max_instances=1, coalesce=True,

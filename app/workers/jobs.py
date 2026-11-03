@@ -7,7 +7,7 @@ Five things happen on a clock rather than in response to a message:
   * the post-delivery feedback request               (spec step 19)
   * topping up delivery slots for the days ahead     (spec step 13)
   * picking up settings saved on another instance
-  * retargeting nudges, only while switched on       (services/nudges)
+  * nudges by stage, only while switched on        (services/nudges)
 
 Each job opens its own session, handles one order at a time and never lets a
 single failure abort the batch - one broken order must not stop the other
@@ -144,13 +144,14 @@ async def send_kitchen_alerts() -> int:
 
 
 async def send_nudges() -> int:
-    """Retargeting nudges (services/nudges). Does nothing at all while the
-    master switch is off; every rule, cap and quiet hour is checked inside."""
+    """Nudges by stage (services/nudges). Does nothing at all while they are
+    switched off on the Nudges page."""
     from app.services.nudges import runner
 
     async with session_scope() as session:
         try:
-            return await runner.run_scheduled(session)
+            counts = await runner.run(session)
+            return counts.get("sent", 0)
         except Exception as exc:  # noqa: BLE001 - never kill the scheduler
             log.error("nudge_job_failed", error=str(exc))
             return 0

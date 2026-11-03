@@ -18,19 +18,7 @@ from app.db.models.enums import (
 )
 from app.db.models.menu import Category, Cuisine, MenuItem
 from app.db.models.loyalty import LoyaltyAccount, LoyaltyEntry
-from app.db.models.nudge import (
-    FlowStatus,
-    NudgeSkip,
-    JourneyBucket,
-    JourneyStatus,
-    NudgeCampaign,
-    NudgeJourney,
-    NudgeKind,
-    NudgeMessage,
-    NudgeSend,
-    NudgeSettings,
-    NudgeStatus,
-)
+from app.db.models.nudge import NudgeBucket, NudgeLead, NudgeSend
 from app.db.models.order import Order
 from app.db.models.outlet import Outlet
 from app.db.models.payout import PartnerPayout
@@ -51,22 +39,14 @@ __all__ = [
     "DELIVERY_DETAIL_SEQUENCE",
     "DeliverySlot",
     "DiscountType",
-    "FlowStatus",
     "InboundMessage",
-    "JourneyBucket",
-    "JourneyStatus",
     "LeadStage",
     "MenuItem",
     "LoyaltyAccount",
     "LoyaltyEntry",
-    "NudgeCampaign",
-    "NudgeJourney",
-    "NudgeKind",
-    "NudgeMessage",
+    "NudgeBucket",
+    "NudgeLead",
     "NudgeSend",
-    "NudgeSettings",
-    "NudgeSkip",
-    "NudgeStatus",
     "Order",
     "OrderStage",
     "Outlet",

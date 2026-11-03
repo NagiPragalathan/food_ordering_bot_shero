@@ -186,24 +186,21 @@ async def decide(session: AsyncSession, event: InboundEvent,
     if in_flow:
         return Decision(True, "order in progress")
     if await _answered_anyway(session, event.whatsapp_number, message):
-        return Decision(True, "opt-out or coupon")
+        return Decision(True, "coupon or nudge reply")
     return Decision(False, "no trigger")
 
 
 async def _answered_anyway(session: AsyncSession, number: str, message: str) -> bool:
-    """STOP / START OFFERS (services/nudges/optout.py), coupon commands
-    (handlers/coupons.py) and LATER / NO to a follow-up (nudges/followup.py)
-    are answered outside an order too: the customer's say over offers, or a
-    reply to one. Only STOP reaches a chat that is with a person."""
+    """Coupon commands (handlers/coupons.py) and Later / No / STOP answering
+    a nudge (services/nudges/replies.py) are answered outside an order too,
+    except in a chat that is with a person."""
     from app.services.conversation.handlers import coupons
-    from app.services.nudges import followup, optout
+    from app.services.nudges import replies
 
-    if await optout.keyword(session, message):
-        return True
     if await _with_a_person(session, number):
         return False
     return (await coupons.is_command(session, message)
-            or await followup.is_reply(session, number, message))
+            or await replies.is_reply(session, number, message))
 
 
 async def _with_a_person(session: AsyncSession, number: str) -> bool:
