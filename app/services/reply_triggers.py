@@ -29,6 +29,10 @@ their name and email still gets it (onboarding.show_main_menu).
 
 Anything else is left alone - no customer record, no reply, no Zoho lead - and
 reaches the team in Gallabox exactly as if the bot were not there.
+
+With the welcome menu on (services/welcome_menu.py), a new chat's first such
+message gets the menu instead, whose buttons start this bot or are left to a
+Gallabox flow; while that flow runs, the bot stays out of the chat.
 """
 
 from __future__ import annotations
@@ -93,6 +97,11 @@ class Decision:
     fresh_start: bool = False
     # The matched trigger's reply (REPLIES); "" when no trigger matched.
     reply: str = ""
+    # For the webhook, with the welcome menu on: send the menu, or note that
+    # the customer picked a Gallabox flow (welcome_menu.SEND / LEFT_TO_GALLABOX).
+    action: str = ""
+    # The welcome menu button behind the decision, if any.
+    label: str = ""
 
 
 # --- the stored list ---------------------------------------------------------
@@ -175,23 +184,45 @@ async def decide(session: AsyncSession, event: InboundEvent,
     """Should the bot answer this message? Reads, never creates, records."""
     if mode() == ANY or not event.is_actionable:
         return Decision(True, "any message")
-    if event.reply_id:
-        return Decision(True, "button tap")
 
-    message = event.text or ""
+    from app.services import welcome_menu
+    from app.services.conversation.engine import FREE_TEXT_STEPS
+
+    now = now or datetime.now(timezone.utc)
+    number, message = event.whatsapp_number, event.text or ""
+    menu = welcome_menu.active()
+    with_gallabox = False
+    if menu:
+        # A welcome menu button, tapped (on this menu or an older one) or typed.
+        button = menu.button(event.reply_title or event.reply_id or message)
+        if button and button.to_gallabox:
+            return Decision(False, "Gallabox flow", action=welcome_menu.LEFT_TO_GALLABOX,
+                            label=button.label)
+        if button:
+            return Decision(True, "welcome menu", fresh_start=True, reply=button.goes_to,
+                            label=button.label)
+        with_gallabox = await welcome_menu.with_gallabox(session, number, now)
+
+    if event.reply_id:
+        # In a Gallabox flow, its buttons are its own.
+        return Decision(False, "with a Gallabox flow") if with_gallabox \
+            else Decision(True, "button tap")
     if normalise(message) in BUILT_IN:
         return Decision(True, "bot link")
 
-    from app.services.conversation.engine import FREE_TEXT_STEPS
-
-    step = await _in_flow(session, event.whatsapp_number, now or datetime.now(timezone.utc))
+    conversation = await _conversation(session, number)
+    step = _in_flow(conversation, now)
     trigger = matching(message)
     if trigger:
         return Decision(True, "trigger", fresh_start=step is None, reply=trigger.reply)
+    if with_gallabox:
+        return Decision(False, "with a Gallabox flow")
     if step in FREE_TEXT_STEPS:
         return Decision(True, "order in progress")
-    if await _answered_anyway(session, event.whatsapp_number, message):
+    if await _answered_anyway(session, number, message):
         return Decision(True, "coupon or nudge reply")
+    if menu and await welcome_menu.due(session, number, now, _last_active(conversation)):
+        return Decision(False, "welcome menu", action=welcome_menu.SEND)
     return Decision(False, "no trigger")
 
 
@@ -217,14 +248,23 @@ async def _with_a_person(session: AsyncSession, number: str) -> bool:
     return step == ConversationStep.HANDED_OVER
 
 
-async def _in_flow(session: AsyncSession, number: str, now: datetime) -> ConversationStep | None:
-    """The step this customer is at, if they are part-way through an order
-    and wrote recently; None otherwise."""
+async def _conversation(session: AsyncSession, number: str) -> Conversation | None:
     customer = await get_customer(session, number)
     if customer is None:
         return None
-    conversation = (await session.execute(select(Conversation).where(
+    return (await session.execute(select(Conversation).where(
         Conversation.customer_id == customer.id))).scalar_one_or_none()
+
+
+def _last_active(conversation: Conversation | None) -> datetime | None:
+    if conversation is None:
+        return None
+    return _latest(conversation.last_message_at, conversation.updated_at)
+
+
+def _in_flow(conversation: Conversation | None, now: datetime) -> ConversationStep | None:
+    """The step this customer is at, if they are part-way through an order
+    and wrote recently; None otherwise."""
     if conversation is None:
         return None
     try:
@@ -234,7 +274,7 @@ async def _in_flow(session: AsyncSession, number: str, now: datetime) -> Convers
     # A chat handed to a person is the person's: the bot stays out of it.
     if step in IDLE_STEPS or step is ConversationStep.HANDED_OVER:
         return None
-    last = _latest(conversation.last_message_at, conversation.updated_at)
+    last = _last_active(conversation)
     return step if last is not None and now - last <= timedelta(hours=ACTIVE_HOURS) else None
 
 

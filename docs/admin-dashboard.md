@@ -588,6 +588,38 @@ a keyword saved without `reply` means both). Not
 read from `.env`. The check is `services/reply_triggers.decide`, run by the
 WhatsApp webhook after the whitelist.
 
+### Welcome menu
+
+For a WhatsApp number shared with Gallabox bot flows (Party Order, Sweet &
+Snacks). Gallabox cannot start one of its flows from outside, and a Gallabox
+flow that answers **any keyword** also answers a customer typing their name to
+this bot - so both bots reply at once. The welcome menu replaces that flow:
+
+- **On** (with *Reply to any message* off): a message that no trigger keyword
+  matches, in a **new chat**, gets the menu - a message and up to three
+  buttons. New means none of these in the last 24 hours: the menu, the
+  ordering bot, a Gallabox flow picked from the menu. So it goes once, not to
+  every message.
+- Each button **goes to** the ordering bot (with both welcome messages, only
+  Order Now or only WhatsApp, like a trigger keyword) or **a Gallabox flow**.
+- A Gallabox button gets no reply from the bot. In Gallabox that flow's
+  keyword is the button's label, so the tap starts it there. For 24 hours
+  after, the bot stays out of the chat: the flow's questions and buttons are
+  Gallabox's. Typing a trigger keyword, or tapping an ordering bot button,
+  brings the bot back.
+- The menu needs no customer record and makes no Zoho lead; only the
+  ordering bot does that, once they pick it.
+- **Test a message** shows a menu button's label as *Starts the bot* or
+  *Left to Gallabox*.
+
+Set up in Gallabox: turn off the flow that answers any keyword (the "Main
+Card"), and give each Gallabox flow its button's exact label as its keyword
+(Party Order US: `Party Order`; Sweet & Snacks: `Sweet & Snacks`).
+
+Stored as `BOT_WELCOME_MENU` (JSON: `{"enabled": true, "text": "...",
+"buttons": [{"label": "Party Order", "goes_to": "gallabox"}]}`); each chat's
+menu and Gallabox pick in `welcome_menu_chats`. Code: `services/welcome_menu.py`.
+
 ### New customers' details
 
 The bot always asks a new customer for their name. **Ask for their email**

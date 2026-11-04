@@ -19,7 +19,7 @@ from app.core.security import verify_gallabox_token
 from app.db.session import get_session
 from app.integrations.gallabox import channel
 from app.schemas.inbound import parse_inbound
-from app.services import allowlist, reply_triggers
+from app.services import allowlist, reply_triggers, welcome_menu
 from app.services.conversation.engine import handle_event
 from app.services.nudges import delivery
 
@@ -91,10 +91,21 @@ async def gallabox_webhook(
     # Keyword mode: a chat only starts the bot on a trigger keyword. Like the
     # whitelist, a message that does not is left for your team untouched.
     decision = await reply_triggers.decide(session, event)
+    number = event.whatsapp_number
+    # The welcome menu: a new chat gets it; a button for a Gallabox flow is
+    # left to that flow (Gallabox starts it on the button's words).
+    if decision.action == welcome_menu.SEND:
+        sent = await welcome_menu.send(session, number)
+        return {"status": "ok" if sent else "ignored", "reason": "welcome menu"}
+    if decision.action == welcome_menu.LEFT_TO_GALLABOX:
+        await welcome_menu.left_to_gallabox(session, number, decision.label)
+        return {"status": "ignored", "reason": "Gallabox flow"}
     if not decision.answer:
         log.info("message_without_trigger", message_id=event.message_id,
-                 number_tail=event.whatsapp_number[-4:])
+                 number_tail=number[-4:], reason=decision.reason)
         return {"status": "ignored", "reason": "no trigger keyword"}
+    if decision.fresh_start:
+        await welcome_menu.back_to_bot(session, number)
 
     log.info("gallabox_webhook_received", kind=str(event.kind),
              message_id=event.message_id, reply_reason=decision.reason)

@@ -25,6 +25,7 @@ from app.db.models.payout import PartnerPayout
 from app.db.models.promotion import DiscountType, Placement, Promotion
 from app.db.models.setting import AdminUser, AppSetting
 from app.db.models.slot import DeliverySlot, SlotHold
+from app.db.models.welcome_menu import WelcomeMenuChat
 
 __all__ = [
     "AdminUser",
@@ -56,4 +57,5 @@ __all__ = [
     "Promotion",
     "SlotHold",
     "SlotHoldStatus",
+    "WelcomeMenuChat",
 ]

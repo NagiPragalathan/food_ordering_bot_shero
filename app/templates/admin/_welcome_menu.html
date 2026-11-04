@@ -1,0 +1,102 @@
+{# Bot replies page: the welcome menu a new chat gets first, and where each
+   button goes. Saved by admin_welcome_menu_save (services/welcome_menu). #}
+{% set gallabox_buttons = welcome.buttons | selectattr('to_gallabox') | list %}
+<form id="menu-form" method="post" action="{{ url_for('admin_welcome_menu_save') }}"
+      class="overflow-hidden rounded-xl border border-stone-200 bg-white lg:col-span-2">
+  <div class="space-y-4 p-5">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h2 class="text-sm font-semibold text-stone-900">Welcome menu</h2>
+        <p class="mt-0.5 text-xs text-stone-500">
+          A new chat gets this menu first. Each button starts the ordering bot or one of your
+          Gallabox flows. Works with <b>Reply to any message</b> off.
+        </p>
+      </div>
+      <label class="relative inline-flex shrink-0 cursor-pointer items-center">
+        <input type="checkbox" id="menu-enabled" name="enabled" value="1" class="peer sr-only"
+               {% if welcome.enabled %}checked{% endif %}>
+        <span class="h-6 w-11 rounded-full bg-stone-300 transition peer-checked:bg-brand-600
+                     peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500/40"></span>
+        <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
+        <span id="menu-label" class="ml-2 w-7 text-xs font-semibold text-stone-700">{{ 'On' if welcome.enabled else 'Off' }}</span>
+      </label>
+    </div>
+
+    {% if welcome.enabled and trigger_mode == 'keywords' %}
+      <div class="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+        <b>On.</b> A message with no trigger keyword gets this menu, once a day: not while the
+        customer is ordering, already got the menu, or is in a Gallabox flow.
+      </div>
+    {% elif welcome.enabled %}
+      <div class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <b>Saved as on, but not sent:</b> Reply to any message is on, so the bot answers every
+        message itself. Switch it off above to use the menu.
+      </div>
+    {% else %}
+      <div class="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-700">
+        <b>Off.</b> A message with no trigger keyword goes to your team in Gallabox.
+      </div>
+    {% endif %}
+
+    <label class="block">
+      <span class="text-xs font-medium text-stone-700">Message</span>
+      <textarea name="text" rows="4" maxlength="{{ text_limit }}"
+                class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">{{ welcome.text }}</textarea>
+    </label>
+
+    <div>
+      <div class="mb-1 hidden grid-cols-[1fr_15rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-stone-400 sm:grid">
+        <span>Button (up to {{ label_limit }} characters)</span><span>Goes to</span>
+      </div>
+      <div class="space-y-2">
+        {% for i in range(3) %}
+          {% set b = welcome.buttons[i] if i < welcome.buttons | length else none %}
+          <div class="grid gap-2 rounded-lg border border-stone-100 p-2 sm:grid-cols-[1fr_15rem] sm:border-0 sm:p-0">
+            <input name="label" value="{{ b.label if b else '' }}" maxlength="{{ label_limit }}"
+                   placeholder="{{ 'Button ' ~ (i + 1) ~ (' (optional)' if i else '') }}" aria-label="Button {{ i + 1 }}"
+                   class="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            <select name="goes_to" aria-label="Button {{ i + 1 }} goes to"
+                    class="rounded-lg border border-stone-300 px-2 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+              {% for value, text in goes_to.items() %}
+              <option value="{{ value }}" {% if (b.goes_to if b else 'gallabox') == value %}selected{% endif %}>{{ text }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        {% endfor %}
+      </div>
+      <p class="mt-2 text-[11px] text-stone-500">Leave a button blank to drop it. WhatsApp shows at most three.</p>
+    </div>
+
+    <div class="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
+      <b>Set up in Gallabox</b>
+      <ol class="mt-1 list-decimal space-y-0.5 pl-4">
+        <li>Turn off the flow that answers <b>any keyword</b> (the Main Card). Otherwise the customer gets both menus.</li>
+        <li>Give each Gallabox flow its button&rsquo;s label as its keyword{% if gallabox_buttons %}:
+          {% for b in gallabox_buttons %}&ldquo;{{ b.label }}&rdquo;{{ ', ' if not loop.last }}{% endfor %}{% endif %}.
+          Tapping the button sends those words, and Gallabox starts the flow.</li>
+        <li>For 24 hours after that tap the bot stays out of the chat, so the flow&rsquo;s questions and
+          buttons are Gallabox&rsquo;s. Typing a trigger keyword, or tapping an ordering bot button, brings the bot back.</li>
+      </ol>
+    </div>
+  </div>
+  <div class="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-5 py-3">
+    <span id="menu-unsaved" class="hidden text-xs font-medium text-amber-700">Unsaved changes</span>
+    <button class="ml-auto rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save</button>
+  </div>
+</form>
+
+<script>
+(function () {
+  var form = document.getElementById('menu-form');
+  var toggle = document.getElementById('menu-enabled');
+  var dirty = false;
+  function mark() { dirty = true; document.getElementById('menu-unsaved').classList.remove('hidden'); }
+  form.addEventListener('input', mark);
+  form.addEventListener('change', function () {
+    document.getElementById('menu-label').textContent = toggle.checked ? 'On' : 'Off';
+    mark();
+  });
+  form.addEventListener('submit', function () { dirty = false; });
+  window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+})();
+</script>

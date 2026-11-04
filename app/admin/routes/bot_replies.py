@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import AdminUser, AppSetting
 from app.db.session import get_session
-from app.services import allowlist, reply_triggers
+from app.services import allowlist, reply_triggers, welcome_menu
 from app.services.settings_store import save_many
 
 log = get_logger(__name__)
@@ -56,7 +56,42 @@ async def bot_replies_page(
         "message_check": _message_check(message) if message.strip() else None,
         "message_query": message,
         "asks_email": settings.asks_customer_email,
+        "welcome": welcome_menu.load(),
+        "goes_to": welcome_menu.GOES_TO,
+        "label_limit": welcome_menu.LABEL_LIMIT,
+        "text_limit": welcome_menu.TEXT_LIMIT,
     })
+
+
+@router.post("/welcome-menu", name="admin_welcome_menu_save")
+async def save_welcome_menu(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    current_user: AdminUser = Depends(require_admin),
+):
+    """The menu a new chat gets first, and where each button goes (services/welcome_menu)."""
+    url = str(request.url_for("admin_bot_replies"))
+    form = await request.form()
+    buttons = tuple(welcome_menu.MenuButton(welcome_menu.clean_label(str(label)), str(goes_to))
+                    for label, goes_to in zip(form.getlist("label"), form.getlist("goes_to"))
+                    if str(label).strip())
+    menu = welcome_menu.Menu(enabled=form.get("enabled") == "1",
+                             text=str(form.get("text") or "").replace("\r\n", "\n").strip(),
+                             buttons=buttons)
+    found = welcome_menu.problems(menu)
+    if found:
+        return redirect(url, flash=("error", " ".join(found)))
+
+    changed = await save_many(session, {"BOT_WELCOME_MENU": welcome_menu.dump(menu)},
+                              updated_by=current_user.email, allow_blank={"BOT_WELCOME_MENU"})
+    log.info("welcome_menu_saved", enabled=menu.enabled, buttons=len(menu.buttons),
+             changed=changed, by=current_user.email)
+    if not menu.enabled:
+        return redirect(url, flash=("success", "Welcome menu off."))
+    if not reply_triggers.is_keyword_mode():
+        return redirect(url, flash=("success", "Welcome menu saved. It is sent once Reply to "
+                                               "any message is switched off."))
+    return redirect(url, flash=("success", "Welcome menu on: a new chat gets it first."))
 
 
 @router.post("/email", name="admin_bot_email_save")
@@ -161,7 +196,11 @@ async def save_triggers(
 def _message_check(message: str) -> dict:
     """Would this message start the bot for a new customer, and why."""
     trigger = reply_triggers.matching(message)
+    menu = welcome_menu.active()
+    button = menu.button(message) if menu else None
     return {"any": reply_triggers.mode() == reply_triggers.ANY, "trigger": trigger,
+            "menu_button": button,
+            "menu_goes_to": welcome_menu.GOES_TO.get(button.goes_to, "") if button else "",
             "built_in": reply_triggers.normalise(message) in reply_triggers.BUILT_IN,
             "match_label": reply_triggers.MATCHES.get(trigger.match, "") if trigger else "",
             "reply_label": reply_triggers.REPLIES.get(trigger.reply, "") if trigger else ""}

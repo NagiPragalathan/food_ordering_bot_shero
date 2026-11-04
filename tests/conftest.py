@@ -35,6 +35,7 @@ def _answer_everyone(monkeypatch):
     monkeypatch.setattr(settings, "bot_reply_mode", "")
     monkeypatch.setattr(settings, "bot_reply_trigger", "")
     monkeypatch.setattr(settings, "bot_trigger_keywords", "")
+    monkeypatch.setattr(settings, "bot_welcome_menu", "")
     # The bot's own channel comes from .env; a test that checks the channel
     # filter sets it itself (tests/integrations/test_channel_filter.py).
     monkeypatch.setattr(settings, "gallabox_channel_id", "")

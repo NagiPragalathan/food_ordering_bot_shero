@@ -56,7 +56,12 @@ The other two are set on the admin Bot replies page:
    `ACTIVE_HOURS` = 24) always pass; at a menu step only a tap or a trigger
    does. A trigger on a chat that is not mid-order (any step but `START` /
    `COMPLETED` / `HANDED_OVER`, within 24 hours) sets `fresh_start`, and the engine runs `onboarding.start`
-   instead of the parked step's handler. The trigger's **Reply with** is kept
+   instead of the parked step's handler. With the **welcome menu** on
+   (`services/welcome_menu.py`), a menu button's label decides first: a
+   Gallabox button is left to that Gallabox flow (and the bot keeps out of the
+   chat for 24 hours), an ordering button starts the bot like a trigger; and a
+   message nothing else answers, in a chat with no menu, bot or Gallabox flow
+   in 24 hours, gets the menu. The trigger's **Reply with** is kept
    on the chat (`welcome_reply`), and `onboarding.show_main_menu` sends both
    welcome messages, only Order Now, or only Continue on WhatsApp accordingly.
 

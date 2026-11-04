@@ -177,6 +177,9 @@ class Settings(BaseSettings):
     bot_reply_trigger: str = Field(default="", validation_alias="ADMIN_PAGE_ONLY_BOT_REPLY_TRIGGER")
     bot_trigger_keywords: str = Field(default="",
                                       validation_alias="ADMIN_PAGE_ONLY_BOT_TRIGGER_KEYWORDS")
+    # The welcome menu sent to a new chat in keyword mode (on/off, text and
+    # buttons) as JSON. Admin page only. See services/welcome_menu.py.
+    bot_welcome_menu: str = Field(default="", validation_alias="ADMIN_PAGE_ONLY_BOT_WELCOME_MENU")
     # Ask a new customer for their email after their name: "on" (also when
     # nothing is saved) or "off". Bot replies page only, like the above.
     # See services/conversation/handlers/onboarding.py.
