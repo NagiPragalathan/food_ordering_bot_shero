@@ -9,14 +9,18 @@ database (never read from .env):
 
 With "any" (the default, and what nothing saved means) the bot answers every
 message, as it always has. With "keywords" a chat only *starts* the bot when
-the message matches a trigger. Once it has started, the customer is mid-order
-and has to be able to type an address or an email, so the bot keeps answering
-everything until the order is finished or the chat goes quiet.
+the message matches a trigger. Once it has started, the customer has to be
+able to type their name, email or address, so a question that wants a typed
+answer (engine.FREE_TEXT_STEPS) takes whatever they type.
 
 Always answered in keyword mode, trigger or not:
   * a tap on one of the bot's own buttons (it is a reply to the bot)
   * the bot's own prefilled messages ("New menu link" from an expired page)
-  * a customer part-way through an order, active in the last ACTIVE_HOURS
+  * a customer the bot asked to type something, active in the last ACTIVE_HOURS
+
+A menu waiting for a tap - the welcome's Continue on WhatsApp, the cuisines,
+the cart - gets the tap, but a typed "hi" there needs a trigger like any other
+message: the welcome must not come back for every message after it.
 
 Each keyword also says how the bot answers it (REPLIES): the welcome's two
 messages, only the Order Now (website) one, or only Continue on WhatsApp.
@@ -178,12 +182,13 @@ async def decide(session: AsyncSession, event: InboundEvent,
     if normalise(message) in BUILT_IN:
         return Decision(True, "bot link")
 
-    in_flow = await _in_flow(session, event.whatsapp_number,
-                             now or datetime.now(timezone.utc))
+    from app.services.conversation.engine import FREE_TEXT_STEPS
+
+    step = await _in_flow(session, event.whatsapp_number, now or datetime.now(timezone.utc))
     trigger = matching(message)
     if trigger:
-        return Decision(True, "trigger", fresh_start=not in_flow, reply=trigger.reply)
-    if in_flow:
+        return Decision(True, "trigger", fresh_start=step is None, reply=trigger.reply)
+    if step in FREE_TEXT_STEPS:
         return Decision(True, "order in progress")
     if await _answered_anyway(session, event.whatsapp_number, message):
         return Decision(True, "coupon or nudge reply")
@@ -212,24 +217,25 @@ async def _with_a_person(session: AsyncSession, number: str) -> bool:
     return step == ConversationStep.HANDED_OVER
 
 
-async def _in_flow(session: AsyncSession, number: str, now: datetime) -> bool:
-    """Is this customer part-way through an order, recently?"""
+async def _in_flow(session: AsyncSession, number: str, now: datetime) -> ConversationStep | None:
+    """The step this customer is at, if they are part-way through an order
+    and wrote recently; None otherwise."""
     customer = await get_customer(session, number)
     if customer is None:
-        return False
+        return None
     conversation = (await session.execute(select(Conversation).where(
         Conversation.customer_id == customer.id))).scalar_one_or_none()
     if conversation is None:
-        return False
+        return None
     try:
         step = ConversationStep(conversation.step)
     except ValueError:
-        return False
+        return None
     # A chat handed to a person is the person's: the bot stays out of it.
     if step in IDLE_STEPS or step is ConversationStep.HANDED_OVER:
-        return False
+        return None
     last = _latest(conversation.last_message_at, conversation.updated_at)
-    return last is not None and now - last <= timedelta(hours=ACTIVE_HOURS)
+    return step if last is not None and now - last <= timedelta(hours=ACTIVE_HOURS) else None
 
 
 def _latest(*moments: datetime | None) -> datetime | None:

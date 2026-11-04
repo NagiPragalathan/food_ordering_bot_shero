@@ -562,8 +562,9 @@ Which messages start the bot. Separate from the whitelist above; both apply.
   chosen reply (it is kept on the chat as `welcome_reply`). With *Reply to any
   message* on, everyone gets both.
 - **Always answered**, keyword or not, so ordering never breaks half-way:
-  - a customer part-way through an order who wrote in the last 24 hours (they
-    have to be able to type their address or email);
+  - a customer the bot has asked to type something - their name, email,
+    address, apartment, delivery note, phone number, location or a quantity -
+    who wrote in the last 24 hours;
   - taps on the bot's own buttons;
   - the bot's own messages, such as "New menu link" from an expired page.
 - A trigger on a chat that is not mid-order (new, finished, or quiet for over
@@ -571,7 +572,10 @@ Which messages start the bot. Separate from the whitelist above; both apply.
   part of the order.
 - Anything else gets no reply, no customer record and no Zoho lead, and
   reaches your team in Gallabox as normal. That includes a message after an
-  order is finished ("when will it arrive?") and a chat handed to a person.
+  order is finished ("when will it arrive?"), a chat handed to a person, and
+  a typed "Hi" while a menu is waiting for a tap (the welcome, the cuisines,
+  the cart): the tap still works, but the welcome does not come back for
+  every message.
 - **Test a message** says whether a first message would start the bot, and
   which keyword it matched.
 - While keyword mode is on, every admin page shows a **Keywords only** badge.

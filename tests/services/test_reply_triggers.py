@@ -119,6 +119,19 @@ async def test_mid_order_everything_is_answered(session, keywords):
     assert decision.answer and decision.reason == "order in progress"
 
 
+@pytest.mark.parametrize("step", [ConversationStep.MAIN_MENU, ConversationStep.CUISINE_MENU,
+                                  ConversationStep.CART_REVIEW])
+async def test_a_menu_waits_for_a_tap_or_a_trigger(session, monkeypatch, step):
+    """The welcome went out a minute ago; a "Hi" must not bring it back."""
+    _set(monkeypatch, ("order food", rt.CONTAINS))
+    await _customer_at(session, step, quiet_for=timedelta(minutes=1))
+    assert not (await rt.decide(session, text("Hi"), NOW)).answer
+    tap = InboundEvent(whatsapp_number=PHONE, message_id="m2", kind=InboundKind.REPLY,
+                       reply_id="continue_whatsapp")
+    assert (await rt.decide(session, tap, NOW)).answer
+    assert (await rt.decide(session, text("Order food"), NOW)).answer
+
+
 async def test_a_trigger_mid_order_does_not_restart(session, keywords):
     await _customer_at(session, ConversationStep.CART_REVIEW, quiet_for=timedelta(minutes=5))
     decision = await rt.decide(session, text("I want to order more"), NOW)

@@ -52,9 +52,10 @@ The other two are set on the admin Bot replies page:
 2. **Trigger keywords** (`services/reply_triggers.decide`): with *Reply to any
    message* off, a chat starts only on a trigger keyword. Button taps, the
    bot's own prefilled messages (`NEW_LINK_KEYWORDS`, `CONTINUE_KEYWORDS`) and
-   a customer mid-order (any step but `START` / `COMPLETED` / `HANDED_OVER`,
-   active within `ACTIVE_HOURS` = 24) always pass. A trigger on a chat that is
-   not mid-order sets `fresh_start`, and the engine runs `onboarding.start`
+   a customer at a typed-answer step (`engine.FREE_TEXT_STEPS`, active within
+   `ACTIVE_HOURS` = 24) always pass; at a menu step only a tap or a trigger
+   does. A trigger on a chat that is not mid-order (any step but `START` /
+   `COMPLETED` / `HANDED_OVER`, within 24 hours) sets `fresh_start`, and the engine runs `onboarding.start`
    instead of the parked step's handler. The trigger's **Reply with** is kept
    on the chat (`welcome_reply`), and `onboarding.show_main_menu` sends both
    welcome messages, only Order Now, or only Continue on WhatsApp accordingly.
