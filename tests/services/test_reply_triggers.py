@@ -281,6 +281,67 @@ async def test_the_webhook_starts_the_bot_on_a_trigger(session, keywords, monkey
     assert result["status"] == "ok" and handled == [{"fresh_start": True, "reply": "both"}]
 
 
+async def _chat(session, monkeypatch):
+    """Messages through the real webhook and engine; returns what each one got."""
+    from app.api.routes import webhooks_gallabox
+    from app.integrations.gallabox.sender import use_sender
+    from tests.conversation.test_happy_path import FakeGallabox
+
+    monkeypatch.setattr(settings, "bot_reply_trigger", rt.KEYWORDS)
+    monkeypatch.setattr(settings, "bot_trigger_keywords",
+                        rt.dump([rt.Trigger("ORDER FOOD", rt.CONTAINS, rt.WHATSAPP)]))
+    monkeypatch.setattr(webhooks_gallabox, "verify_gallabox_token", lambda t: True)
+    fake, count = FakeGallabox(), iter(range(1, 100))
+
+    async def send(message: str | None = None, *, tap: str | None = None) -> list:
+        whatsapp = ({"type": "interactive", "interactive": {"button_reply": {"id": tap, "title": tap}}}
+                    if tap else {"type": "text", "text": {"body": message}})
+
+        class FakeRequest:
+            headers: dict = {}
+
+            async def json(self):
+                return {"whatsapp": {"from": PHONE, "id": f"wamid.{next(count)}", **whatsapp}}
+
+        before = len(fake.sent)
+        with use_sender(fake):
+            await webhooks_gallabox.gallabox_webhook(
+                FakeRequest(), session=session, authorization="t",
+                x_gallabox_token=None, x_webhook_secret=None, token=None)
+        return fake.sent[before:]
+
+    return send
+
+
+async def test_the_reported_chat_a_hi_after_the_welcome_gets_nothing(session, monkeypatch):
+    """Keywords only, ORDER FOOD -> Only WhatsApp, and a returning customer:
+    the chat from the screenshot, where the second "Hi" brought the welcome back."""
+    send = await _chat(session, monkeypatch)
+    session.add(Customer(whatsapp_number=PHONE, name="Mani", email="mani@example.com"))
+    await session.flush()
+
+    assert await send("Hi") == []
+    welcome = await send("ORDER FOOD")
+    assert [m.kind for m in welcome] == ["buttons"] and "Mani" in welcome[0].body
+    assert welcome[0].payload["buttons"] == [("Continue on WhatsApp", "Continue on WhatsApp")]
+    assert await send("Hi") == []
+    assert await send("hello, anyone there?") == []
+    assert await send(tap="Continue on WhatsApp")          # the button still carries on
+    assert await send("order food please")                 # and so does the keyword
+
+
+async def test_a_new_customer_can_still_type_their_name_and_email(session, monkeypatch):
+    send = await _chat(session, monkeypatch)
+    assert await send("Hi") == []
+    assert await send("I want to order food")              # asks their name
+    assert await send("Mani")                              # a typed answer, no keyword
+    step = (await session.execute(select(Conversation.step))).scalar_one()
+    if step == ConversationStep.AWAIT_EMAIL:
+        assert await send("mani@example.com")
+    assert (await session.execute(select(Conversation.step))).scalar_one() == ConversationStep.MAIN_MENU
+    assert await send("Hi") == []                          # the welcome is out: a keyword again
+
+
 # --- what the bot answers a trigger with --------------------------------------------
 def test_each_keyword_keeps_its_reply(monkeypatch):
     _set(monkeypatch, ("hi", rt.EXACT))
