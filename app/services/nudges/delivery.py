@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.models import NudgeSend
+from app.services.nudges import crm
 
 log = get_logger(__name__)
 
@@ -83,4 +84,5 @@ async def record(session: AsyncSession, body: dict) -> bool:
     send.delivery_at = datetime.now(timezone.utc)
     await session.flush()
     log.info("nudge_delivery_status", send_id=str(send.id), status=status)
+    await crm.message_delivered(send)          # its Nudge Messages record, if filed
     return True

@@ -85,6 +85,7 @@ async def handle(ctx) -> bool:
         session.add(lead)
     label = LABELS[which]
     send.reply, send.replied_at = label, now
+    await crm.message_replied(send)            # its Nudge Messages record, if filed
     lead.last_reply, lead.last_reply_at = label, now
     cfg = await config.load(session)
     lines = [f"Tapped {label} on {send.template}."]

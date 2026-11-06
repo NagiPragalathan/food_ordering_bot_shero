@@ -172,3 +172,35 @@ async def test_a_rule_waiting_for_approval_is_shown(admin, session, monkeypatch)
     assert 'data-state="pending"' in page
     assert admin.get("/admin/nudges/statuses").json() == {
         "statuses": {"shero_nudge_cart_reminder": "pending"}}
+
+
+
+async def test_the_zoho_strip_and_try_now(admin, session, monkeypatch):
+    from app.services.nudges import crm
+
+    async def ensure(session_, *, force=False):
+        return {"checked_at": "2026-11-03T13:00:00+00:00", "stages_added": [],
+                "fields_missing": ["Leads.Retargeting_Bucket", "Contacts.Retargeting_Bucket"],
+                "error": "Zoho's custom field limit is reached on this plan",
+                "module_ready": False,
+                "module_error": "Custom modules are not available on this Zoho plan"}
+
+    async def setup_status(session_):
+        return await ensure(session_)
+
+    monkeypatch.setattr(crm, "ensure", ensure)
+    monkeypatch.setattr(crm, "setup_status", setup_status)
+    page = admin.get("/admin/nudges").text
+    assert "No Response · Later · No · Dead Lead" in page
+    assert "2 nudge fields not created yet" in page and "custom field limit" in page
+    assert "Nudge Messages module not created yet" in page and "not available on this Zoho plan" in page
+    response = admin.post("/admin/nudges/zoho-setup", data={"tab": "messages"})
+    assert response.status_code == 303 and response.headers["location"].endswith("tab=messages")
+
+    async def upgraded(session_, *, force=False):
+        return {"checked_at": "2026-11-06T13:00:00+00:00", "stages_added": [], "fields_missing": [],
+                "error": None, "module_ready": True, "module_error": None}
+
+    monkeypatch.setattr(crm, "ensure", upgraded)
+    monkeypatch.setattr(crm, "setup_status", upgraded)
+    assert "Nudge Messages module ready" in admin.get("/admin/nudges").text

@@ -334,7 +334,19 @@ async def _ensure_converted(customer: Customer) -> Record | None:
         return record
     customer.zoho_contact_id = contact_id
     customer.zoho_lead_id = None        # Zoho retires the Lead on conversion
+    await _relink_nudges(customer)
     return (f.CONTACTS, contact_id)
+
+
+async def _relink_nudges(customer: Customer) -> None:
+    """The nudges filed under the Lead join the new Contact's list too."""
+    from sqlalchemy.ext.asyncio import async_object_session
+
+    from app.services.nudges import crm as nudge_crm
+
+    session = async_object_session(customer)
+    if session is not None:
+        await nudge_crm.relink(session, customer)
 
 
 async def _file_order(customer: Customer, order: Order, ctx: OrderContext) -> str | None:

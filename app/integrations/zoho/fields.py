@@ -60,6 +60,32 @@ R_LAST_DATE = "Last_Retargeting_Date"
 R_NEXT_DATE = "Next_Retargeting_Date"
 R_LAST_TEMPLATE = "Last_Template_ID"
 RETARGETING_BUCKETS = ("No-response", "Later", "No", "Engaged", "Dead Lead")
+# The nudge buckets as stages, after the ordering stages in Bot Stage and Lead
+# Status, as in KOB CRM: where a customer the nudges are following is.
+NUDGE_STAGES = ("No Response", "Later", "No", "Dead Lead")
+
+# The bot's Nudge Messages module: one record per nudge sent, in a "Nudge
+# Messages" list on the customer's Lead or Contact (services/nudges/crm.py).
+NUDGE_MESSAGES = "Nudge_Messages"
+N_NAME = "Name"                        # display field: "Cart Created - message 1"
+N_LEAD = "Lead"                        # lookup -> Leads: the customer, while a Lead
+N_CONTACT = "Contact"                  # lookup -> Contacts: set once they are one
+N_STAGE = "Stage"                      # their ordering stage when it went
+N_SEQUENCE = "Sequence"                # Stage message / No Response / Later / No
+N_TEMPLATE = "Message_Template"        # the WhatsApp template's name
+N_ATTEMPT = "Attempt"                  # 1 for the stage message; the n-th in a sequence
+N_SEND_STATUS = "Send_Status"          # Sent / Failed
+N_SEND_ERROR = "Send_Error"
+N_SENT_TIME = "Sent_Time"
+N_DELIVERY = "Delivery_Status"         # Sent / Delivered / Read / Failed, from WhatsApp
+N_DELIVERY_TIME = "Delivery_Time"
+N_REPLY = "Reply"                      # the button they tapped: Order Food / Later / No / STOP
+N_REPLY_TIME = "Reply_Time"
+N_WHATSAPP_ID = "WhatsApp_Message_ID"
+NUDGE_SEQUENCES = ("Stage message", "No Response", "Later", "No")
+SEND_STATUSES = ("Sent", "Failed")
+DELIVERY_STATUSES = ("Sent", "Delivered", "Read", "Failed")
+NUDGE_REPLIES = ("Order Food", "Later", "No", "STOP")
 
 # Lead Source options the bot adds; Zoho's defaults have neither. They equal
 # the bot's own `Customer.lead_source` values.

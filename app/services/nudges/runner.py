@@ -14,6 +14,8 @@ Moving to another stage means they are ordering again: any bucket ends and
 the new stage's rule applies. Paying ends it all. Messages only go inside the
 send hours, never while the customer is chatting with the bot or the team,
 and never once they replied STOP; moves to a bucket happen at any hour.
+Before each send the customer's stage in Zoho is read, and the team's
+decision there wins (services/nudges/crm.py).
 """
 
 from __future__ import annotations
@@ -78,10 +80,13 @@ def chatting(conversation: Conversation | None, now: datetime) -> str | None:
 class Run:
     """One pass over everyone. Counts what it did, for the log and the page."""
 
-    def __init__(self, session: AsyncSession, cfg: NudgeSettings, now: datetime):
+    def __init__(self, session: AsyncSession, cfg: NudgeSettings, now: datetime, *,
+                 file_messages: bool = False):
         self.session, self.cfg, self.now = session, cfg, now
         self.in_hours = in_send_hours(cfg, now)
         self.counts = {"sent": 0, "failed": 0, "moved": 0, "dead": 0}
+        # Each message also gets a record in Zoho's Nudge Messages module.
+        self.file_messages = file_messages
 
     # -- one customer --------------------------------------------------------------
     async def customer(self, customer: Customer, lead: NudgeLead | None,
@@ -215,6 +220,13 @@ class Run:
         if not await messages.approved(message.name):
             lead.waiting = f"{message.name} is not approved by WhatsApp yet"
             return False
+        # Zoho first: the team's decision there (Converted, closed, a bucket)
+        # wins over what the bot was about to send.
+        if self.cfg.zoho_sync:
+            why = await crm.follow(customer, lead, self.now)
+            if why:
+                lead.waiting = why
+                return False
         send = NudgeSend(customer_id=customer.id, kind=kind, stage=lead.stage, attempt=attempt,
                          template=message.name, sent_at=self.now)
         try:
@@ -223,6 +235,8 @@ class Run:
         except (IntegrationError, ConfigurationError, ValueError) as exc:
             send.status, send.error = "failed", str(exc)[:500]
             self.session.add(send)
+            if self.file_messages:
+                await crm.file_message(customer, send)
             self.counts["failed"] += 1
             lead.failures += 1
             log.warning("nudge_send_failed", customer_id=str(customer.id), template=message.name,
@@ -234,6 +248,8 @@ class Run:
             return False
         send.status, send.provider_message_id = "sent", provider_id(result)
         self.session.add(send)
+        if self.file_messages:
+            await crm.file_message(customer, send)
         self.counts["sent"] += 1
         lead.failures, lead.waiting, lead.last_sent_at = 0, None, self.now
         log.info("nudge_sent", customer_id=str(customer.id), template=message.name, kind=kind)
@@ -271,12 +287,14 @@ def provider_id(result) -> str | None:
 
 
 async def run(session: AsyncSession, now: datetime | None = None) -> dict:
-    """One pass. Nothing at all while the nudges are switched off."""
+    """One pass. Nothing is sent while the nudges are switched off; Zoho is
+    still set up for them (once a day), so it is ready when they are on."""
     cfg = await config.load(session)
+    zoho = await crm.ensure(session) if cfg.zoho_sync else {}
     if not cfg.enabled:
         return {"off": True}
     now = now or datetime.now(timezone.utc)
-    job = Run(session, cfg, now)
+    job = Run(session, cfg, now, file_messages=bool(zoho.get("module_ready")))
     active_stages = [r.stage for r in cfg.rules if r.active]
 
     leads = {lead.customer_id: lead for lead in (await session.execute(select(NudgeLead))).scalars()}

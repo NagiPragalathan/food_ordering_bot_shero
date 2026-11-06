@@ -1,8 +1,9 @@
 """What the bot adds to a Zoho CRM, as Zoho's settings APIs want it.
 
 Used by scripts/setup_zoho_crm.py, which compares this against the live CRM
-and creates only what is missing: the Orders and Order Items modules, the
-fields below (on those two and on Leads, Contacts, Products and Vendors), and
+and creates only what is missing: the Orders, Order Items and Nudge Messages
+modules, the fields below (on those and on Leads, Contacts, Products and
+Vendors), and
 the Lead Source and Lead Status options. Zoho derives
 each field's API name from its label ("Bot Stage" -> "Bot_Stage"); fields.py
 holds those names, and a test checks the two agree.
@@ -68,7 +69,7 @@ PERSON_FIELDS: tuple[tuple[str, dict], ...] = (
     (f.AD_ID, _text("Ad ID", 80)),
     (f.CAMPAIGN_ID, _text("Campaign ID", 80)),
     (f.CUISINE, _text("Cuisine Preference", 60)),
-    (f.BOT_STAGE, _picklist("Bot Stage", [s.value for s in LeadStage])),
+    (f.BOT_STAGE, _picklist("Bot Stage", [s.value for s in LeadStage] + list(f.NUDGE_STAGES))),
     (f.BOT_STAGE_HISTORY, _textarea("Bot Stage History")),
     (f.SELECTED_OUTLET, _text("Selected Outlet", 120)),
     (f.DISTANCE_KM, {"field_label": "Distance KM", "data_type": "double",
@@ -128,6 +129,26 @@ ORDER_ITEM_FIELDS: tuple[tuple[str, dict], ...] = (
     (f.I_LINE_TOTAL, _money("Line Total")),
 )
 
+# One record per nudge, in the bot's Nudge Messages module. The two lookups
+# give the Lead and the Contact a "Nudge Messages" related list; delivery and
+# the button tapped are written back as WhatsApp reports them.
+NUDGE_MESSAGE_FIELDS: tuple[tuple[str, dict], ...] = (
+    (f.N_LEAD, _lookup("Lead", f.LEADS, "Nudge Messages")),
+    (f.N_CONTACT, _lookup("Contact", f.CONTACTS, "Nudge Messages")),
+    (f.N_STAGE, _text("Stage", 40)),
+    (f.N_SEQUENCE, _picklist("Sequence", list(f.NUDGE_SEQUENCES))),
+    (f.N_TEMPLATE, _text("Message Template", 120)),
+    (f.N_ATTEMPT, {"field_label": "Attempt", "data_type": "integer", "length": 9}),
+    (f.N_SEND_STATUS, _picklist("Send Status", list(f.SEND_STATUSES))),
+    (f.N_SEND_ERROR, _text("Send Error", 255)),
+    (f.N_SENT_TIME, _datetime("Sent Time")),
+    (f.N_DELIVERY, _picklist("Delivery Status", list(f.DELIVERY_STATUSES))),
+    (f.N_DELIVERY_TIME, _datetime("Delivery Time")),
+    (f.N_REPLY, _picklist("Reply", list(f.NUDGE_REPLIES))),
+    (f.N_REPLY_TIME, _datetime("Reply Time")),
+    (f.N_WHATSAPP_ID, _text("WhatsApp Message ID", 120)),
+)
+
 # What a menu dish has that Zoho's Products module does not.
 PRODUCT_FIELDS: tuple[tuple[str, dict], ...] = (
     (f.P_CUISINE, _text("Cuisine", 60)),
@@ -152,6 +173,8 @@ FIELDS: tuple[FieldSpec, ...] = (
           for module in f.PERSON_MODULES for api_name, body in PERSON_FIELDS)
     + tuple(FieldSpec(ORDERS, api_name, body) for api_name, body in ORDER_FIELDS)
     + tuple(FieldSpec(ORDER_ITEMS, api_name, body) for api_name, body in ORDER_ITEM_FIELDS)
+    + tuple(FieldSpec(f.NUDGE_MESSAGES, api_name, body)
+            for api_name, body in NUDGE_MESSAGE_FIELDS)
     + tuple(FieldSpec(f.PRODUCTS, api_name, body) for api_name, body in PRODUCT_FIELDS)
     + tuple(FieldSpec(f.VENDORS, api_name, body) for api_name, body in VENDOR_FIELDS)
 )
@@ -161,13 +184,16 @@ FIELDS: tuple[FieldSpec, ...] = (
 PICKLIST_OPTIONS: tuple[tuple[str, str, str], ...] = tuple(
     (module, f.LEAD_SOURCE, option)
     for module in f.PERSON_MODULES for option in f.LEAD_SOURCES
-) + tuple((f.LEADS, f.LEAD_STATUS, s.value) for s in LeadStage)
+) + tuple((f.LEADS, f.LEAD_STATUS, s.value) for s in LeadStage) + tuple(
+    (f.LEADS, f.LEAD_STATUS, stage) for stage in f.NUDGE_STAGES) + tuple(
+    (module, f.BOT_STAGE, stage) for module in f.PERSON_MODULES for stage in f.NUDGE_STAGES)
 
 # The bot's own modules, for Zoho's create-module API. Each gets a "Name"
 # display field: the order number, or "order number / dish" on an item.
 MODULES: dict[str, dict[str, str]] = {
     ORDERS: {"singular_label": "Order", "plural_label": "Orders"},
     ORDER_ITEMS: {"singular_label": "Order Item", "plural_label": "Order Items"},
+    f.NUDGE_MESSAGES: {"singular_label": "Nudge Message", "plural_label": "Nudge Messages"},
 }
 ORDERS_MODULE = MODULES[ORDERS]
 

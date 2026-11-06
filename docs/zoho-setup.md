@@ -144,18 +144,27 @@ safe. On a fresh org it creates:
 |---|---|
 | The **Orders** module | Custom module, plural *Orders*, singular *Order*; its display field **Name** holds the order number |
 | The **Order Items** module | Custom module, plural *Order Items*, singular *Order Item*; its display field **Name** holds `order number / dish` |
-| 10 fields on **Leads** and the same 10 on **Contacts** | See the table below |
+| The **Nudge Messages** module | Custom module, plural *Nudge Messages*, singular *Nudge Message*; its display field **Name** holds e.g. `Cart Created - stage message` |
+| 16 fields on **Leads** and the same 16 on **Contacts** | See the table below |
 | 24 fields on **Orders** | See the table below |
 | 7 fields on **Order Items** | See the table below |
+| 14 fields on **Nudge Messages** | See the table below |
 | 5 fields on **Products** and 3 on **Vendors** | See the tables below; the rest of a dish or kitchen goes in Zoho's own fields |
 | **Lead Source** options `WhatsApp` and `Meta Ad` | On Leads and Contacts |
-| **Lead Status** options: the 11 Bot Stage values | So Zoho's own stage bar on a Lead, and its Leads-by-Status reports, show the funnel |
+| **Lead Status** options: the 11 Bot Stage values and the 4 nudge stages | So Zoho's own stage bar on a Lead, and its Leads-by-Status reports, show the funnel and the nudges |
+| **Bot Stage** options: the 4 nudge stages | No Response, Later, No, Dead Lead - on a CRM made before the nudges |
+
+The nudges also set up their own part every day without this script: the
+nudge stages, the five Retargeting fields and the Nudge Messages module
+(docs/nudges.md). After an upgrade from the free edition, **Try now** on the
+Nudges page does it at once.
 
 If Zoho will not create a module through the API, the script prints the
 two-minute manual step and can be run again afterwards.
 Custom modules need a paid edition (a trial counts); on the free edition the
-Orders and Order Items modules cannot exist, and orders are logged as not
-filed. Products and Vendors are Zoho's own modules and exist in every edition.
+Orders, Order Items and Nudge Messages modules cannot exist: orders are
+logged as not filed, and nudges go to the timeline notes only. Products and
+Vendors are Zoho's own modules and exist in every edition.
 
 Fields on **Leads and Contacts**:
 
@@ -177,7 +186,10 @@ Fields on **Leads and Contacts**:
 
 Bot Stage values: New Enquiry, Details Captured, Cuisine Selected, Cart
 Created, Not Serviceable, Outlet Selected, Slot Selected, Payment Link Sent,
-Payment Abandoned, Payment Failed, Converted.
+Payment Abandoned, Payment Failed, Converted; and the nudge stages No
+Response, Later, No and Dead Lead, shown while a customer is in a nudge
+sequence (docs/nudges.md). The team can set those, or Junk Lead, Lost Lead or
+Not Qualified in Lead Status, and the nudges follow.
 
 Fields on **Orders**:
 
@@ -219,6 +231,23 @@ Fields on **Order Items** (one record per dish on a paid order):
 | Contact (`Contact`) | Lookup to Contacts | The customer; shows as an "Order Items" list on the Contact |
 | Dish Code (`Dish_Code`) | Single line | The dish's `retailer_id` |
 | Quantity, Unit Price, Line Total | Number, Currency | As ordered |
+
+Fields on **Nudge Messages** (one record per nudge sent, docs/nudges.md):
+
+| Field (API name) | Type | Holds |
+|---|---|---|
+| Name | Display field | `Cart Created - stage message`, `Later - message 3` |
+| Lead (`Lead`) | Lookup to Leads | The customer while a Lead; shows as a "Nudge Messages" list on it |
+| Contact (`Contact`) | Lookup to Contacts | The customer once a Contact; shows as a "Nudge Messages" list on it |
+| Stage (`Stage`) | Single line | Their ordering stage when it went |
+| Sequence (`Sequence`) | Picklist | Stage message, No Response, Later, No |
+| Message Template (`Message_Template`) | Single line | The WhatsApp template |
+| Attempt (`Attempt`) | Number | Which message of the sequence |
+| Send Status (`Send_Status`), Send Error (`Send_Error`) | Picklist, Single line | Sent or Failed, and why |
+| Sent Time (`Sent_Time`) | Date-time | When it went |
+| Delivery Status (`Delivery_Status`), Delivery Time | Picklist, Date-time | Sent, Delivered, Read, Failed - from WhatsApp |
+| Reply (`Reply`), Reply Time | Picklist, Date-time | The button tapped: Order Food, Later, No, STOP |
+| WhatsApp Message ID (`WhatsApp_Message_ID`) | Single line | WhatsApp's id for the message |
 
 Fields on **Products** (Zoho's own module; one per menu dish). The bot fills
 Zoho's Product Name, Product Code (the dish's `retailer_id`), Unit Price,

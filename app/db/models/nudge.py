@@ -78,6 +78,8 @@ class NudgeSend(Base, UUIDPrimaryKey, Timestamps):
     # The button they tapped in answer: No, Later or STOP.
     reply: Mapped[str | None] = mapped_column(String(20))
     replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Its record in Zoho's Nudge Messages module, once filed there.
+    zoho_id: Mapped[str | None] = mapped_column(String(30))
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<NudgeSend {self.kind} {self.template} {self.status}>"

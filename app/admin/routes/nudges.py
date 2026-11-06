@@ -21,7 +21,7 @@ from app.core.exceptions import ConfigurationError, IntegrationError
 from app.core.logging import get_logger
 from app.db.models import AdminUser, Customer, NudgeBucket, NudgeLead, NudgeSend
 from app.db.session import get_session
-from app.services.nudges import config, messages
+from app.services.nudges import config, crm, messages
 from app.services.nudges.config import BUCKETS, BUTTONS, STAGES, Message, NudgeConfigError
 
 log = get_logger(__name__)
@@ -43,6 +43,13 @@ def _local(cfg: config.NudgeSettings, when: datetime | None) -> str:
         return ""
     when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)   # SQLite: naive UTC
     return when.astimezone(ZoneInfo(cfg.timezone)).strftime("%d %b, %I:%M %p")
+
+
+def _when(cfg: config.NudgeSettings, stamp: str | None) -> str:
+    try:
+        return _local(cfg, datetime.fromisoformat(stamp)) if stamp else ""
+    except ValueError:
+        return ""
 
 
 def _int(value, default: int | None = None) -> int | None:
@@ -72,13 +79,16 @@ async def nudges_page(request: Request, tab: str = "rules", stage: str | None = 
     statuses = await messages.statuses(fresh=fresh)
     # Not approved yet (or refused): the page counts them, and warns when a
     # rule that is on would send one.
+    zoho = await crm.setup_status(session)
     waiting = [m.name for m in cfg.messages
                if statuses is not None and statuses.get(m.name) != "approved"]
     context = {"current_user": current_user, "tab": tab, "tabs": TABS, "cfg": cfg,
                "statuses": statuses, "stages": STAGES, "buckets": BUCKETS,
                "bucket_names": BUCKET_NAMES, "preview": messages.preview, "buttons": BUTTONS,
                "hours": range(0, 25), "waiting": waiting,
-               "blocked": sorted(_in_use(cfg) & set(waiting))}
+               "blocked": sorted(_in_use(cfg) & set(waiting)),
+               "zoho": zoho, "zoho_checked": _when(cfg, zoho.get("checked_at")),
+               "zoho_stages": list(crm.STAGES.values()), "local": lambda when: _local(cfg, when)}
     if tab == "messages":
         context["addable"] = await messages.addable({m.name for m in cfg.messages})
     if tab == "leads":
@@ -227,6 +237,32 @@ async def add_message(request: Request, session: AsyncSession = Depends(get_sess
         current_user.email, "messages",
         f"Saved {name} and sent it to WhatsApp for approval ({status}). It can be used in a "
         f"rule once approved, usually within a few minutes to a day.")
+
+
+@router.post("/zoho-setup", name="admin_nudges_zoho_setup")
+async def zoho_setup(request: Request, session: AsyncSession = Depends(get_session),
+                     current_user: AdminUser = Depends(require_admin)):
+    """Set Zoho up for the nudges now rather than at the next daily try."""
+    form = await request.form()
+    result = await crm.ensure(session, force=True)
+    log.info("nudge_zoho_setup_run", by=current_user.email, error=result.get("error"))
+    if result.get("error") and not result.get("fields_missing"):
+        return redirect(_url(request, str(form.get("tab") or "rules")),
+                        flash=("error", f"Zoho: {result['error']}"))
+    missing = len(result.get("fields_missing") or [])
+    ready = not missing and result.get("module_ready")
+    if ready:
+        message = ("Zoho is ready for the nudges: stages, fields and the Nudge Messages "
+                   "module are in place.")
+    else:
+        why = "; ".join(w for w in (result.get("error"), result.get("module_error")) if w)
+        parts = [f"{missing} fields"] if missing else []
+        if not result.get("module_ready"):
+            parts.append("the Nudge Messages module")
+        message = (f"Zoho has the nudge stages. {' and '.join(parts)} can't be created yet: "
+                   f"{why or 'Zoho refused them'}. The bot tries again every day.")
+    return redirect(_url(request, str(form.get("tab") or "rules")),
+                    flash=("success" if ready else "error", message))
 
 
 @router.get("/statuses", name="admin_nudges_statuses")

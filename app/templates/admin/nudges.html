@@ -61,6 +61,38 @@
   <button class="{{ button }} ml-auto">Save</button>
 </form>
 
+{# --- Zoho: the bucket stages, the nudge fields, the last daily try ------------- #}
+{% if cfg.zoho_sync %}
+<div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-stone-200/70 bg-white px-5 py-3 text-sm text-stone-700 shadow-card">
+  <span class="font-semibold text-stone-900">Zoho</span>
+  {% if not zoho %}
+  <span class="text-stone-500">Not set up for the nudges yet: the bot does it within 5 minutes, or now.</span>
+  {% else %}
+  <span>Stages {{ ui.badge(zoho_stages | join(' · '), 'bad' if zoho.error and not zoho.fields_missing else 'good') }} in Bot Stage and Lead Status.</span>
+  {% if zoho.fields_missing %}
+  <span>{{ ui.badge((zoho.fields_missing | length) ~ ' nudge fields not created yet', 'warn') }}
+    <span class="text-stone-500">{{ zoho.error or 'Zoho refused them' }} - the notes and stages still go in; the bot tries again every day.</span></span>
+  {% elif zoho.error %}
+  <span class="text-red-700">{{ zoho.error }}</span>
+  {% else %}
+  <span>{{ ui.badge('Nudge fields ready', 'good') }}</span>
+  {% endif %}
+  {% if zoho.module_ready %}
+  <span>{{ ui.badge('Nudge Messages module ready', 'good') }}
+    <span class="text-stone-500">each message is a record on the Lead or Contact.</span></span>
+  {% elif zoho.module_error %}
+  <span>{{ ui.badge('Nudge Messages module not created yet', 'warn') }}
+    <span class="text-stone-500">{{ zoho.module_error }} - the bot tries again every day.</span></span>
+  {% endif %}
+  <span class="text-xs text-stone-400">Last checked {{ zoho_checked }}</span>
+  {% endif %}
+  <form method="post" action="{{ url_for('admin_nudges_zoho_setup') }}" class="ml-auto">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <button class="rounded-lg px-3 py-1.5 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200 hover:bg-brand-50">Try now</button>
+  </form>
+</div>
+{% endif %}
+
 {% if blocked %}
 <div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900">
   <span><b>{{ blocked | length }} message{{ 's' if blocked | length != 1 }} your rules use {{ 'are' if blocked | length != 1 else 'is' }} not approved by WhatsApp yet:</b>

@@ -11,8 +11,8 @@ Targeting Rules, except that every rule here can be changed. Code:
 * **Nudges on**: nothing is sent while this is off. It starts off.
 * **Send between ... and ...**, in the **time zone**: messages only go in
   these hours. One that falls due at night waits for the morning.
-* **Write to Zoho**: put each customer's bucket and messages on their Zoho
-  Lead or Contact (see below).
+* **Write to Zoho**: put each customer's stage, sequence and messages in
+  Zoho, and follow what the team sets there (see below).
 
 ## Messages
 
@@ -129,15 +129,50 @@ message shows Sent or Failed.
 
 ## Zoho
 
-With **Write to Zoho** on, each customer's Zoho Lead or Contact gets:
+Everything the nudges do is in Zoho, and Zoho decides. With **Write to
+Zoho** on:
+
+**The stage.** A customer in a sequence shows it as their stage: **Bot
+Stage** (and a Lead's **Lead Status**) reads **No Response**, **Later**,
+**No** or **Dead Lead**, and goes back to their ordering stage (Cart Created,
+...) when they order again. The bot adds those four options to both
+picklists itself.
+
+**Zoho first.** Before each message the bot reads the customer's record in
+Zoho and follows what your team set there:
+
+| In Zoho | The bot |
+|---|---|
+| Lead Status **Junk Lead**, **Lost Lead** or **Not Qualified** | Stops: Dead Lead |
+| Bot Stage **Converted** (set by the team) | Stops: Dead Lead |
+| Bot Stage **No Response**, **Later**, **No** or **Dead Lead** | Moves them there and follows that sequence |
+| An ordering stage, or Zoho can't be read | Sends as planned, or waits for the next run |
+
+**On the Lead or Contact**:
 
 * a timeline note "WhatsApp nudges" for each message, tap and move;
 * **Retargeting Bucket** (No-response, Later, No, Dead Lead, or Engaged once
   they're ordering again), **Retargeting Attempt Count**, **Last** and
   **Next Retargeting Date**, and **Last Template ID**.
 
-`scripts/setup_zoho_crm.py` creates the fields (docs/zoho-setup.md). On a
-CRM without them, the notes still go in.
+**Nudge Messages**, the bot's own module: one record per message, shown as a
+**Nudge Messages** list on the Lead and the Contact. Each record has the
+stage, the sequence (Stage message, No Response, Later, No), the template,
+which message of the sequence it was, Sent or Failed (with the error), the
+time, WhatsApp's message ID, and - written back as WhatsApp reports them -
+the **Delivery Status** (Sent, Delivered, Read, Failed) and the **Reply**
+(Order Food, Later, No, STOP) with their times. When a Lead becomes a
+Contact, its messages join the Contact's list too.
+
+**Setting it up.** The bot does it: once a day it adds the stage options,
+and creates the five fields and the Nudge Messages module with its 14
+fields. The strip under the top bar shows how far it got and when it last
+tried; **Try now** does it at once. A Zoho plan at its limits refuses the
+fields and the module (Zoho's free edition has no custom modules); until
+then the notes and stages still go in, and the bot keeps trying daily, so
+everything appears by itself after an upgrade - or press Try now.
+`scripts/setup_zoho_crm.py` creates the same things by hand
+(docs/zoho-setup.md).
 
 ## How it runs
 
