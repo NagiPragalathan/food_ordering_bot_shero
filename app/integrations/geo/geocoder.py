@@ -270,24 +270,41 @@ def _nominatim_point(result: dict, latitude: float, longitude: float) -> GeoPoin
     )
 
 
+# Typed addresses already looked up. The distance check looks the same address
+# up at every step of one order (address, summary, confirm), so it is asked once.
+_address_cache: dict[str, GeoPoint | None] = {}
+ADDRESS_CACHE_SIZE = 5000
+
+
 async def geocode_address(text: str, country: str | None = None) -> GeoPoint | None:
     """A typed address ("12 Maple St, Edison") to a point with its street.
 
-    Backs the search box above the map on the ordering page. Google resolves
+    Backs the search box above the map on the ordering page, and the check
+    that a map pin really is at the address typed beside it. Google resolves
     US house numbers far more reliably than OpenStreetMap, so set a key.
     """
     query = " ".join((text or "").split())[:200]
     if len(query) < 3:
         return None
     country = country or settings.geocoder_country
+    key = f"{country}:{query.lower()}"
+    if key in _address_cache:
+        return _address_cache[key]
 
     try:
         if settings.google_maps_api_key:
-            return await _google_address(query, country)
-        return await _nominatim_address(query, country)
+            point = await _google_address(query, country)
+        else:
+            point = await _nominatim_address(query, country)
     except (httpx.HTTPError, KeyError, ValueError) as exc:
+        # Not cached: the next step tries again.
         log.warning("address_search_failed", error=str(exc))
         return None
+
+    if len(_address_cache) >= ADDRESS_CACHE_SIZE:
+        _address_cache.clear()
+    _address_cache[key] = point
+    return point
 
 
 async def _google_address(query: str, country: str) -> GeoPoint | None:
@@ -316,3 +333,4 @@ async def _nominatim_address(query: str, country: str) -> GeoPoint | None:
 def clear_cache() -> None:
     _cache.clear()
     _reverse_cache.clear()
+    _address_cache.clear()

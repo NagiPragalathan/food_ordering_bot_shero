@@ -157,7 +157,7 @@ async def check_service(session: AsyncSession, point: GeoPoint | None, *,
         in_radius = nearest is not None and (nearest.service_area_mode or "radius") != "zips"
         return ServiceCheck(False, best.distance_km, best.reason,
                             kitchen_name=best.kitchen_name,
-                            range_km=nearest.delivery_radius_km if in_radius else None)
+                            range_km=reach_km(nearest) if in_radius else None)
     return best
 
 
@@ -176,7 +176,8 @@ def _evaluate(kitchen: Outlet, point: GeoPoint | None, zip_code: str) -> Service
         ))
 
     mode = (kitchen.service_area_mode or "radius").lower()
-    radius_ok = distance is not None and distance <= (kitchen.delivery_radius_km or 0)
+    reach = reach_km(kitchen)
+    radius_ok = distance is not None and distance <= reach
     zip_ok = kitchen.serves_postal_code(zip_code)
 
     if mode == "zips":
@@ -191,9 +192,25 @@ def _evaluate(kitchen: Outlet, point: GeoPoint | None, zip_code: str) -> Service
     else:
         ok = radius_ok
         reason = (f"{distance} km from the kitchen" if ok
-                  else f"{distance} km away, beyond the "
-                       f"{kitchen.delivery_radius_km:g} km delivery range")
+                  else f"{distance} km away, beyond the {reach:g} km delivery range")
     return ServiceCheck(ok, distance, reason, kitchen_name=kitchen.name, kitchen=kitchen)
+
+
+def max_km() -> float | None:
+    """The furthest any kitchen delivers (DELIVERY_MAX_MILES), or None for no cap."""
+    from app.core.config import settings
+
+    cap = settings.delivery_max_miles
+    return km(cap) if cap and cap > 0 else None
+
+
+def reach_km(kitchen: Outlet) -> float:
+    """How far this kitchen really delivers: its own radius, never beyond the
+    cap. A kitchen set to 20 miles took an order 23.7 miles out that Uber,
+    limited to 10, then refused."""
+    own = kitchen.delivery_radius_km or 0
+    cap = max_km()
+    return min(own, cap) if cap is not None else own
 
 
 def _both_reason(radius_ok: bool, zip_ok: bool) -> str:

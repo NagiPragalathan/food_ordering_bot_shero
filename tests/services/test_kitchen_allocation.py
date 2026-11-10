@@ -9,6 +9,15 @@ from app.services import kitchen, orders, slots
 from tests.services.test_orders import _priced
 
 
+@pytest.fixture(autouse=True)
+def _no_distance_cap(monkeypatch):
+    """These tests reach the Jersey City kitchen (~38 km) with a 100 km radius
+    to exercise allocation; the 10-mile cap has its own tests
+    (tests/services/test_pin_vs_address.py)."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "delivery_max_miles", 0)
+
+
 async def allocate(session, customer):
     return await kitchen.check_service(
         session, GeoPoint(latitude=customer.latitude, longitude=customer.longitude),

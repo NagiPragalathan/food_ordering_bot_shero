@@ -404,12 +404,14 @@ async def _serving(session: AsyncSession, address) -> tuple[ServiceCheck, GeoPoi
 
     Run at every step that uses the address - check, quote and confirm - so
     an address switched after a good one was checked cannot reach payment.
-    A map pin is exact; a typed address falls back to its ZIP.
+    The typed street and ZIP decide where that is; a map pin counts only when
+    it sits at them (delivery_address.locate).
     """
-    point = await kitchen_service.resolve_location(
+    point = await delivery_address.locate(
+        street=address.address_line1,
+        postal_code=address.postal_code,
         latitude=address.latitude,
         longitude=address.longitude,
-        postal_code=address.postal_code,
     )
     check = await kitchen_service.check_service(session, point, require_capacity=True,
                                                postal_code=address.postal_code)

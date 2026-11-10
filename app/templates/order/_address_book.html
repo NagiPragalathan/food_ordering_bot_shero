@@ -166,6 +166,12 @@ window.SheroAddressBook = function (deps) {
       }));
 
     startMap(pin);
+    // A street or ZIP typed by hand is no longer what the pin marks, so the
+    // pin is dropped and the address is placed by what was typed. (Values the
+    // map or the search fill in do not fire 'input'.)
+    ['f-address', 'f-zip'].forEach(id => $(id).addEventListener('input', () => {
+      pin.lat = null; pin.lng = null;
+    }));
     $('locate-me').addEventListener('click', () => locateMe(pin));
     $('addr-search').addEventListener('submit', (e) => { e.preventDefault(); search(pin); });
     if ($('addr-back')) $('addr-back').addEventListener('click', showList);

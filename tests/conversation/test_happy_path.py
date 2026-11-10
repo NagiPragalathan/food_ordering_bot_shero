@@ -452,6 +452,34 @@ async def test_out_of_range_location_ends_politely(session, far_outlet, menu, bo
     assert "do not deliver to your area" in bot.last().body
 
 
+async def test_an_address_typed_far_from_the_shared_pin_is_measured_by_the_address(
+        session, outlet, menu, bot, monkeypatch):
+    """A pin shared near the kitchen, then a Jersey City address with its ZIP:
+    the slots step measures the address (~38 km) and stops before any slot."""
+    from app.integrations.geo.geocoder import GeoPoint
+    from app.services import delivery_address
+
+    async def geocode(text, country=None):
+        if "Montgomery" in text:
+            return GeoPoint(40.7215, -74.0466, postal_code="07302",
+                            street="30 Montgomery St", source="google")
+        return None
+    monkeypatch.setattr(delivery_address, "geocode_address", geocode)
+
+    await _sign_up(session, bot)
+    await _add_drumstick(session, bot)
+    await handle_event(session, reply("cart:checkout"))
+    await handle_event(session, pin(*NEARBY))
+    for answer in ("30 Montgomery St, Jersey City NJ 07302", "skip", "skip", "same"):
+        await handle_event(session, text(answer))
+
+    customer, conversation = await _state(session)
+    assert customer.postal_code == "07302"                   # taken from the address
+    assert customer.lead_stage == LeadStage.NOT_SERVICEABLE
+    assert conversation.step != ConversationStep.AWAIT_SLOT_CHOICE
+    assert "outside our delivery area" in bot.last().body
+
+
 async def test_zip_list_decides_serviceability(session, outlet, menu, bot):
     """With service_area_mode='zips', the ZIP list is what counts."""
     outlet.service_area_mode = "zips"

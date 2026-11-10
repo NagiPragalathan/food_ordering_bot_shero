@@ -80,8 +80,8 @@
               <span class="inline-flex items-center gap-1.5" title="Delivery area">
                 <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
                 {% if k.service_area_mode == 'zips' %}{{ k.service_zips | length }} ZIP codes
-                {% elif k.service_area_mode == 'both' %}{{ miles(k.delivery_radius_km) | round(1) }} mi + {{ k.service_zips | length }} ZIPs
-                {% else %}Within <b class="font-semibold text-stone-800">{{ miles(k.delivery_radius_km) | round(1) }} mi</b>{% endif %}
+                {% elif k.service_area_mode == 'both' %}{{ miles(reach(k)) | round(1) }} mi + {{ k.service_zips | length }} ZIPs
+                {% else %}Within <b class="font-semibold text-stone-800">{{ miles(reach(k)) | round(1) }} mi</b>{% endif %}
               </span>
               <span class="inline-flex items-center gap-1.5" title="Today's hours">
                 <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -197,7 +197,7 @@ window.__kitchenMapData = {
   kitchens: [
     {% for k in kitchens if k.is_active %}
     {name: {{ k.name | tojson }}, lat: {{ k.latitude }}, lng: {{ k.longitude }},
-     radiusM: {{ (k.delivery_radius_km * 1000) if k.service_area_mode != 'zips' else 0 }}},
+     radiusM: {{ (reach(k) * 1000) if k.service_area_mode != 'zips' else 0 }}},
     {% endfor %}
   ],
   customer: {% if check and check.point %}{lat: {{ check.point.latitude }}, lng: {{ check.point.longitude }}}{% else %}null{% endif %},

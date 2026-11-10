@@ -216,6 +216,10 @@ class Settings(BaseSettings):
     delivery_fee_fallback: float = Field(default=0.0, ge=0)
     tax_percent: float = Field(default=0.0, ge=0, le=100)
     default_delivery_radius_km: float = Field(default=10.0, gt=0)
+    # The furthest any kitchen delivers, in straight-line miles, whatever its
+    # own radius says: Uber Direct's limit on this account (it refused an
+    # address 23.71 miles out with "Max Radius: 10.00 miles"). 0 = no cap.
+    delivery_max_miles: float = Field(default=10.0, ge=0)
     slot_hold_minutes: int = 30
     # The earliest delivery slot offered starts this long after ordering:
     # home-style food is cooked to order, so the kitchen needs the day.

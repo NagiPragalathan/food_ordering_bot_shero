@@ -11,6 +11,7 @@ enforced by `missing_details()` - checked again at summary time, not just here.
 
 from __future__ import annotations
 
+import re
 
 from app.core.exceptions import NoSlotsAvailableError
 from app.core.logging import get_logger
@@ -35,6 +36,8 @@ log = get_logger(__name__)
 
 MAX_SLOT_ROWS = 10
 DETAIL_CURSOR = "detail_index"
+# A US ZIP (or ZIP+4) at the very end of a typed address.
+TRAILING_ZIP = re.compile(r"\b(\d{5})(?:-\d{4})?\s*$")
 
 PROMPT_FOR_STEP = {
     ConversationStep.AWAIT_ADDRESS: p.ASK_ADDRESS,
@@ -73,6 +76,11 @@ async def handle_address(ctx: FlowContext) -> None:
         await ctx.reply_text(p.ADDRESS_REASK)
         return
     ctx.customer.address_line1 = address
+    # "12 Maple St, Edison NJ 08837": the ZIP typed with the street is the
+    # one it is delivered to, whatever an earlier pin or ZIP said.
+    typed_zip = TRAILING_ZIP.search(address)
+    if typed_zip:
+        ctx.customer.postal_code = typed_zip.group(1)
     await _advance_detail(ctx)
 
 
@@ -119,12 +127,20 @@ def missing_details(ctx: FlowContext) -> list[str]:
 
 # --- slots (step 13) ---------------------------------------------------------
 async def show_slots(ctx: FlowContext) -> None:
-    """Offer the available delivery slots for the chosen outlet."""
-    from app.services import kitchen as kitchen_service
-    from app.integrations.geo.geocoder import GeoPoint
+    """Offer the available delivery slots for the chosen outlet.
 
-    point = (GeoPoint(latitude=ctx.customer.latitude, longitude=ctx.customer.longitude)
-             if ctx.customer.latitude is not None and ctx.customer.longitude is not None else None)
+    The kitchen is checked again now that the street is known: a location pin
+    shared from one place with an address typed for another is measured by
+    the address (delivery_address.locate).
+    """
+    from app.services import delivery_address
+    from app.services import kitchen as kitchen_service
+
+    point = await delivery_address.locate(
+        street=ctx.customer.address_line1, postal_code=ctx.customer.postal_code,
+        latitude=ctx.customer.latitude, longitude=ctx.customer.longitude)
+    if point is not None:
+        ctx.customer.latitude, ctx.customer.longitude = point.latitude, point.longitude
     check = await kitchen_service.check_service(
         ctx.session, point, postal_code=ctx.customer.postal_code, require_capacity=True)
     outlet = check.kitchen
@@ -132,6 +148,11 @@ async def show_slots(ctx: FlowContext) -> None:
         ctx.customer.preferred_outlet_id = outlet.id
         ctx.put(outlet_id=str(outlet.id), distance_km=check.distance_km)
     if outlet is None:
+        if check.kitchen_name:              # outside every kitchen's area
+            log.info("address_out_of_range", reason=check.reason)
+            await ctx.set_stage(LeadStage.NOT_SERVICEABLE)
+            await ctx.reply_text(p.OUT_OF_DELIVERY_RANGE)
+            return
         await ctx.reply_text(check.reason or p.NO_SLOTS)
         return
 

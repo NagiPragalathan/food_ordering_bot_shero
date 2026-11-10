@@ -55,6 +55,9 @@ def _no_zip_lookups(monkeypatch):
         return None
 
     monkeypatch.setattr(delivery_address, "geocode_postal_code", nothing)
+    # Nor does the check that a pin sits at the typed address: no answer, so
+    # the pin stands (tests/services/test_pin_vs_address.py patches it).
+    monkeypatch.setattr(delivery_address, "geocode_address", nothing)
 
 
 @pytest.fixture(autouse=True)

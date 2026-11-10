@@ -1,11 +1,11 @@
 """Uber prices and books the same delivery (services/delivery_address.py,
 pricing._quote_delivery, dispatch.dispatch).
 
-SHO-261108-7QW2Q: our check put the address 6.4 km from the kitchen, but Uber
-refused the quote - the page sent the address in a shape Uber could not read,
-and Uber placed it 23.71 miles away, beyond its 10-mile radius. The page
-ignored the refusal, charged no delivery, took the payment, and the booking
-then failed every 5 minutes until the slot was over. What must hold now:
+SHO-261108-7QW2Q: Uber refused the quote - the address was 23.71 miles away,
+beyond its 10-mile radius (our own check had measured a map pin left by the
+kitchen; tests/services/test_pin_vs_address.py). The page ignored the refusal,
+charged no delivery, took the payment, and the booking then failed every 5
+minutes until the slot was over. What must hold now:
 the quote and the booking send the same, complete address and window; no
 Uber price means no order; and a booking Uber refuses for good is not retried.
 """

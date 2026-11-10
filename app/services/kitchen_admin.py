@@ -18,6 +18,7 @@ import tzfpy
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import Outlet
 from app.integrations.geo.geocoder import geocode_address
@@ -77,6 +78,11 @@ def parse_form(form) -> KitchenForm:
     if radius is None or radius <= 0:
         radius = DEFAULT_RADIUS_MILES
     mode = text("service_area_mode").lower()
+    cap = settings.delivery_max_miles
+    if cap and radius > cap and mode != "zips":
+        raise KitchenFormError(
+            f"Uber delivers at most {cap:g} miles from a kitchen, so the delivery "
+            f"radius can be {cap:g} miles or less.")
 
     return KitchenForm(
         name=text("name")[:120],
