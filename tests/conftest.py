@@ -46,15 +46,29 @@ def _answer_everyone(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_zip_lookups(monkeypatch):
-    """The Uber dropoff's ZIP -> city lookup never reaches the network in a
-    test: no answer, so the kitchen's city is used. A test that wants a city
-    patches it itself (tests/services/test_uber_delivery.py)."""
+    """The Uber dropoff's address lookups never reach the network in a test.
+    Every address is in Edison, NJ (the test kitchen's town); a test about the
+    town itself patches it back (tests/services/test_uber_delivery.py)."""
     from app.services import delivery_address
 
     async def nothing(postal_code, country=None):
         return None
 
+    async def edison(street, zip_code):
+        return ("Edison", "NJ") if zip_code else ("", "")
+
+    monkeypatch.setattr(delivery_address, "town", edison)
     monkeypatch.setattr(delivery_address, "geocode_postal_code", nothing)
+
+    # A WhatsApp pin shared without a ZIP: every spot is in Edison, 08820.
+    from app.integrations.geo.geocoder import GeoPoint
+    from app.services import kitchen
+
+    async def edison_pin(latitude, longitude):
+        return GeoPoint(latitude, longitude, postal_code="08820", city="Edison",
+                        state="New Jersey", state_code="NJ", source="test")
+
+    monkeypatch.setattr(kitchen, "reverse_geocode", edison_pin)
     # Nor does the check that a pin sits at the typed address: no answer, so
     # the pin stands (tests/services/test_pin_vs_address.py patches it).
     monkeypatch.setattr(delivery_address, "geocode_address", nothing)

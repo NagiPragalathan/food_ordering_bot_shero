@@ -122,9 +122,19 @@ async def test_no_kitchen_delivers_past_the_cap_whatever_its_radius(outlet, monk
     assert inside.is_serviceable and not beyond.is_serviceable
     assert kitchen_service.reach_km(outlet) == kitchen_service.km(10)
 
-    monkeypatch.setattr(settings, "delivery_max_miles", 0)          # 0: no cap
-    [beyond] = kitchen_service.coverage([outlet], _miles_north(outlet, 11), "")
-    assert beyond.is_serviceable
+    monkeypatch.setattr(settings, "delivery_max_miles", 8)          # can be lowered
+    [nine] = kitchen_service.coverage([outlet], _miles_north(outlet, 9), "")
+    assert not nine.is_serviceable
+
+
+@pytest.mark.parametrize("miles", [0, 10.5, 20])
+def test_the_cap_cannot_be_raised_past_10_or_switched_off(miles):
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+    with pytest.raises(ValidationError, match="delivery_max_miles"):
+        Settings(_env_file=None, delivery_max_miles=miles)
+    assert Settings(_env_file=None, delivery_max_miles=8).delivery_max_miles == 8
 
 
 def test_a_smaller_radius_still_counts(outlet):
@@ -135,3 +145,40 @@ def test_the_kitchen_form_refuses_a_radius_past_the_cap():
     with pytest.raises(kitchen_admin.KitchenFormError, match="at most 10 miles"):
         kitchen_admin.parse_form({**FORM, "radius_miles": "20"})
     assert kitchen_admin.parse_form({**FORM, "radius_miles": "8"}).radius_miles == 8
+
+
+# --- the admin Settings page ------------------------------------------------------------
+@pytest.mark.parametrize("value, ok", [("10", True), ("8", True), ("1", True),
+                                       ("10.5", False), ("20", False), ("0", False),
+                                       ("ten", False)])
+def test_the_settings_page_takes_10_miles_at_most(value, ok):
+    from app.services.settings_store import SettingValueError, check_value
+
+    if ok:
+        check_value("DELIVERY_MAX_MILES", value)
+    else:
+        with pytest.raises(SettingValueError):
+            check_value("DELIVERY_MAX_MILES", value)
+
+
+async def test_a_lower_limit_saved_on_the_settings_page_applies_at_once(
+        session, outlet, monkeypatch):
+    from app.services import settings_store
+
+    monkeypatch.setattr(settings, "delivery_max_miles", 10.0)
+    outlet.delivery_radius_km = kitchen_service.km(10)
+    await settings_store.save_many(session, {"DELIVERY_MAX_MILES": "6"}, updated_by="test")
+    try:
+        [seven] = kitchen_service.coverage([outlet], _miles_north(outlet, 7), "")
+        assert not seven.is_serviceable
+        assert kitchen_service.reach_km(outlet) == kitchen_service.km(6)
+    finally:
+        await settings_store.save_many(session, {"DELIVERY_MAX_MILES": ""},
+                                       updated_by="test", allow_blank={"DELIVERY_MAX_MILES"})
+
+
+def test_a_stored_value_past_uber_is_held_to_10(monkeypatch):
+    """Even a value written around the page (straight into the database) is
+    held to Uber's 10 miles."""
+    monkeypatch.setattr(settings, "delivery_max_miles", 25.0)
+    assert kitchen_service.max_km() == kitchen_service.km(10)

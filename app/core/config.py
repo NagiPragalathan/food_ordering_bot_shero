@@ -211,15 +211,15 @@ class Settings(BaseSettings):
     client_backend_api_key: str = ""
 
     # --- Business rules ------------------------------------------------------
-    # Stand-in delivery fee for local testing, used only when Uber is
-    # unconfigured AND app_env is not "production". 0 disables it.
-    delivery_fee_fallback: float = Field(default=0.0, ge=0)
+    # There is no stand-in delivery fee: a customer pays Uber's own quote, or
+    # does not order (services/pricing.py).
     tax_percent: float = Field(default=0.0, ge=0, le=100)
     default_delivery_radius_km: float = Field(default=10.0, gt=0)
     # The furthest any kitchen delivers, in straight-line miles, whatever its
     # own radius says: Uber Direct's limit on this account (it refused an
-    # address 23.71 miles out with "Max Radius: 10.00 miles"). 0 = no cap.
-    delivery_max_miles: float = Field(default=10.0, ge=0)
+    # address 23.71 miles out with "Max Radius: 10.00 miles"). It can be set
+    # lower, never higher than 10, and never switched off.
+    delivery_max_miles: float = Field(default=10.0, gt=0, le=10)
     slot_hold_minutes: int = 30
     # The earliest delivery slot offered starts this long after ordering:
     # home-style food is cooked to order, so the kitchen needs the day.

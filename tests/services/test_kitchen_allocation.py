@@ -12,10 +12,12 @@ from tests.services.test_orders import _priced
 @pytest.fixture(autouse=True)
 def _no_distance_cap(monkeypatch):
     """These tests reach the Jersey City kitchen (~38 km) with a 100 km radius
-    to exercise allocation; the 10-mile cap has its own tests
+    to exercise allocation, so the cap is lifted here past what the setting
+    itself allows; the 10-mile cap has its own tests
     (tests/services/test_pin_vs_address.py)."""
     from app.core.config import settings
-    monkeypatch.setattr(settings, "delivery_max_miles", 0)
+    monkeypatch.setattr(kitchen, "UBER_MAX_MILES", 100)
+    monkeypatch.setattr(settings, "delivery_max_miles", 100)
 
 
 async def allocate(session, customer):

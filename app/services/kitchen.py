@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.db.models import Customer, Outlet
 from app.integrations.geo.distance import haversine_km, round_km
-from app.integrations.geo.geocoder import GeoPoint, geocode_postal_code
+from app.integrations.geo.geocoder import GeoPoint, geocode_postal_code, reverse_geocode
 
 log = get_logger(__name__)
 
@@ -98,12 +98,19 @@ async def resolve_location(
 ) -> GeoPoint | None:
     """Turn a shared pin or a typed ZIP into coordinates.
 
-    A pin wins over a ZIP because it is exact. Returns None when neither can
-    be resolved, which is the spec's "re-ask if location can't be read" path.
+    A pin wins over a ZIP because it is exact. A pin shared without a ZIP
+    gets the real ZIP, city and state at that spot, so the delivery address
+    Uber is sent later is the customer's own, never a guessed town. Returns
+    None when neither can be resolved, which is the spec's "re-ask if
+    location can't be read" path.
     """
     if latitude is not None and longitude is not None:
+        zip_code = (postal_code or "").strip()
+        there = None if zip_code else await reverse_geocode(float(latitude), float(longitude))
         return GeoPoint(latitude=float(latitude), longitude=float(longitude),
-                        postal_code=(postal_code or "").strip(), source="pin")
+                        postal_code=zip_code or (there.postal_code if there else ""),
+                        city=there.city if there else "", state=there.state if there else "",
+                        state_code=there.state_code if there else "", source="pin")
     if postal_code:
         return await geocode_postal_code(postal_code)
     return None
@@ -196,21 +203,27 @@ def _evaluate(kitchen: Outlet, point: GeoPoint | None, zip_code: str) -> Service
     return ServiceCheck(ok, distance, reason, kitchen_name=kitchen.name, kitchen=kitchen)
 
 
-def max_km() -> float | None:
-    """The furthest any kitchen delivers (DELIVERY_MAX_MILES), or None for no cap."""
+# Uber Direct's own limit: "Max Radius: 10.00 miles", in a straight line from
+# the pickup. The admin setting may go lower, never higher.
+UBER_MAX_MILES = 10.0
+
+
+def max_km() -> float:
+    """The furthest any kitchen delivers: DELIVERY_MAX_MILES (Settings page or
+    .env), and never more than Uber's 10 miles whatever is stored."""
     from app.core.config import settings
 
-    cap = settings.delivery_max_miles
-    return km(cap) if cap and cap > 0 else None
+    miles = settings.delivery_max_miles
+    if not miles or miles <= 0 or miles > UBER_MAX_MILES:
+        miles = UBER_MAX_MILES
+    return km(miles)
 
 
 def reach_km(kitchen: Outlet) -> float:
     """How far this kitchen really delivers: its own radius, never beyond the
     cap. A kitchen set to 20 miles took an order 23.7 miles out that Uber,
     limited to 10, then refused."""
-    own = kitchen.delivery_radius_km or 0
-    cap = max_km()
-    return min(own, cap) if cap is not None else own
+    return min(kitchen.delivery_radius_km or 0, max_km())
 
 
 def _both_reason(radius_ok: bool, zip_ok: bool) -> str:

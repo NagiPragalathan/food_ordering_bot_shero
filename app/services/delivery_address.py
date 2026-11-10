@@ -9,12 +9,14 @@ measured the pin (6.4 km) and let it through, while Uber measured the address
 
 `uber_dropoff` is one builder for the quote at checkout and the booking before
 the slot, so both send the same, complete address: the street and unit, the
-ZIP, and the ZIP's own city and state. The kitchen's city is only a last
-resort - a customer's street with the kitchen's town is another place.
+ZIP, and the ZIP's own city and state. Nothing is filled in by guesswork - a
+customer's street with the kitchen's town is another place - so an address
+whose town cannot be found is refused and the customer asked to check it.
 """
 
 from __future__ import annotations
 
+from app.core.exceptions import BotFlowError
 from app.core.logging import get_logger
 from app.db.models import Outlet
 from app.integrations.geo.distance import haversine_km
@@ -76,25 +78,47 @@ async def _typed_point(street: str | None, zip_code: str) -> GeoPoint | None:
     return point
 
 
+class AddressNotFound(BotFlowError):
+    """The address's own city and state could not be found. Nothing is
+    guessed in their place: the customer is asked to check the address."""
+
+
+ADDRESS_NOT_FOUND = ("We couldn't find that address on the map. Please check the street "
+                     "and ZIP code, then try again.")
+
+
 async def uber_dropoff(*, street: str | None, unit: str | None, postal_code: str | None,
                        kitchen: Outlet) -> dict:
-    """Uber's address dict for a customer's delivery address."""
-    zip_code = (postal_code or "").strip()
-    city, state = await _city_and_state(zip_code)
-    address = uber.build_address(street=(street or "").strip(), city=city or kitchen.city,
-                                 state=state or kitchen.state, zip_code=zip_code,
+    """Uber's address dict for a customer's delivery address.
+
+    Raises AddressNotFound when the address's own city and state cannot be
+    found - never the kitchen's town in their place.
+    """
+    street, zip_code = (street or "").strip(), (postal_code or "").strip()
+    city, state = await town(street, zip_code)
+    if not (street and zip_code and city and state):
+        raise AddressNotFound(f"no city/state for {street!r}, ZIP {zip_code!r}",
+                              customer_message=ADDRESS_NOT_FOUND)
+    address = uber.build_address(street=street, city=city, state=state, zip_code=zip_code,
                                  country=kitchen.country or "US")
     if unit and unit.strip():
         address["street_address"].append(unit.strip())
     return address
 
 
-async def _city_and_state(zip_code: str) -> tuple[str, str]:
-    """The ZIP's city and state (short form where known). Cached by the
-    geocoder, so a quote and the confirm that follows look it up once."""
+async def town(street: str, zip_code: str) -> tuple[str, str]:
+    """The address's own city and state (short form where known): the ZIP's,
+    else the typed street's. Both lookups are cached by the geocoder, so a
+    quote and the confirm that follows ask once."""
     if not zip_code:
         return "", ""
-    point = await geocode_postal_code(zip_code)
-    if point is None:
-        return "", ""
-    return point.city or "", point.state_code or point.state or ""
+    for lookup in (lambda: geocode_postal_code(zip_code),
+                   lambda: geocode_address(f"{street}, {zip_code}") if street else _none()):
+        point = await lookup()
+        if point is not None and point.city and (point.state_code or point.state):
+            return point.city, point.state_code or point.state
+    return "", ""
+
+
+async def _none() -> None:
+    return None

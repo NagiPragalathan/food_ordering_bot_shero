@@ -54,7 +54,6 @@ easy to get wrong:
 | `ADMIN_BOOTSTRAP_*` | Creates the first admin on startup. **Remove after first sign-in.** |
 | `ORDER_MODE` | `web` (default) sends a storefront link; `chat` browses in WhatsApp |
 | `PUBLIC_BASE_URL` | The ordering link is built from it — a wrong value sends customers nowhere |
-| `DELIVERY_FEE_FALLBACK` | Testing only. Ignored when `APP_ENV=production` |
 
 ### The scheduler constraint
 
@@ -192,7 +191,6 @@ Log events worth alerting on:
 | `admin_login_failed` (repeated) | Someone guessing at the dashboard |
 | `no_kitchen_configured` | The kitchen has not been set up in Settings |
 | `order_link_unavailable` | `ADMIN_SESSION_SECRET` missing; links fall back to chat browsing |
-| `delivery_fee_fallback_used` | A stand-in delivery fee was charged — must never appear in production |
 | `web_payment_link_failed` | A web order was cancelled because Stripe would not issue a link |
 
 Worth a dashboard: orders paid per hour, and lead stage counts (the drop-off

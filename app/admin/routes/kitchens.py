@@ -219,8 +219,8 @@ def _form(request: Request, current_user: AdminUser, kitchen: Outlet | None):
         "maps_browser_key": settings.google_maps_browser_key,
         "radius_miles": (kitchen_service.miles(kitchen.delivery_radius_km) if kitchen
                          else kitchen_admin.DEFAULT_RADIUS_MILES),
-        # The slider stops at the cap (DELIVERY_MAX_MILES); 0 means none.
-        "max_radius_miles": settings.delivery_max_miles or 30,
+        # The slider stops at the cap (DELIVERY_MAX_MILES, 10 at most).
+        "max_radius_miles": settings.delivery_max_miles,
     })
 
 

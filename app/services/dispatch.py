@@ -41,7 +41,7 @@ from app.core.logging import get_logger
 from app.db.models import Customer, DeliverySlot, Order, OrderStage, Outlet, PaymentStatus
 from app.integrations.uber import direct as uber
 from app.integrations.zoho import fields as f
-from app.services.delivery_address import uber_dropoff
+from app.services.delivery_address import AddressNotFound, uber_dropoff
 from app.services.slots import as_utc
 
 log = get_logger(__name__)
@@ -231,6 +231,11 @@ async def dispatch(session: AsyncSession, order: Order, *,
             # The same request gets the same refusal: no more automatic tries.
             order.uber_retry_stopped_at = now
         return _failed(order, _reason(exc))
+    except AddressNotFound:
+        # It was found at checkout, so the map lookup is down: the next run
+        # tries again. Never booked to a guessed town.
+        return _failed(order, "Could not look up the customer's city and state for Uber "
+                              "just now; will try again.")
     except ConfigurationError as exc:
         return _failed(order, str(exc))
 

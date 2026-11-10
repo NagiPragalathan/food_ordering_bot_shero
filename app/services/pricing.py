@@ -162,12 +162,8 @@ async def price_cart(
             priced.uber_quote_id = quote.quote_id
             priced.uber_quote_raw = quote.raw
             priced.currency = quote.currency or currency
-        elif _fallback_fee() is not None:
-            # Local testing without Uber credentials. Never reachable in
-            # production - see `_fallback_fee`.
-            priced.delivery_fee = money(_fallback_fee())
-            log.warning("delivery_fee_fallback_used", fee=str(priced.delivery_fee))
         else:
+            # Uber's own price or none: never a stand-in fee, in any setup.
             priced.delivery_quote_failed, priced.delivery_quote_error = True, UNAVAILABLE
 
     if promotion is not None:
@@ -207,19 +203,6 @@ def _settle(priced: PricedOrder) -> None:
         - priced.discount - priced.loyalty_discount
     )
 
-
-def _fallback_fee() -> Decimal | None:
-    """A stand-in delivery fee, or None when it must not apply.
-
-    Guarded twice on purpose: it needs an explicit non-zero setting *and* a
-    non-production environment. Charging a guessed delivery fee to a real
-    customer would be worse than refusing the order.
-    """
-    if settings.app_env == "production":
-        return None
-    if not settings.delivery_fee_fallback:
-        return None
-    return Decimal(str(settings.delivery_fee_fallback))
 
 
 async def _price_lines(session, cart_items: list[dict]) -> list[PricedLine]:

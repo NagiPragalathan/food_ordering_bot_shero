@@ -56,6 +56,9 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("FEEDBACK_DELAY_MINUTES", "Feedback request after delivery (minutes)", False),
         ("UBER_DISPATCH_HOURS_BEFORE",
          "When to book the Uber courier: hours before the delivery slot (e.g. 1, 2, 3)", False),
+        ("DELIVERY_MAX_MILES",
+         "Maximum delivery distance: miles from the kitchen, straight line "
+         "(10 at most - Uber's limit)", False),
         ("PUBLIC_BASE_URL", "Public API URL", False),
         ("PAY_REDIRECT_BASE_URL", "Pay redirect URL", False),
     ],
@@ -91,6 +94,9 @@ NUMBER_RANGES: dict[str, tuple[float, float]] = {
     # At least half an hour, so the courier has time to reach the kitchen;
     # at most 12, as Uber will not hold a booking much longer.
     "UBER_DISPATCH_HOURS_BEFORE": (0.5, 12),
+    # Uber Direct delivers 10 miles from the pickup at most, measured in a
+    # straight line, so a kitchen may reach less than that, never more.
+    "DELIVERY_MAX_MILES": (1, 10),
 }
 
 

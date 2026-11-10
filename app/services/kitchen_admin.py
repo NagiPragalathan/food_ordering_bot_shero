@@ -79,7 +79,7 @@ def parse_form(form) -> KitchenForm:
         radius = DEFAULT_RADIUS_MILES
     mode = text("service_area_mode").lower()
     cap = settings.delivery_max_miles
-    if cap and radius > cap and mode != "zips":
+    if radius > cap and mode != "zips":
         raise KitchenFormError(
             f"Uber delivers at most {cap:g} miles from a kitchen, so the delivery "
             f"radius can be {cap:g} miles or less.")

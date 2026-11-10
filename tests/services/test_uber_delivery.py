@@ -29,6 +29,9 @@ from app.services import addresses, delivery_address, dispatch, order_link, pric
 from tests.services.test_dispatch import NOW, _order
 from tests.services.test_out_of_area import NEAR, FakeRequest, Recorder
 
+# The real town lookup: conftest stands every address in Edison, NJ.
+REAL_TOWN = delivery_address.town
+
 REFUSAL = {"code": "address_undeliverable",
            "message": "The specified location is not in a deliverable area.", "kind": "error",
            "metadata": {"details": "The dropoff location is outside the delivery radius of the "
@@ -46,6 +49,7 @@ def zip_town(monkeypatch):
     async def lookup(postal_code, country=None):
         return GeoPoint(latitude=40.55, longitude=-74.46, postal_code=postal_code,
                         city="Piscataway", state="New Jersey", state_code="NJ")
+    monkeypatch.setattr(delivery_address, "town", REAL_TOWN)
     monkeypatch.setattr(delivery_address, "geocode_postal_code", lookup)
 
 
@@ -80,11 +84,27 @@ async def test_the_uber_address_is_the_customers_own_town(outlet, zip_town):
                        "state": "NJ", "zip_code": "08854", "country": "US"}
 
 
-async def test_the_kitchens_town_is_only_the_last_resort(outlet):
+async def test_the_street_gives_the_town_when_the_zip_does_not(outlet, monkeypatch):
+    async def street(text, country=None):
+        return GeoPoint(40.52, -74.41, city="Edison", state="New Jersey", state_code="NJ",
+                        street="12 Maple St", postal_code="08820")
+    monkeypatch.setattr(delivery_address, "town", REAL_TOWN)
+    monkeypatch.setattr(delivery_address, "geocode_address", street)
     address = await delivery_address.uber_dropoff(street="12 Maple St", unit=None,
                                                   postal_code="08820", kitchen=outlet)
-    assert (address["city"], address["state"], address["street_address"]) == (
-        "Edison", "NJ", ["12 Maple St"])
+    assert (address["city"], address["state"]) == ("Edison", "NJ")
+
+
+async def test_a_town_that_cannot_be_found_is_never_guessed(outlet, monkeypatch):
+    """Not the kitchen's town: the customer is asked to check the address."""
+    async def nothing(*_a, **_kw):
+        return None
+    monkeypatch.setattr(delivery_address, "town", REAL_TOWN)
+    monkeypatch.setattr(delivery_address, "geocode_address", nothing)
+    with pytest.raises(delivery_address.AddressNotFound) as caught:
+        await delivery_address.uber_dropoff(street="12 Maple St", unit=None,
+                                            postal_code="08820", kitchen=outlet)
+    assert caught.value.customer_message == delivery_address.ADDRESS_NOT_FOUND
 
 
 # --- the quote --------------------------------------------------------------------------
@@ -132,8 +152,7 @@ async def test_uber_down_is_unavailable(outlet, quotes):
 
 
 async def test_no_price_is_never_a_zero_delivery_charge(session, outlet, quotes, monkeypatch):
-    monkeypatch.setattr(settings, "delivery_fee_fallback", 4.0)       # even with a dev fallback
-    monkeypatch.setattr(settings, "app_env", "development")
+    monkeypatch.setattr(settings, "app_env", "development")          # in any setup
 
     async def one_line(session_, items):
         return [pricing.PricedLine("x", "Sambar", 1, Decimal("10.00"), Decimal("10.00"))]

@@ -1,4 +1,4 @@
-"""The web storefront's cart sanitising and the dev delivery-fee fallback.
+"""The web storefront's cart sanitising.
 
 The cart arrives from a browser, so it is untrusted input: quantities, ids and
 the shape of the list itself are all attacker-controlled. Prices are never
@@ -8,13 +8,9 @@ must not reach the pricing code at all.
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 import pytest
 
 from app.api.routes.order_web import _clean_cart
-from app.core.config import settings
-from app.services.pricing import _fallback_fee
 
 
 class TestCleanCart:
@@ -55,24 +51,3 @@ class TestCleanCart:
         """20 is the limit the bot enforces; the web must not be looser."""
         assert _clean_cart([{"retailer_id": "a", "quantity": 20}])
         assert _clean_cart([{"retailer_id": "a", "quantity": 21}]) == []
-
-
-class TestFallbackFee:
-    """A guessed delivery fee must never reach a real customer."""
-
-    def test_disabled_by_default(self, monkeypatch):
-        monkeypatch.setattr(settings, "delivery_fee_fallback", 0.0)
-        monkeypatch.setattr(settings, "app_env", "development")
-        assert _fallback_fee() is None
-
-    def test_applies_in_development_when_set(self, monkeypatch):
-        monkeypatch.setattr(settings, "delivery_fee_fallback", 5.99)
-        monkeypatch.setattr(settings, "app_env", "development")
-        assert _fallback_fee() == Decimal("5.99")
-
-    def test_never_applies_in_production_even_when_set(self, monkeypatch):
-        """The guard that matters: a misconfigured production deployment
-        refuses the order rather than inventing a delivery charge."""
-        monkeypatch.setattr(settings, "delivery_fee_fallback", 5.99)
-        monkeypatch.setattr(settings, "app_env", "production")
-        assert _fallback_fee() is None
