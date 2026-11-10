@@ -70,13 +70,16 @@ class UberDirectClient(ApiClient):
         dropoff_latitude: float | None = None,
         dropoff_longitude: float | None = None,
         pickup_ready_at: datetime | None = None,
+        pickup_deadline_at: datetime | None = None,
+        dropoff_ready_at: datetime | None = None,
         dropoff_deadline_at: datetime | None = None,
     ) -> DeliveryQuote:
         """Quote a delivery from an outlet to the customer.
 
-        `pickup` / `dropoff` are structured address dicts (see `build_address`).
-        Coordinates are sent alongside because a ZIP-only dropoff geocodes
-        poorly on Uber's side.
+        `pickup` / `dropoff` are Uber address dicts (`build_address`) - the
+        same ones the booking sends, so Uber prices the place it delivers to.
+        Coordinates are sent alongside for precision. The four times are the
+        booking's window (`pricing._quote_delivery`).
         """
         body: dict = {
             "pickup_address": json.dumps(pickup),
@@ -87,10 +90,12 @@ class UberDirectClient(ApiClient):
         if dropoff_latitude is not None and dropoff_longitude is not None:
             body["dropoff_latitude"] = dropoff_latitude
             body["dropoff_longitude"] = dropoff_longitude
-        if pickup_ready_at:
-            body["pickup_ready_dt"] = _iso(pickup_ready_at)
-        if dropoff_deadline_at:
-            body["dropoff_deadline_dt"] = _iso(dropoff_deadline_at)
+        for key, value in (("pickup_ready_dt", pickup_ready_at),
+                           ("pickup_deadline_dt", pickup_deadline_at),
+                           ("dropoff_ready_dt", dropoff_ready_at),
+                           ("dropoff_deadline_dt", dropoff_deadline_at)):
+            if value:
+                body[key] = _iso(value)
 
         payload = await self.post(
             f"/v1/customers/{settings.uber_customer_id}/delivery_quotes", json=body
@@ -171,6 +176,29 @@ def build_address(*, street: str, city: str, state: str, zip_code: str,
         "zip_code": zip_code,
         "country": country,
     }
+
+
+# Uber's word that it cannot deliver there: beyond its radius from the
+# kitchen (10 miles on this account), or a place it cannot find.
+UNDELIVERABLE = {"address_undeliverable", "address_undeliverable_limited_couriers",
+                 "unknown_location"}
+
+
+def error_code(exc: Exception) -> str:
+    """The `code` in Uber's error body ("address_undeliverable"), or ""."""
+    payload = getattr(exc, "payload", None)
+    return str(payload.get("code") or "") if isinstance(payload, dict) else ""
+
+
+def is_undeliverable(exc: Exception) -> bool:
+    return error_code(exc) in UNDELIVERABLE
+
+
+def is_permanent(exc: Exception) -> bool:
+    """Will asking again get the same answer? Uber refusing the request itself
+    (400, 404, 422: the address, a field) does; an outage, a timeout, a rate
+    limit or expired credentials do not."""
+    return getattr(exc, "status_code", None) in (400, 404, 422)
 
 
 def minor_to_decimal(value: object) -> Decimal:

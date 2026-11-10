@@ -25,7 +25,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import ConversationStep, Customer, DeliverySlot, LeadStage, OrderStage
 from app.db.session import get_session
-from app.services import addresses, crm_sync, media_thumbs
+from app.services import addresses, crm_sync, delivery_address, media_thumbs
 from app.services import cart as cart_service
 from app.services import kitchen as kitchen_service
 from app.services import menu as menu_service
@@ -47,6 +47,10 @@ router = APIRouter(prefix="/order", tags=["ordering"])
 
 # Shown when an upstream we depend on is unconfigured or down. It names
 # nothing internal: the detail goes to the log, not the customer.
+# Uber will not deliver to the address from the kitchen: beyond its radius
+# (10 miles on this account), or a place it cannot find.
+OUT_OF_RANGE = ("Sorry, our delivery partner can't deliver to this address from our "
+                "kitchen - it is outside our delivery area. Please choose another address.")
 UPSTREAM_DOWN = ("We could not work out the delivery charge just now. "
                  "Please try again shortly, or message us on WhatsApp.")
 PAYMENT_DOWN = ("We could not start the payment just now. Nothing has been "
@@ -485,8 +489,9 @@ async def quote(request: Request, token: str,
             outlet=kitchen,
             dropoff_latitude=point.latitude if point else customer.latitude,
             dropoff_longitude=point.longitude if point else customer.longitude,
-            dropoff_address=_dropoff(address),
+            dropoff_address=await _dropoff(address, kitchen),
             slot_starts_at=slots.as_utc(slot.starts_at),
+            slot_ends_at=slots.as_utc(slot.ends_at),
             promotion=promotion,
             customer_id=customer.id,
             loyalty_points=body.get("loyalty_points", 0),
@@ -499,6 +504,8 @@ async def quote(request: Request, token: str,
         # customer's. Say so plainly here instead of returning a 500.
         log.error("web_quote_failed", error=str(exc))
         return {"ok": False, "error": UPSTREAM_DOWN}
+    if priced.delivery_quote_failed:
+        return _no_delivery(priced, kitchen)
 
     await crm_sync.advance_stage(customer, LeadStage.SLOT_SELECTED, forward_only=True)
     return {
@@ -575,12 +582,16 @@ async def confirm(request: Request, token: str,
             outlet=kitchen,
             dropoff_latitude=customer.latitude,
             dropoff_longitude=customer.longitude,
-            dropoff_address=_dropoff(address),
+            dropoff_address=await _dropoff(address, kitchen),
             slot_starts_at=slots.as_utc(slot.starts_at),
+            slot_ends_at=slots.as_utc(slot.ends_at),
             promotion=promotion,
             customer_id=customer.id,
             loyalty_points=body.get("loyalty_points", 0),
         )
+        # No Uber price, no order: never a guessed (or zero) delivery charge.
+        if priced.delivery_quote_failed:
+            return _no_delivery(priced, kitchen)
         # The customer agreed to the total they were shown. If the coupon
         # stopped applying since (expired, claimed, cart changed), show them
         # the new total before anything is created.
@@ -691,9 +702,17 @@ def _clean_cart(raw) -> list[dict]:
     return cart
 
 
-def _dropoff(address) -> dict:
-    return {
-        "street": address.address_line1,
-        "unit": address.apartment_unit or "",
-        "postal_code": address.postal_code,
-    }
+async def _dropoff(address, kitchen) -> dict:
+    """The address as Uber reads it - the same one the booking sends."""
+    return await delivery_address.uber_dropoff(
+        street=address.address_line1, unit=address.apartment_unit,
+        postal_code=address.postal_code, kitchen=kitchen)
+
+
+def _no_delivery(priced, kitchen) -> dict:
+    """Uber gave no price: say why, and take no order."""
+    log.warning("web_order_blocked_no_quote", outlet=kitchen.code,
+                reason=priced.delivery_quote_error)
+    if priced.delivery_quote_error == pricing.UNDELIVERABLE:
+        return {"ok": False, "error": OUT_OF_RANGE}
+    return {"ok": False, "error": UPSTREAM_DOWN}

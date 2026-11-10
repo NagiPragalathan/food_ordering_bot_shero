@@ -95,10 +95,29 @@ immediately. `fee` becomes the delivery charge, `tax` becomes the "extra
 taxes/fees" line — the two the spec shows separately on the summary.
 
 Addresses are sent as JSON strings (`build_address`), with coordinates
-alongside, because a ZIP-only dropoff geocodes poorly on Uber's side.
+alongside for precision. **The quote at checkout and the booking before the
+slot send the same dropoff** (`services/delivery_address.uber_dropoff`):
+street and unit, the ZIP, and the ZIP's own city and state (the kitchen's
+only if the ZIP can't be looked up). Uber places a delivery by its address
+first, so a customer's street with the kitchen's town, or an address in a
+shape Uber can't read, is priced - or refused - as somewhere else. The quote
+also asks for the booking's own window (pickup from UBER_DISPATCH_HOURS_BEFORE
+the slot, delivered inside it), so the fee is Uber's price for the delivery
+it will book. Uber's price can still move between checkout and booking; the
+Uber queue shows what the customer paid beside what Uber charged.
 
-**If the quote fails, the order is blocked**, not estimated. Charging a
-guessed delivery fee is worse than asking the customer to retry.
+**If the quote fails, the order is blocked**, not estimated - in chat and on
+the ordering page, before any payment link. Charging a guessed (or zero)
+delivery fee is worse than asking the customer to retry. When Uber says
+`address_undeliverable` (beyond its delivery radius from the kitchen - 10
+miles on this account - or a place it can't find) the customer is told the
+address is outside the delivery area and asked for another; anything else
+(Uber down, not set up) asks them to try again.
+
+Booking (`services/dispatch.py`): a refusal Uber will repeat (HTTP 400, 404,
+422 - the address, a field) stops the automatic retries and shows **Needs
+attention** on the Uber queue; an outage, a rate limit or expired keys is
+tried again every 5 minutes until the slot ends.
 
 ## Stripe
 

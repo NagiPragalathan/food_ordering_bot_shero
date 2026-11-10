@@ -36,6 +36,10 @@ CENTS = Decimal("0.01")
 # Lead time handed to Uber when quoting; the real window comes from the slot.
 DEFAULT_PICKUP_LEAD_MINUTES = 45
 
+# PricedOrder.delivery_quote_error
+UNDELIVERABLE = "undeliverable"      # Uber cannot deliver there (its radius, an unknown place)
+UNAVAILABLE = "unavailable"          # Uber could not be asked (down, not set up)
+
 
 def money(value) -> Decimal:
     """Round to 2dp, half-up - the way money is rounded, not bankers'."""
@@ -72,6 +76,8 @@ class PricedOrder:
     uber_quote_id: str | None = None
     uber_quote_raw: dict = field(default_factory=dict)
     delivery_quote_failed: bool = False
+    # Why: Uber cannot deliver there (UNDELIVERABLE), or could not be asked.
+    delivery_quote_error: str = ""
     # The coupon. `discount` is zero when none is applied, or when the cart
     # does not qualify yet - `promo_problem` then says why.
     discount: Decimal = Decimal("0.00")
@@ -115,6 +121,7 @@ async def price_cart(
     dropoff_longitude: float | None = None,
     dropoff_address: dict | None = None,
     slot_starts_at: datetime | None = None,
+    slot_ends_at: datetime | None = None,
     promotion: Promotion | None = None,
     customer_id=None,
     loyalty_points: int = 0,
@@ -138,14 +145,18 @@ async def price_cart(
 
     # Delivery quote needs a destination and an outlet to quote from.
     if outlet is not None and dropoff_address is not None:
-        quote = await _quote_delivery(
+        quote, why = await _quote_delivery(
             outlet=outlet,
             dropoff_address=dropoff_address,
             dropoff_latitude=dropoff_latitude,
             dropoff_longitude=dropoff_longitude,
             slot_starts_at=slot_starts_at,
+            slot_ends_at=slot_ends_at,
         )
-        if quote is not None:
+        if why == UNDELIVERABLE:
+            # Never guessed around: Uber will not take this delivery.
+            priced.delivery_quote_failed, priced.delivery_quote_error = True, why
+        elif quote is not None:
             priced.delivery_fee = money(quote.fee)
             priced.extra_fees = money(quote.extra_fees)
             priced.uber_quote_id = quote.quote_id
@@ -157,7 +168,7 @@ async def price_cart(
             priced.delivery_fee = money(_fallback_fee())
             log.warning("delivery_fee_fallback_used", fee=str(priced.delivery_fee))
         else:
-            priced.delivery_quote_failed = True
+            priced.delivery_quote_failed, priced.delivery_quote_error = True, UNAVAILABLE
 
     if promotion is not None:
         priced.promotion = promotion
@@ -273,12 +284,15 @@ async def _quote_delivery(
     dropoff_latitude: float | None,
     dropoff_longitude: float | None,
     slot_starts_at: datetime | None,
-) -> uber.DeliveryQuote | None:
-    """Ask Uber Direct for the delivery charge.
+    slot_ends_at: datetime | None = None,
+) -> tuple[uber.DeliveryQuote | None, str]:
+    """Ask Uber Direct for the delivery charge: (quote, "") or (None, why).
 
-    Returns None if Uber is unreachable. The caller decides what to do; the
-    conversation handler treats it as a soft failure and asks the customer to
-    retry rather than charging a guessed fee.
+    Quoted for the booking's own window (services/dispatch.py: pickup from
+    UBER_DISPATCH_HOURS_BEFORE the slot, delivered inside it), so the price is
+    Uber's price for the delivery it will book. The caller never charges a
+    guessed fee: the customer is told, and asked to retry or use another
+    address.
     """
     pickup = uber.build_address(
         street=outlet.address_line1,
@@ -287,11 +301,18 @@ async def _quote_delivery(
         zip_code=outlet.postal_code,
         country=outlet.country or "US",
     )
-    pickup_ready = slot_starts_at or (
-        datetime.now(timezone.utc) + timedelta(minutes=DEFAULT_PICKUP_LEAD_MINUTES)
-    )
+    now = datetime.now(timezone.utc)
+    if slot_starts_at is not None and slot_ends_at is not None:
+        before = timedelta(hours=settings.uber_dispatch_hours_before)
+        window = {"pickup_ready_at": max(now, slot_starts_at - before),
+                  "pickup_deadline_at": slot_ends_at,
+                  "dropoff_ready_at": max(now, slot_starts_at),
+                  "dropoff_deadline_at": slot_ends_at}
+    else:
+        window = {"pickup_ready_at": slot_starts_at or (
+            now + timedelta(minutes=DEFAULT_PICKUP_LEAD_MINUTES))}
 
-    try:
+    async def ask(times: dict) -> uber.DeliveryQuote:
         return await uber.uber_direct.get_quote(
             pickup=pickup,
             dropoff=dropoff_address,
@@ -299,17 +320,27 @@ async def _quote_delivery(
             pickup_longitude=outlet.longitude,
             dropoff_latitude=dropoff_latitude,
             dropoff_longitude=dropoff_longitude,
-            pickup_ready_at=pickup_ready,
+            **times,
         )
+
+    try:
+        try:
+            return await ask(window), ""
+        except IntegrationError as exc:
+            if uber.is_undeliverable(exc) or len(window) == 1 or not uber.is_permanent(exc):
+                raise
+            # Uber refused the window itself: the plain quote still prices it.
+            log.warning("uber_quote_window_refused", outlet=outlet.code, error=str(exc))
+            return await ask({"pickup_ready_at": window["pickup_ready_at"]}), ""
     except IntegrationError as exc:
         log.error("uber_quote_failed", outlet=outlet.code, error=str(exc))
-        return None
+        return None, UNDELIVERABLE if uber.is_undeliverable(exc) else UNAVAILABLE
     except ConfigurationError as exc:
         # Unconfigured is a kind of unreachable as far as the caller is
         # concerned. Raising here would surface as a 500 on the web page
         # rather than the "we could not calculate delivery" path.
         log.error("uber_not_configured", outlet=outlet.code, error=str(exc))
-        return None
+        return None, UNAVAILABLE
 
 
 def format_summary(priced: PricedOrder, *, outlet_name: str,

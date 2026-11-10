@@ -8,13 +8,12 @@ from app.core.logging import get_logger
 from app.core.exceptions import PaymentError
 from app.db.models import ConversationStep, Order, OrderStage, Outlet, PaymentStatus
 from app.integrations.gallabox.messages import Button
-from app.integrations.uber.direct import build_address
 from app.services import kitchen as kitchen_service
 from app.services import orders as order_service
-from app.services import order_changes, payments, promotions, slots
+from app.services import delivery_address, order_changes, payments, promotions, slots
 from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
-from app.services.pricing import format_summary, price_cart
+from app.services.pricing import UNDELIVERABLE, format_summary, price_cart
 
 log = get_logger(__name__)
 
@@ -39,8 +38,9 @@ async def build_and_show_summary(ctx: FlowContext) -> None:
         outlet=outlet,
         dropoff_latitude=ctx.customer.latitude,
         dropoff_longitude=ctx.customer.longitude,
-        dropoff_address=_dropoff_address(ctx),
+        dropoff_address=await _dropoff_address(ctx, outlet),
         slot_starts_at=slot_starts_at,
+        slot_ends_at=_parse_dt(ctx.get("slot_ends_at")),
         promotion=promotion,
         customer_id=ctx.customer.id,
         loyalty_points=ctx.get("loyalty_points") or 0,
@@ -49,8 +49,10 @@ async def build_and_show_summary(ctx: FlowContext) -> None:
     # Without a delivery quote we would have to guess the charge, so stop here
     # rather than show the customer a total we cannot stand behind.
     if priced.delivery_quote_failed:
-        await ctx.reply_text(p.QUOTE_FAILED)
-        log.warning("summary_blocked_no_quote", outlet=outlet.code)
+        await ctx.reply_text(p.OUT_OF_DELIVERY_RANGE
+                             if priced.delivery_quote_error == UNDELIVERABLE else p.QUOTE_FAILED)
+        log.warning("summary_blocked_no_quote", outlet=outlet.code,
+                    reason=priced.delivery_quote_error)
         return
 
     order = await order_service.create_draft_order(
@@ -210,14 +212,11 @@ async def _draft_order(ctx: FlowContext) -> Order | None:
     return await order_service.get_order(ctx.session, order_id)
 
 
-def _dropoff_address(ctx: FlowContext) -> dict:
-    """Customer address in the shape Uber Direct expects."""
-    return build_address(
-        street=ctx.customer.address_line1 or "",
-        city=ctx.get("city") or "",
-        state=ctx.get("state") or "",
-        zip_code=ctx.customer.postal_code or ctx.get("postal_code") or "",
-    )
+async def _dropoff_address(ctx: FlowContext, outlet: Outlet) -> dict:
+    """The customer's address as Uber reads it - the same one the booking sends."""
+    return await delivery_address.uber_dropoff(
+        street=ctx.customer.address_line1, unit=ctx.customer.apartment_unit,
+        postal_code=ctx.customer.postal_code or ctx.get("postal_code"), kitchen=outlet)
 
 
 def _parse_dt(value) -> datetime | None:

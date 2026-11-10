@@ -113,7 +113,7 @@ async def test_free_delivery_does_not_change_the_tax(session, menu, monkeypatch,
     monkeypatch.setattr(config.settings, "tax_percent", 10.0)
 
     async def quote(**_):
-        return DeliveryQuote(quote_id="q-1", fee=Decimal("7.99"))
+        return DeliveryQuote(quote_id="q-1", fee=Decimal("7.99")), ""
     monkeypatch.setattr(pricing, "_quote_delivery", quote)
 
     promo = _promo(discount_type=DiscountType.FREE_DELIVERY, discount_value=Decimal("0"))
@@ -546,7 +546,7 @@ async def web(session, customer, outlet, menu, monkeypatch):
     monkeypatch.setattr(settings, "tax_percent", 0.0)
 
     async def quote(**_):
-        return DeliveryQuote(quote_id="q-1", fee=Decimal("7.99"))
+        return DeliveryQuote(quote_id="q-1", fee=Decimal("7.99")), ""
     monkeypatch.setattr(pricing, "_quote_delivery", quote)
     sender = Sender()
     monkeypatch.setattr(payments, "current_sender", lambda: sender)

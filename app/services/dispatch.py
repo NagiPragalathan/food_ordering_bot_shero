@@ -13,11 +13,18 @@ the slot:
 While Stripe is on test keys the job books nothing (auto_booking_paused):
 with Uber live, a test payment would otherwise book a real, paid courier.
 
-A failure (Uber down, credentials missing, an address Uber rejects) is kept
-on the order and logged, and the next run tries again until the slot is
-over, so a short outage does not lose a delivery. Nothing here is shown to
-the customer; the kitchen's Out for Delivery step still drives their
+A failure is kept on the order and logged. One that can pass (Uber down,
+credentials missing, a rate limit) is tried again on the next runs until the
+slot is over, so a short outage does not lose a delivery. One Uber refuses
+for good (the address beyond its radius, a field it rejects) is not: asking
+again gets the same answer, so the job stops and the Uber queue shows Needs
+attention until someone fixes it and sends it by hand. Nothing here is shown
+to the customer; the kitchen's Out for Delivery step still drives their
 WhatsApp updates.
+
+The dropoff is built exactly as the checkout quote's (services/
+delivery_address.py), so Uber books the delivery it priced; the fee Uber
+charges is kept beside the delivery fee the customer paid.
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ from app.core.logging import get_logger
 from app.db.models import Customer, DeliverySlot, Order, OrderStage, Outlet, PaymentStatus
 from app.integrations.uber import direct as uber
 from app.integrations.zoho import fields as f
+from app.services.delivery_address import uber_dropoff
 from app.services.slots import as_utc
 
 log = get_logger(__name__)
@@ -80,6 +88,7 @@ async def due_orders(session: AsyncSession, now: datetime | None = None) -> list
         .where(Order.payment_status == str(PaymentStatus.PAID),
                Order.stage.in_(AWAITING_COURIER),
                Order.uber_delivery_id.is_(None),
+               Order.uber_retry_stopped_at.is_(None),
                or_(Order.uber_dispatch_due_at <= now,
                    Order.uber_dispatch_due_at.is_(None) & (DeliverySlot.starts_at <= window_end)),
                DeliverySlot.ends_at > now)
@@ -118,8 +127,8 @@ async def reschedule(session: AsyncSession, now: datetime | None = None) -> int:
 
 
 # --- the admin's Uber queue ----------------------------------------------------
-WAITING, BOOKED, RETRYING, MISSED, CANCELLED = (
-    "Waiting", "Booked", "Retrying", "Missed", "Cancelled")
+WAITING, BOOKED, RETRYING, MISSED, CANCELLED, NEEDS_ATTENTION = (
+    "Waiting", "Booked", "Retrying", "Missed", "Cancelled", "Needs attention")
 
 
 @dataclass
@@ -161,6 +170,8 @@ def _status(order: Order, slot_end: datetime, now: datetime) -> str:
         return CANCELLED if (order.uber_delivery_status or "") == "canceled" else BOOKED
     if slot_end <= now:
         return MISSED
+    if order.uber_retry_stopped_at:
+        return NEEDS_ATTENTION
     return RETRYING if order.uber_dispatch_error else WAITING
 
 
@@ -199,7 +210,9 @@ async def dispatch(session: AsyncSession, order: Order, *,
             pickup_name=outlet.name,
             pickup_phone=_e164(outlet.phone or outlet.kitchen_whatsapp),
             pickup_latitude=outlet.latitude, pickup_longitude=outlet.longitude,
-            dropoff=_dropoff_address(order, outlet),
+            dropoff=await uber_dropoff(street=order.delivery_address,
+                                       unit=order.apartment_unit,
+                                       postal_code=order.postal_code, kitchen=outlet),
             dropoff_name=customer.name or "Shero customer",
             dropoff_phone=_e164(order.contact_number or customer.whatsapp_number),
             dropoff_latitude=_float(order.delivery_latitude),
@@ -213,16 +226,24 @@ async def dispatch(session: AsyncSession, order: Order, *,
             dropoff_ready_at=max(now, starts), dropoff_deadline_at=ends,
             dropoff_notes=order.delivery_instructions,
         )
-    except (IntegrationError, ConfigurationError) as exc:
+    except IntegrationError as exc:
+        if uber.is_permanent(exc):
+            # The same request gets the same refusal: no more automatic tries.
+            order.uber_retry_stopped_at = now
+        return _failed(order, _reason(exc))
+    except ConfigurationError as exc:
         return _failed(order, str(exc))
 
     order.uber_delivery_id = delivery.delivery_id
+    order.uber_fee = delivery.fee if delivery.fee else None
+    order.uber_retry_stopped_at = None
     order.uber_delivery_status = delivery.status or None
     order.uber_tracking_url = delivery.tracking_url
     order.uber_dispatched_at = now
     order.uber_dispatch_error = None
     log.info("uber_delivery_booked", order_number=order.order_number,
-             delivery_id=delivery.delivery_id, slot_start=starts.isoformat())
+             delivery_id=delivery.delivery_id, slot_start=starts.isoformat(),
+             uber_fee=str(order.uber_fee), charged=str(order.delivery_fee))
     return True
 
 
@@ -248,15 +269,16 @@ def _failed(order: Order, reason: str) -> bool:
     return False
 
 
-def _dropoff_address(order: Order, outlet: Outlet) -> dict:
-    """The delivery address. Orders store street, unit and ZIP; the city and
-    state are the kitchen's, as every delivery is local to it."""
-    address = uber.build_address(street=order.delivery_address or "", city=outlet.city,
-                                 state=outlet.state, zip_code=order.postal_code or "",
-                                 country=outlet.country or "US")
-    if order.apartment_unit:
-        address["street_address"].append(order.apartment_unit)
-    return address
+def _reason(exc: IntegrationError) -> str:
+    """Uber's refusal in words for the queue: its own explanation where it
+    gives one ("outside the delivery radius ... 23.71 miles"), else the error."""
+    payload = exc.payload if isinstance(exc.payload, dict) else {}
+    details = (payload.get("metadata") or {}).get("details") if isinstance(
+        payload.get("metadata"), dict) else None
+    message = payload.get("message")
+    if uber.is_undeliverable(exc):
+        return f"Uber can't deliver to this address: {details or message or exc}"
+    return str(exc)
 
 
 def _manifest(order: Order) -> list[dict]:
@@ -279,7 +301,7 @@ def _float(value) -> float | None:
 
 
 # --- the Uber queue page's filters ------------------------------------------------
-STATUSES = (WAITING, BOOKED, RETRYING, MISSED, CANCELLED)
+STATUSES = (WAITING, BOOKED, RETRYING, NEEDS_ATTENTION, MISSED, CANCELLED)
 WHEN = {"today": "Today", "upcoming": "Upcoming", "past": "Past"}
 
 

@@ -292,7 +292,9 @@ order keeps its own copy of the code, title and amount.
 
 ## Uber queue
 
-**Finding an order:** status tabs with counts (All, Waiting, Booked, Retrying, Missed, Cancelled), a search box (order number, customer name or number, delivery address or ZIP) and a delivery-day filter (Today, Upcoming, Past - in the kitchen's timezone). Filters are in the address bar, so a filtered view can be bookmarked.
+Under each order number: **Delivery paid** - the delivery charge the customer paid, from Uber's quote at checkout - and, once the courier is booked, **Uber** - what Uber charged for it (amber when the two differ).
+
+**Finding an order:** status tabs with counts (All, Waiting, Booked, Retrying, Needs attention, Missed, Cancelled), a search box (order number, customer name or number, delivery address or ZIP) and a delivery-day filter (Today, Upcoming, Past - in the kitchen's timezone). Filters are in the address bar, so a filtered view can be bookmarked.
 
 Every paid order joins the queue the moment it is paid, with the time it
 will be sent to Uber: **2 hours before its delivery slot starts**
@@ -320,7 +322,8 @@ resumes by itself once Stripe has live keys.
 |---|---|
 | Waiting | Paid; booked automatically at the time shown |
 | Booked | Uber accepted it. **Track courier** opens Uber's tracking page |
-| Retrying | Uber refused or was unreachable; the reason is shown and the bot tries again every 5 minutes until the slot ends |
+| Retrying | Uber was unreachable or busy; the reason is shown and the bot tries again every 5 minutes until the slot ends |
+| Needs attention | Uber refused it for good - e.g. *Uber can't deliver to this address: ... outside the delivery radius (Max 10 miles, Calculated 23.71 miles)*. Asking again gets the same answer, so the bot stops trying: fix the address and **Send to Uber now**, or arrange the delivery by hand |
 | Missed | The slot ended without a courier - arrange it by hand |
 | Cancelled | The booking was cancelled here |
 

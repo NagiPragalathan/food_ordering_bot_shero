@@ -45,6 +45,19 @@ def _answer_everyone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_zip_lookups(monkeypatch):
+    """The Uber dropoff's ZIP -> city lookup never reaches the network in a
+    test: no answer, so the kitchen's city is used. A test that wants a city
+    patches it itself (tests/services/test_uber_delivery.py)."""
+    from app.services import delivery_address
+
+    async def nothing(postal_code, country=None):
+        return None
+
+    monkeypatch.setattr(delivery_address, "geocode_postal_code", nothing)
+
+
+@pytest.fixture(autouse=True)
 def _templates_approved(monkeypatch):
     """Every template counts as approved unless a test says otherwise.
 

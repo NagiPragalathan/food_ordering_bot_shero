@@ -11,7 +11,8 @@
 {% set meta = {
   'Waiting':   ('default', 'bg-stone-100 text-stone-700 ring-stone-500/20', 'Paid; booked automatically at the time shown'),
   'Booked':    ('good', 'bg-emerald-50 text-emerald-700 ring-emerald-600/20', 'Uber accepted it; the courier collects and delivers inside the slot'),
-  'Retrying':  ('bad', 'bg-red-50 text-red-700 ring-red-600/20', 'Uber refused or was unreachable; tried again every 5 minutes until the slot ends'),
+  'Retrying':  ('bad', 'bg-red-50 text-red-700 ring-red-600/20', 'Uber was unreachable or busy; tried again every 5 minutes until the slot ends'),
+  'Needs attention': ('bad', 'bg-amber-50 text-amber-800 ring-amber-600/30', 'Uber refused it for good (e.g. the address is beyond its delivery radius); no more automatic tries - fix it, then Send to Uber now, or arrange delivery by hand'),
   'Missed':    ('bad', 'bg-red-100 text-red-800 ring-red-600/30', 'The slot ended without a courier: arrange it by hand'),
   'Cancelled': ('default', 'bg-stone-100 text-stone-500 ring-stone-500/15', 'The Uber booking was cancelled'),
 } %}
@@ -48,7 +49,7 @@
   {# --- Status tabs, then search and date ------------------------------- #}
   <div class="space-y-3">
     {% set tab_items = [('All', searched, url_with(status=None), not status, 'default')] %}
-    {% for s in ['Waiting', 'Booked', 'Retrying', 'Missed', 'Cancelled'] %}
+    {% for s in ['Waiting', 'Booked', 'Retrying', 'Needs attention', 'Missed', 'Cancelled'] %}
       {% set tab_items = tab_items.append((s, counts[s], url_with(status=s), status == s, meta[s][0])) or tab_items %}
     {% endfor %}
     {{ ui.tabs(tab_items) }}
@@ -85,10 +86,14 @@
           {% set o = row.order %}
           {% set c = row.customer %}
           {% set start = row.slot_start.astimezone(tz) if row.slot_start else none %}
-          <tr class="align-top transition hover:bg-brand-50/30 {{ 'bg-red-50/40' if row.status in ('Missed', 'Retrying') else '' }}">
+          <tr class="align-top transition hover:bg-brand-50/30 {{ 'bg-red-50/40' if row.status in ('Missed', 'Retrying', 'Needs attention') else '' }}">
             <td class="px-4 py-3">
               <div class="font-mono text-xs font-semibold text-stone-800">{{ o.order_number }}</div>
               <div class="mt-0.5 text-[11px] text-stone-400">${{ '%.2f' | format(o.total or 0) }}</div>
+              <div class="mt-0.5 text-[11px] text-stone-500" title="Delivery the customer paid (Uber's quote at checkout){% if o.uber_fee is not none %}, and what Uber charged when the courier was booked{% endif %}">
+                Delivery paid ${{ '%.2f' | format(o.delivery_fee or 0) }}{% if o.uber_fee is not none %}
+                <span class="{{ 'font-semibold text-amber-700' if o.uber_fee != o.delivery_fee else 'text-stone-400' }}">· Uber ${{ '%.2f' | format(o.uber_fee) }}</span>{% endif %}
+              </div>
             </td>
             <td class="px-4 py-3">
               <div class="flex items-start gap-3">
@@ -131,12 +136,12 @@
                    class="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700 hover:underline">Track courier
                   <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
               {% endif %}
-              {% if o.uber_dispatch_error and row.status in ('Retrying', 'Missed') %}
+              {% if o.uber_dispatch_error and row.status in ('Retrying', 'Missed', 'Needs attention') %}
                 <div class="mt-1 max-w-xs rounded-lg bg-red-50 px-2 py-1 text-[11px] text-red-700">{{ o.uber_dispatch_error }}</div>
               {% endif %}
             </td>
             <td class="px-4 py-3 text-right">
-              {% if row.status in ('Waiting', 'Retrying', 'Cancelled') and row.slot_end and row.slot_end > now %}
+              {% if row.status in ('Waiting', 'Retrying', 'Needs attention', 'Cancelled') and row.slot_end and row.slot_end > now %}
                 <form method="post" action="{{ url_for('admin_delivery_send', order_number=o.order_number) }}" data-busy="Sending…">
                   <button class="whitespace-nowrap rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700">
                     Send to Uber now
@@ -173,7 +178,7 @@
       <svg class="h-4 w-4 transition group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
     </summary>
     <dl class="grid gap-2 border-t border-stone-100 px-4 py-3 sm:grid-cols-2">
-      {% for s in ['Waiting', 'Booked', 'Retrying', 'Missed', 'Cancelled'] %}
+      {% for s in ['Waiting', 'Booked', 'Retrying', 'Needs attention', 'Missed', 'Cancelled'] %}
       <div class="flex items-start gap-2">
         <dt><span class="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset {{ meta[s][1] }}">{{ s }}</span></dt>
         <dd class="pt-0.5">{{ meta[s][2] }}.</dd>

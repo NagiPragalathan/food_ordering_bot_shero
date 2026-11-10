@@ -225,6 +225,12 @@ QUOTE_FAILED = (
     "We could not calculate the delivery charge just now. "
     "Please try again in a moment."
 )
+# Uber will not deliver there from the kitchen (beyond its radius, or a place
+# it cannot find): no order, rather than one that is paid and never delivered.
+OUT_OF_DELIVERY_RANGE = (
+    "Sorry, our delivery partner can't deliver to your address from our kitchen - "
+    "it is outside our delivery area. Type *update location* to use a different address."
+)
 
 # --- Feedback (step 19) ------------------------------------------------------
 FEEDBACK_THANKS = "Thank you for the feedback! \U0001F64F"

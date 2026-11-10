@@ -129,6 +129,13 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
     uber_tracking_url: Mapped[str | None] = mapped_column(Text)
     uber_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     uber_dispatch_error: Mapped[str | None] = mapped_column(String(500))
+    # Uber refused the booking for good (the address is beyond its radius, a
+    # field it rejects): the job stops retrying, the Uber queue shows Needs
+    # attention, and Send to Uber now can still try by hand.
+    uber_retry_stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # What Uber charged for the booked delivery, beside delivery_fee: what the
+    # customer was charged from the quote at checkout.
+    uber_fee: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     uber_quote_raw: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     # --- Feedback (spec step 19) ---------------------------------------------
