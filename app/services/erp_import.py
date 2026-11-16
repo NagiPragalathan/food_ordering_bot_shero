@@ -204,6 +204,15 @@ async def import_exports(session: AsyncSession, files: list[tuple[str, bytes, st
     # A cost price found in any file counts for the same item code everywhere
     # (only the full catalogue export carries Pp_price).
     costs = {d.code: d.cost for f in parsed for d in f.dishes if d.cost is not None}
+    # A dish the ERP has no photo for takes the photo of a row with exactly
+    # the same name (spacing and capitals aside) anywhere in the files - the
+    # full catalogue's other brands included. Only an exact name: a similar
+    # dish (another size, a combo) would show the wrong picture.
+    photos: dict[str, str] = {}
+    for file in parsed:
+        for d in file.dishes:
+            if d.image:
+                photos.setdefault(_key(d.name), d.image)
 
     taken: dict[str, str] = {}              # item code -> the cuisine that took it
     plan: list[tuple[str, list[ErpDish]]] = []
@@ -223,7 +232,7 @@ async def import_exports(session: AsyncSession, files: list[tuple[str, bytes, st
     existing_cuisines = {c.slug: c for c in (await session.execute(select(Cuisine))).scalars()}
     existing_items = {i.retailer_id: i for i in (await session.execute(select(MenuItem))).scalars()}
     next_cuisine = int(await session.scalar(select(func.max(Cuisine.position))) or 0) + 1
-    unpriced = 0
+    unpriced = borrowed = 0
 
     for cuisine_name, dishes in plan:
         slug = slugify(cuisine_name, max_length=80)
@@ -274,8 +283,11 @@ async def import_exports(session: AsyncSession, files: list[tuple[str, bytes, st
             item.position = position
             # A new ERP photo replaces the old (copied to our store later); a
             # dish the ERP has no photo for keeps one the team uploaded here.
-            if dish.image and not _same_photo(item.image_url, dish.image):
-                item.image_url = dish.image
+            image = dish.image or photos.get(_key(dish.name), "")
+            if image and not dish.image and not item.image_url:
+                borrowed += 1
+            if image and not _same_photo(item.image_url, image)                     and (dish.image or not item.image_url):
+                item.image_url = image
     await session.flush()
 
     if replace:
@@ -292,6 +304,9 @@ async def import_exports(session: AsyncSession, files: list[tuple[str, bytes, st
             ~Cuisine.id.in_(select(Category.cuisine_id).distinct())))
         await session.flush()
 
+    if borrowed:
+        result.warnings.append(f"{borrowed} dish(es) have no photo in the ERP: they use the "
+                               "photo of the dish with the same name elsewhere in the ERP.")
     if unpriced:
         result.warnings.append(f"{unpriced} dish(es) have no Mrp in the ERP: they are on "
                                "the menu switched off until they have a price.")

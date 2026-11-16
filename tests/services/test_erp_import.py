@@ -20,7 +20,7 @@ HEADER = ["Item_code", "Name", "Category", "Brand", "Description", "image", "Typ
 PHOTO = "https://sherohomeerp-shero.s3.ap-south-1.amazonaws.com/items/{}.jpg"
 
 
-def export(*rows, cost=True) -> bytes:
+def export(*rows, cost=True, no_photo=()) -> bytes:
     """An ERP "Item Details" export: title rows, the header on row 5, dishes."""
     header = HEADER if cost else [h for h in HEADER if h != "Pp_price"]
     book = Workbook()
@@ -32,7 +32,8 @@ def export(*rows, cost=True) -> bytes:
     sheet.append(header)
     for code, name, category, brand, price, *rest in rows:
         values = {"Item_code": code, "Name": name, "Category": category, "Brand": brand,
-                  "Description": f"About {name}", "image": PHOTO.format(code.lower()),
+                  "Description": f"About {name}",
+                  "image": None if code in no_photo else PHOTO.format(code.lower()),
                   "Type": "sale", "Sku": code[-3:], "Food_type": "Veg", "Hsn": "123",
                   "Pp_price": rest[0] if rest else None, "Mrp": price, "Package_Charge": 5,
                   "Price_variation": "Price 3"}
@@ -215,3 +216,25 @@ async def test_a_big_cuisine_is_shown_a_page_at_a_time(session):
     assert "Dish 150<" in first or "Dish 150\"" in first or "Dish 150 " in first or "Dish 150" in first
     second = client.get("/dst/admin/menu?cuisine=chettinad&page=2").text
     assert "Page 2 of 2" in second and "Dish 160" in second and "Dish 1\"" not in second
+
+
+async def test_a_dish_without_a_photo_takes_the_same_named_dishs(session):
+    """Only an exact name (spacing and capitals aside) lends its photo - from
+    any file, the full catalogue's other brands included - and never over a
+    photo the dish already has."""
+    andhra = export(("ITM0009001", "peanut chutney -  250 ml", "Chutney", "Andhra", "99"),
+                    ("ITM0009002", "Peanut Chutney - 500 ml", "Chutney", "Andhra", "150"),
+                    cost=False, no_photo=("ITM0009001", "ITM0009002"))
+    files = [("Shero Home Food - Andhra.xlsx", andhra, ""),
+             ("Shero Home Food - Kerala.xlsx", KERALA, "")]   # Peanut Chutney - 250 ml: Chettinad's
+    result = await erp_import.import_exports(session, files)
+    found = await dishes(session)
+    assert found["itm0009001"].image_url == PHOTO.format("itm0000078")
+    assert found["itm0009002"].image_url is None             # another size: not the same dish
+    assert any("1 dish(es) have no photo in the ERP" in w for w in result.warnings)
+
+    found["itm0009001"].image_url = "/media/uploaded-by-the-team.jpg"
+    await session.flush()
+    again = await erp_import.import_exports(session, files)
+    assert (await dishes(session))["itm0009001"].image_url == "/media/uploaded-by-the-team.jpg"
+    assert not any("have no photo in the ERP" in w for w in again.warnings)
