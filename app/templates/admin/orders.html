@@ -47,35 +47,53 @@
         <tr>
           <th class="px-4 py-2.5 font-medium">Order</th>
           <th class="px-4 py-2.5 font-medium">Items</th>
-          <th class="px-4 py-2.5 font-medium">Customer</th>
+          <th class="px-4 py-2.5 font-medium">Customer and address</th>
           <th class="px-4 py-2.5 font-medium">Slot</th>
           <th class="px-4 py-2.5 text-right font-medium">Total</th>
-          <th class="px-4 py-2.5 font-medium">Payment</th>
-          <th class="px-4 py-2.5 font-medium">Stage</th>
-          <th class="px-4 py-2.5"></th>
+          <th class="px-4 py-2.5 font-medium">Status</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-stone-100">
         {% for row in rows %}
-        <tr class="hover:bg-stone-50/70">
+        <tr class="align-top hover:bg-stone-50/70 [&>td]:align-top">
           <td class="px-4 py-3">
-            <div class="font-medium">{{ row.order.order_number }}</div>
-            <div class="text-xs text-stone-500">
+            <div class="whitespace-nowrap font-medium">{{ row.order.order_number }}</div>
+            <div class="whitespace-nowrap text-xs text-stone-500">
               {{ row.order.created_at.strftime('%d %b, %H:%M') }} ·
               {{ row.order.item_count }} item(s)
             </div>
           </td>
-          <td class="px-4 py-3">
-            {% for item in row.order.items or [] %}<div>{{ item.quantity }} x {{ item.name }}</div>{% endfor %}
-            {% if row.order.delivery_instructions %}<p class="mt-1 text-xs text-stone-500">Notes: {{ row.order.delivery_instructions }}</p>{% endif %}
+          <td class="min-w-[16rem] px-4 py-3">
+            <ul class="space-y-1">
+              {% for item in row.order.items or [] %}
+              <li class="flex gap-1.5 leading-snug">
+                <span class="shrink-0 font-semibold tabular-nums text-stone-700">{{ item.quantity }} ×</span>
+                <span>{{ item.name }}</span>
+              </li>
+              {% endfor %}
+            </ul>
           </td>
-          <td class="px-4 py-3">
-            <div>{{ row.customer.name or '—' if row.customer else '—' }}</div>
-            <div class="text-xs text-stone-500">
-              {{ row.order.contact_number or (row.customer.whatsapp_number if row.customer else '') }}
-            </div>
+          <td class="min-w-[14rem] max-w-[18rem] px-4 py-3" data-order-address>
+            <div class="font-medium text-stone-900">{{ row.customer.name or '—' if row.customer else '—' }}</div>
+            {% set phone = row.order.contact_number or (row.customer.whatsapp_number if row.customer else '') %}
+            {% if phone %}<div class="font-mono text-[11px] text-stone-500">+{{ phone | replace('+', '') }}</div>{% endif %}
+            {% if row.order.delivery_address %}
+              <div class="mt-1.5 text-xs leading-snug text-stone-700">
+                {{ row.order.delivery_address }}{% if row.order.apartment_unit %}, {{ row.order.apartment_unit }}{% endif %}{% if row.order.postal_code and row.order.postal_code not in row.order.delivery_address %}, {{ row.order.postal_code }}{% endif %}
+              </div>
+            {% else %}
+              <div class="mt-1.5 text-xs text-stone-400">No address yet</div>
+            {% endif %}
+            {% if row.order.delivery_instructions %}
+              <div class="mt-1 text-[11px] italic text-stone-500">Note: “{{ row.order.delivery_instructions }}”</div>
+            {% endif %}
+            {% if row.order.delivery_latitude and row.order.delivery_longitude %}
+              <a href="https://www.google.com/maps/search/?api=1&query={{ row.order.delivery_latitude }},{{ row.order.delivery_longitude }}"
+                 target="_blank" rel="noopener"
+                 class="mt-1 inline-block text-[11px] font-semibold text-brand-700 hover:underline">Open in Maps</a>
+            {% endif %}
           </td>
-          <td class="px-4 py-3 text-xs text-stone-600">
+          <td class="min-w-[11rem] px-4 py-3 text-xs text-stone-600">
             {{ row.order.slot_label or '—' }}
             {% if row.outlet %}<div class="text-stone-500">{{ row.outlet.name }}</div>{% endif %}
             {# Kitchen notification: provider acceptance is not a read receipt. #}
@@ -102,7 +120,7 @@
               <div class="mt-1 text-red-700" title="{{ row.order.uber_dispatch_error }}">{{ 'Uber' if tenant_settings.delivery_provider == 'uber' else 'Courier' }} not booked - retrying</div>
             {% endif %}
           </td>
-          <td class="px-4 py-3 text-right font-semibold tabular-nums">
+          <td class="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums">
             {{ locale.money(row.order.total) }}
             {% if row.order.discount and row.order.discount > 0 %}
               <div class="mt-0.5 whitespace-nowrap text-[11px] font-medium text-emerald-700"
@@ -116,14 +134,17 @@
                  title="{{ row.split.rule }}">Kitchen {{ locale.money(row.split.kitchen) }} · Shero {{ locale.money(row.split.shero) }}</a>
             {% endif %}
           </td>
-          <td class="px-4 py-3">{{ ui.payment_badge(row.order.payment_status) }}
-            {% if row.order.loyalty_points %}<div class="text-xs text-stone-500">{{ row.order.loyalty_points }} points / {{ row.order.loyalty_state }}</div>{% endif %}
-            {% if row.order.loyalty_earned %}<div class="text-xs text-emerald-700">Earned {{ row.order.loyalty_earned }} points</div>{% endif %}
-          </td>
-          <td class="px-4 py-3">{{ ui.stage_badge(row.order.stage) }}</td>
-          <td class="px-4 py-3 text-right">
+          {# Payment, stage and the next step in one column, so the whole row
+             fits on the screen without scrolling sideways. #}
+          <td class="w-48 px-4 py-3" data-order-status>
+            <div class="flex flex-col items-start gap-1.5">
+              {{ ui.payment_badge(row.order.payment_status) }}
+              {{ ui.stage_badge(row.order.stage) }}
+            </div>
+            {% if row.order.loyalty_points %}<div class="mt-1 text-xs text-stone-500">{{ row.order.loyalty_points }} points / {{ row.order.loyalty_state }}</div>{% endif %}
+            {% if row.order.loyalty_earned %}<div class="mt-1 text-xs text-emerald-700">Earned {{ row.order.loyalty_earned }} points</div>{% endif %}
             {% if row.next_label %}
-            <form method="post"
+            <form method="post" class="mt-2"
                   action="{{ url_for('admin_order_advance', order_number=row.order.order_number) }}">
               <button class="whitespace-nowrap rounded-lg bg-brand-600 px-3 py-1.5 text-xs
                              font-semibold text-white hover:bg-brand-700">

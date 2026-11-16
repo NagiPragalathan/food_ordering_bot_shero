@@ -92,3 +92,29 @@ async def test_admin_retry_does_not_send_unpaid_order(admin, session, customer, 
     response = admin.post(f"/admin/orders/{order.order_number}/notify-kitchen")
     assert response.status_code == 303
     assert order.kitchen_notified_at is None
+
+
+async def test_the_orders_page_shows_where_each_order_goes(admin, session, customer, outlet):
+    """The customer's delivery address sits with their name, with a map link,
+    and every column starts at the top of its row."""
+    order = await add_order(session, customer, outlet, "SHO-ADDR-1", "Vendaikai Sambar")
+    order.delivery_address = "12 Maple Street, Edison, NJ 08817"
+    order.apartment_unit = "Apt 4B"
+    order.postal_code = "08817"
+    order.delivery_instructions = "Ring the bell twice"
+    order.delivery_latitude, order.delivery_longitude = Decimal("40.5300"), Decimal("-74.4000")
+    await session.flush()
+
+    page = admin.get("/admin/orders").text
+    cell = page.split("data-order-address", 1)[1].split("</td>", 1)[0]
+    assert "12 Maple Street, Edison, NJ 08817, Apt 4B" in cell
+    assert ", 08817</div>" not in cell.replace("\n", "").replace(" ", "")   # the ZIP only once
+    assert "Ring the bell twice" in cell
+    assert "maps/search/?api=1&query=40.530000,-74.400000" in cell or "query=40.53" in cell
+    assert "Customer and address" in page and "[&>td]:align-top" in page
+
+
+async def test_an_order_without_an_address_says_so(admin, session, customer, outlet):
+    await add_order(session, customer, outlet, "SHO-ADDR-2", "Rasam")
+    cell = admin.get("/admin/orders").text.split("data-order-address", 1)[1].split("</td>", 1)[0]
+    assert "No address yet" in cell and "Open in Maps" not in cell
