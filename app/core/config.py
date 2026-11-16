@@ -260,6 +260,11 @@ class Settings(BaseSettings):
 
     # --- Client backend adapters ---------------------------------------------
     order_mode: OrderMode = "web"
+    # Once the customer's details are in (and when a returning customer
+    # starts again): Shero US greets them with Order Now (its website) and
+    # Continue on WhatsApp; DST India goes straight to the menu, which is
+    # what Continue on WhatsApp opens (onboarding.show_main_menu).
+    straight_to_menu: bool = False
     outlet_source: SourceMode = "local"
     slot_source: SourceMode = "local"
     client_backend_base_url: str = ""
@@ -397,6 +402,7 @@ class DstSettings(Settings):
     zoho_data_center: str = "in"
     zoho_required: bool = False
     price_required: bool = True
+    straight_to_menu: bool = True
     # GST on restaurant food; confirm with the client.
     tax_percent: float = Field(default=5.0, ge=0, le=100)
     # The bot answers nobody on the DST number until it is switched on from

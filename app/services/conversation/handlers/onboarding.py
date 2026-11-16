@@ -103,6 +103,14 @@ async def show_main_menu(ctx: FlowContext, *, returning: bool = False) -> None:
     (Bot replies page, services/reply_triggers.REPLIES): the website alone,
     or WhatsApp alone, which is then the greeting and the button together.
     """
+    if settings.straight_to_menu:
+        # DST India: no greeting and no choice of two buttons - the menu
+        # itself, exactly what Continue on WhatsApp would have opened.
+        from app.services.conversation.handlers import menu
+
+        await menu.show_cuisines(ctx)
+        return
+
     name = ctx.customer.greeting_name
     greeting = (p.WELCOME_BACK if returning else p.WELCOME_READY).format(name=name)
     reply = reply_triggers.welcome_reply(ctx.conversation.get("welcome_reply"))

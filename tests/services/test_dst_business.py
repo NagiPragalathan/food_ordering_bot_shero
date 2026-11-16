@@ -233,3 +233,60 @@ def test_dst_loyalty_starts_sized_in_rupees():
         rules = loyalty.default_policy()
     assert rules.currency == "INR" and rules.minimum_earn_subtotal == 200
     assert rules.points_per_currency * rules.point_value * 100 == 1   # about 1% back
+
+
+# --- after the details: straight to the menu -----------------------------------
+async def _sign_up(session, fake):
+    from app.integrations.gallabox.sender import use_sender
+    from app.services.conversation.engine import handle_event
+    from tests.conversation.test_happy_path import text
+
+    with use_sender(fake):
+        await handle_event(session, text("hi"))
+        await handle_event(session, text("Asha Menon"))
+        if "email" in fake.last().body.lower():
+            await handle_event(session, text("asha@example.com"))
+
+
+async def test_dst_goes_straight_to_the_menu_after_the_details(session, outlet, menu,
+                                                               monkeypatch):
+    """No "You are all set" greeting with Order Now / Continue on WhatsApp:
+    the cuisine choice comes straight after the name and email."""
+    from tests.conversation.test_happy_path import FakeGallabox
+
+    monkeypatch.setattr(settings_for(tenants.DST), "order_mode", "chat")
+    fake = FakeGallabox()
+    with tenants.use(tenants.DST):
+        await _sign_up(session, fake)
+    last = fake.last()
+    assert last.kind == "list" and last.body == "Which cuisine would you like today?"
+    assert not any("all set" in m.body or m.kind == "cta_url" for m in fake.sent)
+
+
+async def test_dst_web_ordering_sends_the_menu_link_straight_away(session, outlet, menu,
+                                                                  monkeypatch):
+    from app.integrations.gallabox import template_status
+    from tests.conversation.test_happy_path import FakeGallabox
+
+    async def not_approved(name):
+        return False
+
+    monkeypatch.setattr(settings_for(tenants.DST), "order_mode", "web")
+    monkeypatch.setattr(template_status, "is_approved", not_approved)
+    fake = FakeGallabox()
+    with tenants.use(tenants.DST):
+        await _sign_up(session, fake)
+    last = fake.last()
+    assert last.kind == "cta_url" and last.payload["label"] == "View Menu"
+    assert "/dst/order/" in last.payload["url"]
+    assert not any("all set" in m.body for m in fake.sent)
+
+
+async def test_shero_us_still_greets_with_both_buttons(session, outlet, menu, monkeypatch):
+    from tests.conversation.test_happy_path import FakeGallabox
+
+    monkeypatch.setattr(settings_for(tenants.US), "order_mode", "web")
+    fake = FakeGallabox()
+    await _sign_up(session, fake)
+    kinds = [m.kind for m in fake.sent[-2:]]
+    assert "all set" in fake.sent[-2].body and kinds == ["cta_url", "buttons"]
