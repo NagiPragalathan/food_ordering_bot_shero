@@ -48,6 +48,10 @@ aiosqlite==0.20.0
 # ~850KB PNGs, far too heavy for a phone menu.
 Pillow==11.0.0
 
+# Reads the Shero ERP's item exports (Excel) for DST India's menu
+# (services/erp_import.py, Menu > Import from sheet).
+openpyxl==3.1.5
+
 # A kitchen's timezone from its map pin, offline (services/kitchen_admin.timezone_for).
 tzfpy==2.1.0
 
