@@ -14,9 +14,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenants
 from app.core.logging import get_logger
 from app.core.security import verify_gallabox_token
-from app.db.session import get_session
+from app.db.session import get_session, session_scope
 from app.integrations.gallabox import channel
 from app.schemas.inbound import parse_inbound
 from app.services import allowlist, reply_triggers, welcome_menu
@@ -62,21 +63,37 @@ async def gallabox_webhook(
     if not isinstance(body, dict):
         return {"status": "ignored", "reason": "unexpected payload"}
 
-    # A delivery or read receipt for a message we sent (Gallabox's
-    # Message.WA.Status.* events), not a message from the customer.
-    event_name = request.headers.get("x-event-name") or str(body.get("event") or "")
-    if delivery.is_status_event(event_name, body):
-        updated = await delivery.record(session, body)
-        return {"status": "ok" if updated else "ignored", "reason": "delivery status"}
-
     event = parse_inbound(body)
+    event_name = request.headers.get("x-event-name") or str(body.get("event") or "")
 
-    # Another team's WhatsApp number in the same Gallabox account: not ours to
-    # answer, record or send to Zoho. Checked first of all.
-    if not channel.is_ours(event):
+    # Which business's WhatsApp number it came in on (Shero US, DST India -
+    # one Gallabox account, one webhook). Another team's number in the same
+    # account is not ours to answer, record or send to a CRM. Checked first.
+    tenant = channel.tenant_for(event)
+    if tenant is None and delivery.is_status_event(event_name, body):
+        # A receipt only ever updates a message this business sent (matched
+        # by its message id), so one that names no channel is checked here
+        # as it always was.
+        tenant = tenants.current()
+    if tenant is None:
         log.info("other_channel_ignored", message_id=event.message_id,
                  channel_id=event.channel_id, channel_number_tail=event.channel_number[-4:])
         return {"status": "ignored", "reason": "another channel"}
+    if tenant != tenants.current():
+        # The other business: its own settings and its own database.
+        with tenants.use(tenant):
+            async with session_scope() as own_session:
+                return await _handle(body, event, event_name, own_session)
+    return await _handle(body, event, event_name, session)
+
+
+async def _handle(body: dict, event, event_name: str, session: AsyncSession) -> dict:
+    """One message (or receipt) on one business's own number."""
+    # A delivery or read receipt for a message we sent (Gallabox's
+    # Message.WA.Status.* events), not a message from the customer.
+    if delivery.is_status_event(event_name, body):
+        updated = await delivery.record(session, body)
+        return {"status": "ok" if updated else "ignored", "reason": "delivery status"}
 
     # Test mode: answer only the listed numbers. Checked before anything else
     # happens, so another customer gets no record, no reply and no Zoho lead -

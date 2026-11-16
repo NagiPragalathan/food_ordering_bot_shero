@@ -88,6 +88,8 @@ async def nudges_page(request: Request, tab: str = "rules", stage: str | None = 
                "hours": range(0, 25), "waiting": waiting,
                "blocked": sorted(_in_use(cfg) & set(waiting)),
                "zoho": zoho, "zoho_checked": _when(cfg, zoho.get("checked_at")),
+               # A business without Zoho (DST India) is offered no Zoho sync.
+               "zoho_in_use": crm.in_use(),
                "zoho_stages": list(crm.STAGES.values()), "local": lambda when: _local(cfg, when)}
     if tab == "messages":
         context["addable"] = await messages.addable({m.name for m in cfg.messages})

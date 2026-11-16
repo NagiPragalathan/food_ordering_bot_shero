@@ -5,7 +5,7 @@
 <div class="mb-5 grid gap-3 sm:grid-cols-3">
   <div class="rounded-xl border bg-white p-4"><div class="text-xs uppercase tracking-wide text-stone-500">Program</div><div class="mt-1 text-lg font-semibold {% if rules.enabled %}text-emerald-700{% else %}text-amber-700{% endif %}">{{ 'On' if rules.enabled else 'Paused' }}</div><div class="text-xs text-stone-500">Earning {{ 'on' if rules.earning_enabled else 'paused' }} &middot; spending {{ 'on' if rules.redemption_enabled else 'paused' }}</div></div>
   <div class="rounded-xl border bg-white p-4"><div class="text-xs uppercase tracking-wide text-stone-500">Customers holding points</div><div class="mt-1 text-lg font-semibold">{{ holders }}</div></div>
-  <div class="rounded-xl border bg-white p-4"><div class="text-xs uppercase tracking-wide text-stone-500">Points outstanding</div><div class="mt-1 text-lg font-semibold">{{ outstanding }}</div><div class="text-xs text-stone-500">worth ${{ '%.2f' | format(outstanding * rules.point_value) }}</div></div>
+  <div class="rounded-xl border bg-white p-4"><div class="text-xs uppercase tracking-wide text-stone-500">Points outstanding</div><div class="mt-1 text-lg font-semibold">{{ outstanding }}</div><div class="text-xs text-stone-500">worth {{ locale.money(outstanding * rules.point_value) }}</div></div>
 </div>
 
 <form method="post" action="{{ url_for('admin_loyalty_save') }}" id="rules" class="space-y-5">
@@ -77,7 +77,7 @@
   <h2 class="text-lg font-semibold">What the saved rules give</h2>
   <p class="mb-3 text-sm text-stone-600">Points for an order with this much eligible food, by the customer's order number{% if rules.promo_multiplier > 1 %}; in brackets, on a promotion day (&times;{{ rules.promo_multiplier }}){% endif %}. Dish bonuses come on top.</p>
   <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="text-stone-500"><th class="py-2">Food</th>{% for n in example_orders %}<th>Order {{ n }}</th>{% endfor %}</tr></thead><tbody>
-  {% for row in examples %}<tr class="border-t"><td class="py-2 font-medium">${{ row.spend }}</td>{% for cell in row.cells %}<td>{{ cell.points }}{% if rules.promo_multiplier > 1 and cell.promo != cell.points %} <span class="text-stone-500">({{ cell.promo }})</span>{% endif %}</td>{% endfor %}</tr>{% endfor %}
+  {% for row in examples %}<tr class="border-t"><td class="py-2 font-medium">{{ locale.symbol() }}{{ row.spend }}</td>{% for cell in row.cells %}<td>{{ cell.points }}{% if rules.promo_multiplier > 1 and cell.promo != cell.points %} <span class="text-stone-500">({{ cell.promo }})</span>{% endif %}</td>{% endfor %}</tr>{% endfor %}
   </tbody></table></div>
 </section>
 

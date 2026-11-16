@@ -10,6 +10,14 @@
 {% set input_cls = "w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-stone-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20" %}
 {% set label_cls = "mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-500" %}
 {% set mode = k.service_area_mode if k and k.service_area_mode else 'radius' %}
+{# The business's own terms: miles and ZIP codes for Shero US, km and PIN
+   codes for DST India (app/core/locale.py). #}
+{% set dunit = locale.distance_unit() %}
+{% set dunit_long = locale.unit_name() %}
+{% set postal = locale.postal_label() %}
+{% set postal_short = locale.postal_short() %}
+{% set india = tenant_settings.country_code | upper == 'IN' %}
+{% set by_uber = tenant_settings.delivery_provider == 'uber' %}
 {% set day_names = {'mon':'Monday','tue':'Tuesday','wed':'Wednesday','thu':'Thursday','fri':'Friday','sat':'Saturday','sun':'Sunday'} %}
 
 {% macro section(icon, title, note) %}
@@ -42,7 +50,7 @@
       <div>
         <label class="{{ label_cls }}" for="f-name">Kitchen name</label>
         <input id="f-name" name="name" required value="{{ k.name if k else '' }}"
-               placeholder="Shero Elkridge" class="{{ input_cls }}">
+                                placeholder="{{ 'Shero Anna Nagar' if india else 'Shero Elkridge' }}" class="{{ input_cls }}">
       </div>
       <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-stone-200 px-4 py-2.5 sm:min-w-[15rem]">
         <span>
@@ -68,7 +76,7 @@
                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
           <input id="map-search" type="search" autocomplete="off"
-                 placeholder="Search an address, e.g. 6021 University Blvd, Elkridge"
+                                  placeholder="Search an address, e.g. {{ '12 2nd Avenue, Anna Nagar, Chennai' if india else '6021 University Blvd, Elkridge' }}"
                  class="{{ input_cls }} pl-9">
         </div>
         <div class="flex gap-2">
@@ -109,22 +117,22 @@
         <div class="sm:col-span-6">
           <label class="{{ label_cls }}" for="f-street">Street address</label>
           <input id="f-street" name="address_line1" required value="{{ k.address_line1 if k else '' }}"
-                 placeholder="6639 Cambria Terrace" class="{{ input_cls }}">
+                                  placeholder="{{ '12 2nd Avenue' if india else '6639 Cambria Terrace' }}" class="{{ input_cls }}">
         </div>
         <div class="sm:col-span-3">
           <label class="{{ label_cls }}" for="f-city">City</label>
           <input id="f-city" name="city" required value="{{ k.city if k else '' }}"
-                 placeholder="Elkridge" class="{{ input_cls }}">
+                                  placeholder="{{ 'Chennai' if india else 'Elkridge' }}" class="{{ input_cls }}">
         </div>
         <div class="sm:col-span-1">
           <label class="{{ label_cls }}" for="f-state">State</label>
           <input id="f-state" name="state" required value="{{ k.state if k else '' }}"
-                 placeholder="MD" class="{{ input_cls }} uppercase">
+                                  placeholder="{{ 'TN' if india else 'MD' }}" class="{{ input_cls }} uppercase">
         </div>
         <div class="sm:col-span-2">
-          <label class="{{ label_cls }}" for="f-zip">ZIP</label>
+          <label class="{{ label_cls }}" for="f-zip">{{ postal_short }}</label>
           <input id="f-zip" name="postal_code" required value="{{ k.postal_code if k else '' }}"
-                 placeholder="21075" inputmode="numeric" class="{{ input_cls }}">
+                                  placeholder="{{ '600040' if india else '21075' }}" inputmode="numeric" class="{{ input_cls }}">
         </div>
       </div>
 
@@ -159,9 +167,9 @@
     <div class="space-y-5">
       <div class="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Delivery area rule">
         {% for value, title, note in [
-          ('radius', 'Within a radius', 'Everyone within the miles below'),
-          ('zips', 'Only these ZIP codes', 'Just the ZIP codes you list'),
-          ('both', 'Radius and ZIP list', 'Must be inside both'),
+          ('radius', 'Within a radius', 'Everyone within the ' ~ dunit_long ~ ' below'),
+          ('zips', 'Only these ' ~ postal ~ 's', 'Just the ' ~ postal ~ 's you list'),
+          ('both', 'Radius and ' ~ postal_short ~ ' list', 'Must be inside both'),
         ] %}
         <label data-mode-card class="flex cursor-pointer gap-3 rounded-xl border p-3.5 transition
                       {{ 'border-brand-500 bg-brand-50 ring-1 ring-brand-500' if mode == value else 'border-stone-200 hover:border-stone-300' }}">
@@ -182,27 +190,27 @@
             <input id="f-radius" name="radius_miles" inputmode="decimal" value="{{ radius_miles | round(2) }}"
                    class="w-24 rounded-lg border border-stone-300 px-3 py-1.5 text-right text-sm font-semibold outline-none
                           focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-            <span class="text-sm text-stone-500">miles</span>
+            <span class="text-sm text-stone-500">{{ dunit_long }}</span>
           </div>
         </div>
         <input id="radius-slider" type="range" min="1" max="{{ max_radius_miles }}" step="0.5" value="{{ radius_miles }}"
-               class="w-full accent-brand-600" aria-label="Delivery radius in miles">
+               class="w-full accent-brand-600" aria-label="Delivery radius in {{ dunit_long }}">
         <div class="mt-2 flex flex-wrap items-center gap-2">
           <span class="text-[11px] text-stone-400">Quick pick:</span>
           {% for preset in [5, 8, 10, 15, 20] if preset <= max_radius_miles %}
           <button type="button" data-radius="{{ preset }}"
                   class="rounded-full border border-stone-200 px-3 py-1 text-xs font-medium text-stone-600 hover:border-brand-500 hover:text-brand-700">
-            {{ preset }} mi{% if preset == 10 %} · default{% endif %}
+            {{ preset }} {{ dunit }}{% if preset == 10 %} · default{% endif %}
           </button>
           {% endfor %}
         </div>
         <p class="mt-2 text-[11px] text-stone-500">The circle on the map shows this area around the pin.
-          Uber delivers at most {{ max_radius_miles | round(1) }} miles from a kitchen in a straight line, so the radius cannot go higher.</p>
+          {% if by_uber %}Uber delivers at most {{ max_radius_miles | round(1) }} {{ dunit_long }} from a kitchen in a straight line, so the radius cannot go higher.{% else %}Your delivery staff go at most {{ max_radius_miles | round(1) }} {{ dunit_long }} from a kitchen in a straight line (set on Settings), so the radius cannot go higher.{% endif %}</p>
       </div>
 
       <div id="zips-block" class="{{ 'hidden' if mode == 'radius' else '' }}">
-        <label class="{{ label_cls }}" for="f-zips">ZIP codes served <span class="normal-case tracking-normal text-stone-400">(comma separated)</span></label>
-        <textarea id="f-zips" name="service_zips" rows="2" placeholder="21075, 21045, 21044"
+        <label class="{{ label_cls }}" for="f-zips">{{ postal }}s served <span class="normal-case tracking-normal text-stone-400">(comma separated)</span></label>
+        <textarea id="f-zips" name="service_zips" rows="2" placeholder="{{ '600040, 600101, 600102' if india else '21075, 21045, 21044' }}"
                   class="{{ input_cls }} font-mono text-xs">{{ k.service_zips | join(', ') if k and k.service_zips else '' }}</textarea>
         <p id="zips-count" class="mt-1 text-[11px] text-stone-500"></p>
       </div>
@@ -215,16 +223,16 @@
     <div class="grid gap-4 sm:grid-cols-2">
       <div>
         <label class="{{ label_cls }}" for="f-wa">Kitchen WhatsApp</label>
-        <input id="f-wa" name="kitchen_whatsapp" inputmode="tel" placeholder="14438011011"
+        <input id="f-wa" name="kitchen_whatsapp" inputmode="tel" placeholder="{{ '919840012345' if india else '14438011011' }}"
                value="{{ k.kitchen_whatsapp if k and k.kitchen_whatsapp else '' }}" class="{{ input_cls }}">
         <p class="mt-1 text-[11px] text-stone-500">Gets each paid order on its delivery day.</p>
       <p class="mt-1 text-xs text-stone-500">New paid orders are sent here automatically: order code, delivery slot, kitchen and dishes with quantities, never the customer's name, number, address or the amount. Include the country code. Approve the shero_kitchen_order template in Gallabox; until then the kitchen gets shero_new_order_alert with those details blanked.</p>
           </div>
       <div>
         <label class="{{ label_cls }}" for="f-phone">Phone for the courier</label>
-        <input id="f-phone" name="kitchen_phone" inputmode="tel" placeholder="14438011011"
+        <input id="f-phone" name="kitchen_phone" inputmode="tel" placeholder="{{ '919840012345' if india else '14438011011' }}"
                value="{{ k.phone if k and k.phone else '' }}" class="{{ input_cls }}">
-        <p class="mt-1 text-[11px] text-stone-500">Uber gives this to the courier. Empty: the WhatsApp number.</p>
+        <p class="mt-1 text-[11px] text-stone-500">{{ 'Uber gives this to the courier.' if by_uber else 'Your delivery staff call this number.' }} Empty: the WhatsApp number.</p>
       </div>
     </div>
     {% endcall %}
@@ -241,11 +249,12 @@
 
       <div>
         <label class="{{ label_cls }}" for="f-tz">Timezone</label>
-        {% set tz = k.timezone if k and k.timezone else 'America/New_York' %}
+        {% set tz = k.timezone if k and k.timezone else tenant_settings.default_timezone %}
         {% set zones = [('America/New_York','Eastern (New York)'),('America/Chicago','Central (Chicago)'),
                         ('America/Denver','Mountain (Denver)'),('America/Phoenix','Mountain, no DST (Phoenix)'),
                         ('America/Los_Angeles','Pacific (Los Angeles)'),('America/Anchorage','Alaska'),
                         ('Pacific/Honolulu','Hawaii')] %}
+        {% if india %}{% set zones = [('Asia/Kolkata','India (IST)')] %}{% endif %}
         <select id="f-tz" name="timezone_name" class="{{ input_cls }} sm:max-w-sm">
           {% for value, label in zones %}
           <option value="{{ value }}" {% if tz == value %}selected{% endif %}>{{ label }}</option>
@@ -361,7 +370,11 @@
   const modeInputs = [...form.querySelectorAll('[name="service_area_mode"]')];
   const radius = field('radius_miles');
   const slider = document.getElementById('radius-slider');
-  const KM_PER_MILE = 1.609344;
+  // The radius is typed in the business's unit: miles (Shero US) or km.
+  const KM_PER_UNIT = {{ 1.609344 if dunit == 'mi' else 1 }};
+  const UNIT = {{ dunit | tojson }};
+  const POSTAL = {{ postal | tojson }};
+  const POSTAL_SHORT = {{ postal_short | tojson }};
 
   window.__kitchenForm = { field, onChange: [] };
   const changed = () => { summary(); window.__kitchenForm.onChange.forEach((fn) => fn()); };
@@ -391,12 +404,12 @@
     radius.value = slider.value = button.dataset.radius; changed();
   }));
 
-  // ZIP list: count what was typed.
+  // The postal code list: count what was typed.
   const zips = field('service_zips');
   const zipList = () => zips.value.split(/[\s,;]+/).filter(Boolean);
   const countZips = () => {
     const n = zipList().length;
-    document.getElementById('zips-count').textContent = n ? `${n} ZIP code${n === 1 ? '' : 's'}` : '';
+    document.getElementById('zips-count').textContent = n ? `${n} ${POSTAL}${n === 1 ? '' : 's'}` : '';
   };
   zips.addEventListener('input', () => { countZips(); changed(); });
 
@@ -447,15 +460,16 @@
     set('sum-pin', pin);
     set('coords-summary', pin === 'not set' ? '' : pin);
 
-    const m = Number.isFinite(miles()) ? `${miles()} mi` : '?';
+    const m = Number.isFinite(miles()) ? `${miles()} ${UNIT}` : '?';
     const z = zipList().length;
     set('sum-area', mode() === 'radius' ? `within ${m}`
-      : mode() === 'zips' ? `${z} ZIP code${z === 1 ? '' : 's'}`
-      : `within ${m}, ${z} ZIP${z === 1 ? '' : 's'}`);
+      : mode() === 'zips' ? `${z} ${POSTAL}${z === 1 ? '' : 's'}`
+      : `within ${m}, ${z} ${POSTAL_SHORT}${z === 1 ? '' : 's'}`);
     const open = [...form.querySelectorAll('[data-day-open]')].filter((t) => t.checked).length;
     set('sum-days', open ? `${open} day${open === 1 ? '' : 's'} a week` : 'closed every day');
   }
-  window.__kitchenForm.miles = () => (mode() === 'zips' ? null : miles() * KM_PER_MILE * 1000);
+  // The radius in metres, for the circle on the map.
+  window.__kitchenForm.miles = () => (mode() === 'zips' ? null : miles() * KM_PER_UNIT * 1000);
   window.__kitchenForm.refresh = changed;
 
   ['name', 'latitude', 'longitude'].forEach((n) => field(n).addEventListener('input', changed));

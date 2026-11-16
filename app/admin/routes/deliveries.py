@@ -3,6 +3,10 @@
 The bot books the courier on its own (workers/jobs.dispatch_couriers). This
 page shows the queue and lets an admin send one now - to test the Uber
 connection, or to rescue an order - or cancel a booking.
+
+A business whose own staff deliver (DST India) has no Uber: the same page is
+its Delivery queue - what the riders take out and when, with the address and
+phone, and the Out for Delivery / Delivered steps.
 """
 
 from __future__ import annotations
@@ -40,13 +44,33 @@ async def queue_page(
     kitchens = await kitchen_service.active_kitchens(session)
     tz = _tz(kitchens[0].timezone if kitchens else None)
     now = datetime.now(timezone.utc)
-    status = listing.choice(status, set(dispatch.STATUSES), "")
+    status = listing.choice(status, set(dispatch.STATUSES) | set(dispatch.OWN_STATUSES), "")
     when = listing.choice(when, dispatch.WHEN, "")
 
-    every = await dispatch.queue(session, now=now)
+    own = not dispatch.uses_uber()
+    every = await (dispatch.own_queue(session, now=now) if own
+                   else dispatch.queue(session, now=now))
     # Tabs count what the search and date filter leave; the tab then narrows.
     searched = [r for r in every if dispatch.matches(r, query=q or "", when=when, now=now, tz=tz)]
     rows = [r for r in searched if not status or r.status == status]
+    if own:
+        return render(request, "admin/own_deliveries.html", {
+            "current_user": current_user,
+            "rows": rows,
+            "counts": dispatch.status_counts(searched),
+            "statuses": dispatch.OWN_STATUSES,
+            "searched": len(searched),
+            "total": len(every),
+            "status": status,
+            "query": q or "",
+            "when": when,
+            "when_options": dispatch.WHEN,
+            "filtering": bool(q or when or status),
+            "url_with": partial(listing.url_with, request),
+            "tz": tz,
+            "now": now,
+            "has_kitchen": bool(kitchens),
+        })
     return render(request, "admin/deliveries.html", {
         "current_user": current_user,
         "rows": rows,
@@ -122,6 +146,6 @@ async def _order(session: AsyncSession, order_number: str) -> Order | None:
 
 def _tz(name: str | None):
     try:
-        return ZoneInfo(name or "America/New_York")
+        return ZoneInfo(name or settings.default_timezone)
     except ZoneInfoNotFoundError:
         return timezone.utc

@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import is_unset, settings
 from app.core.exceptions import ConfigurationError, IntegrationError
 from app.core.logging import get_logger
 from app.db.models import AppSetting, Customer, LeadStage, NudgeBucket, NudgeLead, NudgeSend
@@ -59,6 +60,21 @@ FIELD_BATCH = 5                                  # Zoho creates five fields per 
 SEQUENCES = {"stage": "Stage message", NudgeBucket.NO_RESPONSE: "No Response",
              NudgeBucket.LATER: "Later", NudgeBucket.NO: "No"}
 DELIVERY = {"sent": "Sent", "delivered": "Delivered", "read": "Read", "failed": "Failed"}
+
+
+def connected() -> bool:
+    """Zoho credentials are set for the business being served."""
+    return not any(is_unset(value) for value in (
+        settings.zoho_client_id, settings.zoho_client_secret, settings.zoho_refresh_token))
+
+
+def in_use() -> bool:
+    """Do the nudges work with Zoho here? Always for a business whose CRM is
+    Zoho (Shero US: as before, set up or not); for one whose CRM is its own
+    (DST India), only once Zoho has been connected for it. Otherwise the
+    nudges run on the bot's own stages alone: no Zoho stage is read or
+    written and no Nudge Messages record is filed."""
+    return settings.zoho_required or connected()
 
 
 def record(customer: Customer) -> tuple[str, str] | None:

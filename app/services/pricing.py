@@ -1,7 +1,10 @@
 """Order pricing (spec step 14 and the "Pricing shown to the customer" table).
 
     Dish price (MRP)                  -> the menu in this database
-    Delivery charge + extra fees      -> Uber Direct quote
+    Delivery charge + extra fees      -> Uber Direct quote (Shero US), or the
+                                         business's own fee when its own staff
+                                         deliver (DST India: own_delivery_fee,
+                                         free from free_delivery_above)
     Coupon discount                   -> services/promotions.py
     Total                             -> dish total + Uber charges (+ our tax)
                                          - discount
@@ -144,7 +147,11 @@ async def price_cart(
     )
 
     # Delivery quote needs a destination and an outlet to quote from.
-    if outlet is not None and dropoff_address is not None:
+    if outlet is not None and dropoff_address is not None and own_delivery():
+        # The business's own riders: its own charge, nobody else to ask.
+        # How far they go is the kitchen's area (services/kitchen.max_km).
+        priced.delivery_fee = own_delivery_fee(dish_total)
+    elif outlet is not None and dropoff_address is not None:
         quote, why = await _quote_delivery(
             outlet=outlet,
             dropoff_address=dropoff_address,
@@ -188,6 +195,20 @@ async def price_cart(
             session, priced, customer_id=customer_id,
             outlet_id=outlet.id if outlet else None, requested=loyalty_points)
     return priced
+
+
+def own_delivery() -> bool:
+    """True when the business delivers with its own staff, not Uber Direct."""
+    return settings.delivery_provider == "own"
+
+
+def own_delivery_fee(dish_total: Decimal) -> Decimal:
+    """The business's own delivery charge: the flat fee, or nothing once the
+    dishes reach the free-delivery amount (when one is set)."""
+    threshold = money(settings.free_delivery_above or 0)
+    if threshold > 0 and dish_total >= threshold:
+        return Decimal("0.00")
+    return money(settings.own_delivery_fee or 0)
 
 
 def _settle(priced: PricedOrder) -> None:
@@ -282,7 +303,7 @@ async def _quote_delivery(
         city=outlet.city,
         state=outlet.state,
         zip_code=outlet.postal_code,
-        country=outlet.country or "US",
+        country=outlet.country or settings.country_code,
     )
     now = datetime.now(timezone.utc)
     if slot_starts_at is not None and slot_ends_at is not None:
@@ -330,7 +351,7 @@ def format_summary(priced: PricedOrder, *, outlet_name: str,
                    slot_label: str) -> str:
     """The order summary shown before payment (spec step 14)."""
     symbol = {"USD": "$", "INR": "₹", "EUR": "€", "GBP": "£"}.get(
-        priced.currency.upper(), ""
+        priced.currency.upper(), settings.currency_symbol
     )
     lines = ["*Your order*", ""]
     for line in priced.lines:

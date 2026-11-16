@@ -15,14 +15,17 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import locale
 from app.db.models import DiscountType, Outlet, Placement, Promotion
 from app.services import promotions
 
-DISCOUNT_TYPES = [
-    (DiscountType.PERCENT.value, "Percentage (%)"),
-    (DiscountType.FLAT.value, "Flat amount ($)"),
-    (DiscountType.FREE_DELIVERY.value, "Free delivery"),
-]
+def discount_types() -> list[tuple[str, str]]:
+    """The kinds of discount, in the business's currency: "Flat amount ($)"."""
+    return [
+        (DiscountType.PERCENT.value, "Percentage (%)"),
+        (DiscountType.FLAT.value, f"Flat amount ({locale.symbol()})"),
+        (DiscountType.FREE_DELIVERY.value, "Free delivery"),
+    ]
 PLACEMENTS = [
     (Placement.MENU.value, "Menu banner + checkout",
      "A banner on the menu page, and listed at checkout."),
@@ -125,10 +128,13 @@ def parse_form(form) -> PromotionForm:
         if value is None or not (0 < value <= 100):
             raise PromotionFormError("A percentage discount is between 1 and 100.")
         if max_discount is not None and max_discount <= 0:
-            raise PromotionFormError("Max discount must be more than $0, or blank for no cap.")
+            raise PromotionFormError(
+                f"Max discount must be more than {locale.symbol()}0, or blank for no cap.")
     elif discount_type == DiscountType.FLAT:
         if value is None or value <= 0:
-            raise PromotionFormError("Enter how many dollars the code takes off.")
+            raise PromotionFormError(
+                "Enter how many dollars the code takes off." if locale.currency() == "USD"
+                else f"Enter how much ({locale.symbol()}) the code takes off.")
         max_discount = None          # a flat amount is its own cap
     else:
         value, max_discount = Decimal("0"), None
@@ -212,7 +218,7 @@ def _money(raw: str, label: str) -> Decimal | None:
     if not raw:
         return None
     try:
-        value = Decimal(raw.replace("$", "").replace(",", "").replace("%", "").strip())
+        value = Decimal(locale.amount_text(raw).replace("%", ""))
     except InvalidOperation as exc:
         raise PromotionFormError(f"{label} must be a number.") from exc
     if not value.is_finite():

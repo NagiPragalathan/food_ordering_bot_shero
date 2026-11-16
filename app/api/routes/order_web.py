@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (BotFlowError, ConfigurationError,
                                  IntegrationError, PaymentError)
+from app.core import locale
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import ConversationStep, Customer, DeliverySlot, LeadStage, OrderStage
@@ -99,7 +100,13 @@ async def _page(request: Request, token: str, session: AsyncSession,
         "token": token,
         "customer": customer,
         "kitchen": kitchen,
-        "currency_symbol": "$",
+        # The business's own terms: $ / ZIP code / miles for Shero US,
+        # ₹ / PIN code / km for DST India (app/core/locale.py).
+        "currency_symbol": locale.symbol(),
+        "postal_label": locale.postal_label(),
+        "postal_short": locale.postal_short(),
+        "postal_digits": locale.postal_digits(),
+        "distance_unit": locale.distance_unit(),
         # Public by design; see google_maps_browser_key in config.
         "maps_browser_key": settings.google_maps_browser_key,
     })

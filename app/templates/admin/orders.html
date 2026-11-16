@@ -95,25 +95,25 @@
             {# Courier: booked 2 hours before the slot (services/dispatch.py). #}
             {% if row.order.uber_delivery_id %}
               <div class="mt-1 text-emerald-700">
-                Uber booked{% if row.order.uber_delivery_status %} · {{ row.order.uber_delivery_status }}{% endif %}
+                {{ 'Uber' if tenant_settings.delivery_provider == 'uber' else 'Courier' }} booked{% if row.order.uber_delivery_status %} · {{ row.order.uber_delivery_status }}{% endif %}
                 {% if row.order.uber_tracking_url %}<a href="{{ row.order.uber_tracking_url }}" target="_blank" rel="noopener" class="underline">track</a>{% endif %}
               </div>
             {% elif row.order.uber_dispatch_error %}
-              <div class="mt-1 text-red-700" title="{{ row.order.uber_dispatch_error }}">Uber not booked - retrying</div>
+              <div class="mt-1 text-red-700" title="{{ row.order.uber_dispatch_error }}">{{ 'Uber' if tenant_settings.delivery_provider == 'uber' else 'Courier' }} not booked - retrying</div>
             {% endif %}
           </td>
           <td class="px-4 py-3 text-right font-semibold tabular-nums">
-            ${{ '%.2f' | format(row.order.total) }}
+            {{ locale.money(row.order.total) }}
             {% if row.order.discount and row.order.discount > 0 %}
               <div class="mt-0.5 whitespace-nowrap text-[11px] font-medium text-emerald-700"
                    title="{{ row.order.promo_title or '' }}">
-                {{ row.order.promo_code }} −${{ '%.2f' | format(row.order.discount) }}
+                {{ row.order.promo_code }} −{{ locale.money(row.order.discount) }}
               </div>
             {% endif %}
             {% if row.split %}
               <a href="{{ url_for('admin_payouts') }}?period=all&amp;kitchen={{ row.order.outlet_id or '' }}"
                  class="mt-0.5 block whitespace-nowrap text-[11px] font-normal text-stone-500 hover:text-brand-700"
-                 title="{{ row.split.rule }}">Kitchen ${{ '%.2f' | format(row.split.kitchen) }} · Shero ${{ '%.2f' | format(row.split.shero) }}</a>
+                 title="{{ row.split.rule }}">Kitchen {{ locale.money(row.split.kitchen) }} · Shero {{ locale.money(row.split.shero) }}</a>
             {% endif %}
           </td>
           <td class="px-4 py-3">{{ ui.payment_badge(row.order.payment_status) }}

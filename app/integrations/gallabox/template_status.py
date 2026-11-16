@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.core import tenants
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.integrations.gallabox import template_admin
@@ -40,24 +41,38 @@ log = get_logger(__name__)
 CACHE_SECONDS = 300
 SETTLE = timedelta(minutes=15)
 
-_usable: dict[str, bool] = {}
-_fetched_at: float = 0.0
+class _State:
+    """One business's view of its templates (each has its own WhatsApp
+    number, and its own copies of the templates)."""
+
+    def __init__(self) -> None:
+        self.usable: dict[str, bool] = {}
+        self.fetched_at = 0.0
+
+
+_states: tenants.PerTenant[_State] = tenants.PerTenant(_State)
 
 
 async def is_approved(name: str) -> bool:
-    """Approved, and approved long enough ago for Gallabox to send it."""
-    global _fetched_at
-    if time.monotonic() - _fetched_at > CACHE_SECONDS:
+    """Approved, and approved long enough ago for Gallabox to send it.
+
+    `name` may be a catalogue name (tpl.ORDER_SUMMARY.name): it is checked
+    under the current business's own name for it (DST India: "dst_...")."""
+    from app.integrations.gallabox.templates import wire_name
+
+    name = wire_name(name)
+    state = _states.get()
+    if time.monotonic() - state.fetched_at > CACHE_SECONDS:
         try:
             rows = await template_admin.list_templates()
         except Exception as exc:   # any failure: treat as unusable, use the fallback
             log.warning("template_status_unavailable", error=str(exc))
             return False
         now = await gallabox_now()
-        _usable.clear()
-        _usable.update({str(row.get("name")): usable(row, now) for row in rows})
-        _fetched_at = time.monotonic()
-    return _usable.get(name, False)
+        state.usable.clear()
+        state.usable.update({str(row.get("name")): usable(row, now) for row in rows})
+        state.fetched_at = time.monotonic()
+    return state.usable.get(name, False)
 
 
 def usable(row: dict, now: datetime | None) -> bool:
@@ -107,9 +122,9 @@ def _foreign_button_url(row: dict) -> str | None:
 def _recategorised_as_marketing(row: dict) -> bool:
     """A template we submitted as UTILITY that Meta now files as MARKETING."""
     # Imported here: templates is a plain catalogue, kept free of this module.
-    from app.integrations.gallabox.templates import BY_NAME
+    from app.integrations.gallabox.templates import BY_NAME, catalogue_name
 
-    spec = BY_NAME.get(str(row.get("name")))
+    spec = BY_NAME.get(catalogue_name(str(row.get("name"))))
     category = str(row.get("category") or "").upper()
     return bool(spec and spec.category == "UTILITY" and category == "MARKETING")
 
@@ -128,6 +143,4 @@ def _parse_iso(value) -> datetime | None:
 
 
 def clear_cache() -> None:
-    global _fetched_at
-    _usable.clear()
-    _fetched_at = 0.0
+    _states.clear()

@@ -53,10 +53,10 @@ def test_a_passphrase_is_accepted_and_derived():
 
     original = live.settings_encryption_key
     try:
-        object.__setattr__(live, "settings_encryption_key", "just-a-passphrase")
+        live.settings_encryption_key = "just-a-passphrase"
         assert decrypt(encrypt("value")) == "value"
     finally:
-        object.__setattr__(live, "settings_encryption_key", original)
+        live.settings_encryption_key = original
 
 
 def test_secrets_are_refused_without_a_key(monkeypatch):
@@ -186,7 +186,7 @@ async def test_a_clearable_blank_clears_even_where_the_override_was_never_loaded
     """A script that disconnects starts with the environment's blank in memory."""
     await save(session, "ZOHO_REFRESH_TOKEN", "1000.tok")
     await session.flush()
-    object.__setattr__(settings, "zoho_refresh_token", "")     # never applied here
+    settings.zoho_refresh_token = ""     # never applied here
 
     changed = await save_many(session, {"ZOHO_REFRESH_TOKEN": ""},
                               allow_blank={"ZOHO_REFRESH_TOKEN"})

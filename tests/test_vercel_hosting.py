@@ -48,9 +48,28 @@ async def test_one_failing_job_does_not_stop_the_others(monkeypatch):
     async def broken():
         raise RuntimeError("zoho down")
 
+    from app.core import tenants
+
     monkeypatch.setattr(cron.jobs, "ALL_JOBS", {"a": broken, "b": fine})
     results = await cron.run(("a", "b"))
-    assert results["b"] == 3 and str(results["a"]).startswith("error")
+    # Each job runs once per business (Shero US, DST India).
+    assert results["b"] == 3 * len(tenants.enabled())
+    assert str(results["a"]).startswith("error")
+
+
+async def test_a_job_runs_once_for_each_business_in_its_own_settings(monkeypatch):
+    from app.core import tenants
+    from app.core.config import settings
+
+    seen = []
+
+    async def which():
+        seen.append((tenants.current().key, settings.currency))
+        return 1
+
+    monkeypatch.setattr(cron.jobs, "ALL_JOBS", {"which": which})
+    await cron.run(("which",))
+    assert seen == [("us", "USD"), ("dst", "INR")]
 
 
 @pytest.fixture

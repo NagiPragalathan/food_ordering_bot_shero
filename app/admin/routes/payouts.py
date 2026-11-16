@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.admin import listing
 from app.admin.deps import redirect, render, require_admin
 from app.core.logging import get_logger
@@ -37,10 +38,11 @@ def _zone(kitchens: list[Outlet]) -> ZoneInfo:
     """Dates on the page are the kitchens' local dates."""
     for kitchen in kitchens:
         try:
-            return ZoneInfo(kitchen.timezone or DEFAULT_ZONE)
+            return ZoneInfo(kitchen.timezone or settings.default_timezone or DEFAULT_ZONE)
         except Exception:  # noqa: BLE001 - a bad name falls through to the default
             continue
-    return ZoneInfo(DEFAULT_ZONE)
+    # No kitchen yet: the business's own timezone (New York, or Kolkata).
+    return ZoneInfo(settings.default_timezone or DEFAULT_ZONE)
 
 
 def _local(zone: ZoneInfo, when: datetime | None) -> str:

@@ -178,6 +178,14 @@ def store_bytes(data: bytes, *, key: str) -> str | None:
     if not data:
         return None
 
+    # The photo folder is shared by both businesses, and a dish code can be
+    # the same in both: each business's own pictures get their own names, so
+    # an upload in one never replaces the other's photo.
+    from app.core import tenants
+
+    business = tenants.current()
+    if not business.is_default:
+        key = f"{business.key}:{key}"
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
     try:

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import re
 
+from app.core import locale
+
 # Deliberately permissive: the goal is to catch typos and obvious rubbish, not
 # to reimplement RFC 5322. Delivery of the receipt is the real proof.
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$")
@@ -60,7 +62,9 @@ def clean_phone(raw: str | None, *, fallback: str | None = None) -> str | None:
     digits = "".join(ch for ch in text if ch.isdigit())
     if not MIN_PHONE_DIGITS <= len(digits) <= MAX_PHONE_DIGITS:
         return None
-    return digits
+    # A bare 10-digit mobile number gets DST India's +91; Shero US keeps it
+    # as typed (app/core/locale.py).
+    return locale.typed_phone(digits)
 
 
 def clean_postal_code(raw: str | None) -> str | None:

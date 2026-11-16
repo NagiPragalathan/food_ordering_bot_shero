@@ -98,14 +98,14 @@
         <input id="discount_value" name="discount_value" inputmode="decimal" value="{{ v.discount_value }}" placeholder="20" class="{{ field }}">
       </div>
       <div data-show="percent">
-        <label class="{{ label }}" for="max_discount">Max discount ($)</label>
+        <label class="{{ label }}" for="max_discount">Max discount ({{ locale.symbol() }})</label>
         <input id="max_discount" name="max_discount" inputmode="decimal" value="{{ v.max_discount }}" placeholder="No cap" class="{{ field }}">
         <p class="{{ hint }}">The most one order can save. Blank for no cap.</p>
       </div>
       <div>
-        <label class="{{ label }}" for="min_order">Min order ($)</label>
+        <label class="{{ label }}" for="min_order">Min order ({{ locale.symbol() }})</label>
         <input id="min_order" name="min_order" inputmode="decimal" value="{{ v.min_order }}" placeholder="0" class="{{ field }}">
-        <p class="{{ hint }}">Dish subtotal needed. Below it, customers see "Add $X more".</p>
+        <p class="{{ hint }}">Dish subtotal needed. Below it, customers see "Add {{ locale.symbol() }}X more".</p>
       </div>
     </div>
   </section>
@@ -230,10 +230,10 @@
   <section class="rounded-2xl border border-stone-200/70 bg-white p-5 shadow-card">
     <h2 class="text-xs font-semibold uppercase tracking-wide text-stone-500">Try it on an order</h2>
     <div class="mt-3 grid grid-cols-2 gap-3">
-      <label class="text-xs text-stone-600">Dishes ($)
+      <label class="text-xs text-stone-600">Dishes ({{ locale.symbol() }})
         <input id="try-dishes" inputmode="decimal" value="40" class="{{ field }} mt-1">
       </label>
-      <label class="text-xs text-stone-600">Delivery ($)
+      <label class="text-xs text-stone-600">Delivery ({{ locale.symbol() }})
         <input id="try-delivery" inputmode="decimal" value="7.99" class="{{ field }} mt-1">
       </label>
     </div>
@@ -255,9 +255,9 @@
       <div class="rounded-xl bg-stone-50 p-3"><dt class="text-[11px] text-stone-500">Awaiting payment</dt>
         <dd class="text-lg font-semibold tabular-nums text-stone-900">{{ usage.held }}</dd></div>
       <div class="rounded-xl bg-stone-50 p-3"><dt class="text-[11px] text-stone-500">Discount given</dt>
-        <dd class="text-lg font-semibold tabular-nums text-emerald-700">${{ '%.2f' | format(usage.discount_given) }}</dd></div>
+        <dd class="text-lg font-semibold tabular-nums text-emerald-700">{{ locale.money(usage.discount_given) }}</dd></div>
       <div class="rounded-xl bg-stone-50 p-3"><dt class="text-[11px] text-stone-500">Sales</dt>
-        <dd class="text-lg font-semibold tabular-nums text-stone-900">${{ '%.2f' | format(usage.revenue) }}</dd></div>
+        <dd class="text-lg font-semibold tabular-nums text-stone-900">{{ locale.money(usage.revenue) }}</dd></div>
     </dl>
     <div class="mt-4 flex gap-2 border-t border-stone-100 pt-4">
       <form method="post" action="{{ url_for('admin_promotion_duplicate', promotion_id=p.id) }}">
@@ -303,8 +303,8 @@
             <div>{{ row.customer.name or '—' }}</div>
             <div class="text-xs text-stone-500">{{ row.customer.whatsapp_number }}</div>
           </td>
-          <td class="px-4 py-3 text-right font-semibold tabular-nums text-emerald-700">−${{ '%.2f' | format(row.order.discount) }}</td>
-          <td class="px-4 py-3 text-right tabular-nums">${{ '%.2f' | format(row.order.total) }}</td>
+          <td class="px-4 py-3 text-right font-semibold tabular-nums text-emerald-700">−{{ locale.money(row.order.discount) }}</td>
+          <td class="px-4 py-3 text-right tabular-nums">{{ locale.money(row.order.total) }}</td>
           <td class="px-4 py-3">{{ ui.payment_badge(row.order.payment_status) }}</td>
           <td class="px-4 py-3 text-right">
             {% if row.bill_url %}<a href="{{ row.bill_url }}" target="_blank" rel="noopener" class="text-xs font-semibold text-brand-700 underline">Bill</a>{% endif %}
@@ -326,9 +326,11 @@
 (function () {
   const form = document.getElementById('promo-form');
   const $ = (id) => document.getElementById(id);
-  const num = (id) => { const n = parseFloat(String($(id).value).replace(/[$,%\s]/g, '')); return isFinite(n) ? n : null; };
+  // The business's currency: $ for Shero US, ₹ for DST India.
+  const CUR = {{ locale.symbol() | tojson }};
+  const num = (id) => { const n = parseFloat(String($(id).value).replace(/[$\u20b9,%\s]/g, '')); return isFinite(n) ? n : null; };
   const plain = (n) => Number.isInteger(n) ? String(n) : n.toFixed(2);
-  const money = (n) => '$' + (Math.round(n * 100) / 100).toFixed(2);
+  const money = (n) => CUR + (Math.round(n * 100) / 100).toFixed(2);
   const type = () => (form.querySelector('[name=discount_type]:checked') || {}).value || 'percent';
   const WHERE = {
     menu: 'Shown as a banner on the menu page and under Offers at checkout.',
@@ -340,13 +342,13 @@
   function defaultTag() {
     const v = num('discount_value') || 0;
     if (type() === 'percent') return 'FLAT ' + plain(v) + '% OFF';
-    if (type() === 'flat') return '$' + plain(v) + ' OFF';
+    if (type() === 'flat') return CUR + plain(v) + ' OFF';
     return 'FREE DELIVERY';
   }
   function terms() {
     const out = [];
     const min = num('min_order');
-    if (min) out.push('Min order $' + plain(min));
+    if (min) out.push('Min order ' + CUR + plain(min));
     if (form.first_order_only.checked) out.push('First order only');
     const per = num('per_customer_limit');
     if (per === 1) out.push('Once per customer'); else if (per > 1) out.push(per + ' uses per customer');
@@ -370,7 +372,7 @@
     const t = type();
     form.querySelectorAll('[data-show]').forEach(el =>
       el.classList.toggle('hidden', !el.dataset.show.split(' ').includes(t)));
-    $('value-unit').textContent = t === 'flat' ? '($)' : '(%)';
+    $('value-unit').textContent = t === 'flat' ? '(' + CUR + ')' : '(%)';
 
     $('tag-default').textContent = defaultTag();
     $('pv-tag').textContent = ($('tag').value.trim() || defaultTag()).toUpperCase();

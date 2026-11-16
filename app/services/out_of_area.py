@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from app.core import locale
 from app.core.logging import get_logger
 from app.db.models import Customer
 from app.db.models.address import CustomerAddress
@@ -32,11 +33,12 @@ def address_line(address: CustomerAddress) -> str:
 
 
 def page_message(check: ServiceCheck, where: str) -> str:
-    """What the ordering page says, in miles."""
+    """What the ordering page says, in the business's unit (miles, km)."""
     text = f"Sorry, we do not deliver to {where} yet."
-    away = miles(check.distance_km)
+    away = locale.from_km(check.distance_km)
     if away is not None:
-        text += f" Our nearest kitchen is about {away:g} miles away, outside its delivery area."
+        text += (f" Our nearest kitchen is about {away:g} {locale.unit_name()} away,"
+                 " outside its delivery area.")
     return text + " Please try a different address."
 
 
@@ -44,6 +46,11 @@ def details(check: ServiceCheck, where: str, *, notified: bool) -> dict:
     """What the ordering page needs to draw its "not here yet" panel."""
     return {
         "address": where,
+        # In the business's own unit ("mi" or "km"), for the page to show.
+        "distance": locale.from_km(check.distance_km),
+        "range": locale.from_km(check.range_km),
+        "unit": locale.distance_unit(),
+        # Always in miles, as the page read them before (kept for callers).
         "miles": miles(check.distance_km),
         "range_miles": miles(check.range_km),
         "notified": notified,

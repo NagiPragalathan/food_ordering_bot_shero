@@ -38,6 +38,13 @@ from app.db.base import Base, Timestamps, UUIDPrimaryKey
 ZERO = Decimal("0.00")
 
 
+def _business_currency() -> str:
+    """A new dish is priced in the currency of the business it belongs to."""
+    from app.core.config import settings
+
+    return settings.currency.upper()
+
+
 class Cuisine(Base, UUIDPrimaryKey, Timestamps):
     """A menu tab: Chettinad, Kerala, Andhra."""
 
@@ -111,7 +118,9 @@ class MenuItem(Base, UUIDPrimaryKey, Timestamps):
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=ZERO, nullable=False)
     # Internal cost (sheet PPP). Never shown to a customer.
     cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
-    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    # The business's own currency (USD for Shero US, INR for DST India).
+    currency: Mapped[str] = mapped_column(String(3), default=_business_currency,
+                                          nullable=False)
 
     # Pack details parsed out of the description where present.
     pack_size: Mapped[str | None] = mapped_column(String(80))
@@ -131,8 +140,10 @@ class MenuItem(Base, UUIDPrimaryKey, Timestamps):
 
     @property
     def price_display(self) -> str:
+        from app.core.config import settings
+
         symbol = {"USD": "$", "INR": "₹", "EUR": "€", "GBP": "£"}.get(
-            self.currency.upper(), ""
+            (self.currency or "").upper(), settings.currency_symbol
         )
         return f"{symbol}{self.price:.2f}"
 

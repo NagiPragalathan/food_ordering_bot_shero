@@ -3,13 +3,66 @@
 {% block title %}Import{% endblock %}
 {% block heading %}Import menu{% endblock %}
 {% block subheading %}
-  <p class="text-xs text-stone-500">Pull from Google Sheets, or upload a CSV</p>
+  <p class="text-xs text-stone-500">Upload the ERP's item exports, pull from Google Sheets, or upload a CSV</p>
 {% endblock %}
 
 {% block content %}
 <div class="grid gap-5 lg:grid-cols-3">
 
   <div class="space-y-5 lg:col-span-2">
+
+    {% call ui.card('Upload ERP item exports (Excel)', 'One file = one cuisine: "Shero Home Food - Andhra.xlsx" becomes Andhra') %}
+      <form method="post" action="{{ url_for('admin_import_erp') }}"
+            enctype="multipart/form-data" class="space-y-4" data-erp-import>
+        <div>
+          <label class="mb-1.5 block text-sm font-medium text-stone-700">Excel files from the ERP</label>
+          <input type="file" name="files" multiple required
+                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                 class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm
+                        file:mr-3 file:rounded file:border-0 file:bg-stone-100
+                        file:px-3 file:py-1.5 file:text-xs file:font-medium">
+          <p class="mt-1.5 text-xs text-stone-500">
+            The "Item Details" export: Item_code, Name, Category, Brand, Description, image, &hellip;,
+            Mrp. Choose several files at once. <strong>Mrp</strong> is the price customers pay
+            ({{ locale.symbol() }}); <strong>Pp_price</strong>, where the export has it, is kept as cost.
+            The same item code updates the same dish.
+          </p>
+        </div>
+
+        <div>
+          <label class="mb-1.5 block text-sm font-medium text-stone-700">
+            Cuisine name <span class="font-normal text-stone-400">(optional, one file only)</span>
+          </label>
+          <input name="cuisine" placeholder="Taken from the file name"
+                 class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                        focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+        </div>
+
+        <label class="flex items-start gap-2 text-sm">
+          <input type="checkbox" name="replace"
+                 class="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+          <span>
+            Replace the whole menu with these files
+            <span class="block text-xs text-stone-500">
+              Every dish that is not in them is <strong>deleted</strong>, with any category or
+              cuisine left empty. Past orders keep their own copy and are not affected.
+              Leave it off to add and update only.
+            </span>
+          </span>
+        </label>
+
+        {% if photos_waiting %}
+        <p class="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">
+          {{ photos_waiting }} photo{{ '' if photos_waiting == 1 else 's' }} still being copied
+          from the ERP to our server, a batch every few minutes. Until then they load from the ERP.
+        </p>
+        {% endif %}
+
+        <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+          Upload and import
+        </button>
+      </form>
+    {% endcall %}
 
     {% call ui.card('From Google Sheets', 'Every tab is imported as one cuisine') %}
       <form method="post" action="{{ url_for('admin_import_sheet') }}" class="space-y-4">
@@ -123,4 +176,22 @@
     {% endcall %}
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Confirm before a whole-menu replace, and show the import is running.
+  document.querySelectorAll('form[data-erp-import]').forEach(form => {
+    form.addEventListener('submit', event => {
+      const replace = form.querySelector('input[name="replace"]');
+      if (replace && replace.checked && !confirm('Delete every dish that is not in these files?')) {
+        event.preventDefault();
+        return;
+      }
+      const button = form.querySelector('button');
+      button.disabled = true;
+      button.textContent = 'Importing…';
+    });
+  });
+</script>
 {% endblock %}

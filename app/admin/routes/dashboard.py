@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.deps import render, require_admin
+from app.core import locale
 from app.core.config import settings
 from app.db.models import (
     AdminUser,
@@ -106,7 +107,18 @@ async def dashboard(
         "active_orders": list(active.scalars()),
         "recent_orders": list(recent.scalars()),
         "missing_credentials": settings.missing_credentials(),
+        "channel": _channel(),
     })
+
+
+def _channel() -> dict:
+    """This business's WhatsApp number and Gallabox channel, for the banner."""
+    digits = "".join(ch for ch in settings.whatsapp_business_number if ch.isdigit())
+    return {
+        "number": locale.phone_display(digits),
+        "chat_url": f"https://wa.me/{digits}" if digits else "",
+        "channel_id": settings.gallabox_channel_id.strip(),
+    }
 
 
 async def _funnel_counts(session: AsyncSession) -> list[dict]:

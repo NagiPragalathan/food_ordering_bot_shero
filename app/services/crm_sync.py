@@ -14,6 +14,11 @@ A customer is a Lead until their first payment, then a Contact: Zoho's own
 Lead conversion, as the spec says. The bot's fields have the same names on
 both modules, so everything here works on "the customer's record" - a
 (module, id) pair - whichever it is.
+
+Zoho is Shero US's CRM. DST India's is its own (services/dst_crm.py): there
+Zoho is used only once it is connected for DST India, and until then every
+Zoho call here is skipped quietly - no request, no error in the log - while
+the stages still go to the DST CRM's seam.
 """
 
 from __future__ import annotations
@@ -36,7 +41,7 @@ from app.db.models import (
 )
 from app.integrations.zoho import crm, engagement
 from app.integrations.zoho import fields as f
-from app.services import catalogue_sync
+from app.services import catalogue_sync, dst_crm
 from app.services.customers import record_stage
 
 log = get_logger(__name__)
@@ -44,6 +49,15 @@ log = get_logger(__name__)
 ZOHO_ERRORS = (IntegrationError, ConfigurationError)
 
 Record = tuple[str, str]        # (module, Zoho record id)
+
+
+def zoho_in_use() -> bool:
+    """Does the business being served use Zoho? Shero US always (a missing
+    key is reported where a call fails, as before); a business whose CRM is
+    its own (DST India) only once Zoho is connected for it."""
+    from app.services.nudges.crm import in_use
+
+    return in_use()
 
 
 @dataclass
@@ -79,6 +93,8 @@ async def ensure_record(customer: Customer) -> Record | None:
     may also already be in Zoho from a hand-typed entry. One record per
     WhatsApp number (spec section 2), never a duplicate.
     """
+    if not zoho_in_use():
+        return None
     if customer.zoho_contact_id:
         return (f.CONTACTS, customer.zoho_contact_id)
     if customer.zoho_lead_id:
@@ -171,6 +187,7 @@ async def advance_stage(customer: Customer, stage: LeadStage, *,
     if not changed:
         return False
 
+    await dst_crm.record_lead_stage(customer, stage)
     record = await ensure_record(customer)
     if record:
         # Also right after creating: a record found by phone may be at any stage.
@@ -203,6 +220,9 @@ async def convert_and_record_order(customer: Customer, order: Order,
     with its Order Items."""
     record_stage(customer, LeadStage.CONVERTED)
     customer.is_converted = True
+    await dst_crm.record_lead_stage(customer, LeadStage.CONVERTED)
+    if not zoho_in_use():
+        return
 
     details = _order_details(customer, order, ctx.outlet_name)
     record = await _ensure_converted(customer)
@@ -218,6 +238,10 @@ async def convert_and_record_order(customer: Customer, order: Order,
 async def push_order_stage(order: Order, stage: OrderStage, *,
                            delivered_at: datetime | None = None) -> None:
     """Mirror an order stage change into Zoho's Order Status (spec 17-18)."""
+    if dst_crm.in_use():
+        await dst_crm.record_order_stage(await _customer_of(order), stage)
+    if not zoho_in_use():
+        return
     if not order.zoho_order_id and order.zoho_note:
         # Noted rather than filed (_note_order): the change is a short note
         # on the same Lead/Contact, so the record shows how the order went.
@@ -260,6 +284,11 @@ async def push_customer(customer: Customer, *, details: dict,
     module the caller needs to know what failed, so problems come back as
     sentences (empty list = all went through) as well as being logged.
     """
+    if not zoho_in_use():
+        from app.core import tenants
+
+        return [f"Zoho is not connected for {tenants.current().name}: connect it on the "
+                "Settings page first."]
     # A linked record may have been deleted in Zoho since (common while
     # testing). Check, and relink or recreate rather than updating a ghost.
     for module, attr in ((f.CONTACTS, "zoho_contact_id"), (f.LEADS, "zoho_lead_id")):
@@ -314,6 +343,16 @@ async def push_customer(customer: Customer, *, details: dict,
 
 
 # --- helpers -----------------------------------------------------------------
+async def _customer_of(order: Order) -> Customer | None:
+    """The order's customer, from the order's own session (None if detached)."""
+    from sqlalchemy.ext.asyncio import async_object_session
+
+    session = async_object_session(order)
+    if session is None or order.customer_id is None:
+        return None
+    return await session.get(Customer, order.customer_id)
+
+
 async def _ensure_converted(customer: Customer) -> Record | None:
     """The customer's Contact, converting their Lead if they still are one.
 

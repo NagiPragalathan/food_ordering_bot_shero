@@ -45,7 +45,7 @@
     <div class="space-y-3 xl:col-span-3">
       <form method="get" action="{{ url_for('admin_kitchens') }}"
             class="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-3 shadow-card sm:flex-row sm:items-center">
-        {{ ui.search('find', find, 'Search kitchen name, street, city or ZIP') }}
+        {{ ui.search('find', find, 'Search kitchen name, street, city or ' ~ locale.postal_short()) }}
         <div class="flex items-center gap-2 sm:ml-auto">
           {{ ui.select('status', status, [('', 'All kitchens')] + status_options.items() | list, 'Show') }}
           <button class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800">Search</button>
@@ -79,9 +79,9 @@
             <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-stone-600">
               <span class="inline-flex items-center gap-1.5" title="Delivery area">
                 <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
-                {% if k.service_area_mode == 'zips' %}{{ k.service_zips | length }} ZIP codes
-                {% elif k.service_area_mode == 'both' %}{{ miles(reach(k)) | round(1) }} mi + {{ k.service_zips | length }} ZIPs
-                {% else %}Within <b class="font-semibold text-stone-800">{{ miles(reach(k)) | round(1) }} mi</b>{% endif %}
+                {% if k.service_area_mode == 'zips' %}{{ k.service_zips | length }} {{ locale.postal_label() }}s
+                {% elif k.service_area_mode == 'both' %}{{ miles(reach(k)) | round(1) }} {{ locale.distance_unit() }} + {{ k.service_zips | length }} {{ locale.postal_short() }}s
+                {% else %}Within <b class="font-semibold text-stone-800">{{ miles(reach(k)) | round(1) }} {{ locale.distance_unit() }}</b>{% endif %}
               </span>
               <span class="inline-flex items-center gap-1.5" title="Today's hours">
                 <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -89,7 +89,7 @@
               </span>
               <span class="inline-flex items-center gap-1.5" title="Phone for the courier">
                 <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>
-                {% if phone %}<span class="font-mono">+{{ phone | replace('+', '') }}</span>{% else %}<b class="text-amber-700">No number: Uber cannot book</b>{% endif %}
+                {% if phone %}<span class="font-mono">+{{ phone | replace('+', '') }}</span>{% else %}<b class="text-amber-700">{{ 'No number: Uber cannot book' if tenant_settings.delivery_provider == 'uber' else 'No number for the rider' }}</b>{% endif %}
               </span>
             </div>
           </div>
@@ -149,7 +149,7 @@
           {% else %}
           <div class="mt-3 rounded-xl px-3 py-2.5 text-sm {{ 'bg-emerald-50 text-emerald-900' if check.result.is_serviceable else 'bg-red-50 text-red-900' }}">
             {% if check.result.is_serviceable %}
-              <b>Served</b> by {{ check.result.kitchen_name }}, {{ miles(check.result.distance_km) }} mi away.
+              <b>Served</b> by {{ check.result.kitchen_name }}, {{ miles(check.result.distance_km) }} {{ locale.distance_unit() }} away.
             {% else %}
               <b>Not served</b>: no kitchen covers this address.
             {% endif %}
@@ -160,7 +160,7 @@
             <li class="flex items-center justify-between gap-3 py-2">
               <span class="font-medium text-stone-800">{{ row.kitchen.name }}</span>
               <span class="flex items-center gap-3">
-                <span class="tabular-nums text-stone-500">{{ row.miles if row.miles is not none else '—' }} mi</span>
+                <span class="tabular-nums text-stone-500">{{ row.miles if row.miles is not none else '—' }} {{ locale.distance_unit() }}</span>
                 {{ ui.badge('Covers it', 'good') if row.serves else ui.badge('Out of area') }}
               </span>
             </li>

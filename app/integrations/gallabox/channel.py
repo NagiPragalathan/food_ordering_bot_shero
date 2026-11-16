@@ -13,7 +13,8 @@ answering a stranger is worse than missing a message.
 
 from __future__ import annotations
 
-from app.core.config import is_unset, settings
+from app.core import tenants
+from app.core.config import is_unset, settings, settings_for
 from app.schemas.inbound import InboundEvent
 
 
@@ -37,8 +38,33 @@ def is_ours(event: InboundEvent) -> bool:
     ours_number = _digits(settings.whatsapp_business_number)
     if not ours_id and not ours_number:
         return True
+    return _matches(event, ours_id, ours_number)
+
+
+def _matches(event: InboundEvent, ours_id: str, ours_number: str) -> bool:
     if event.channel_id and ours_id:
         return event.channel_id == ours_id
     if event.channel_number and ours_number:
         return _digits(event.channel_number) == ours_number
     return False
+
+
+def tenant_for(event: InboundEvent) -> tenants.Tenant | None:
+    """The business whose WhatsApp number this message came in on, or None.
+
+    Shero US and DST India are two numbers in one Gallabox account, and
+    Gallabox sends both numbers' messages to the same webhook. Another
+    business claims a message only by its own configured channel, never by
+    having none set; the business being served then answers as before
+    (`is_ours`, a fresh setup included). None: another team's number.
+    """
+    here = tenants.current()
+    for tenant in tenants.enabled():
+        if tenant == here:
+            continue
+        own = settings_for(tenant)
+        own_id = "" if is_unset(own.gallabox_channel_id) else own.gallabox_channel_id.strip()
+        own_number = _digits(own.whatsapp_business_number)
+        if (own_id or own_number) and _matches(event, own_id, own_number):
+            return tenant
+    return here if is_ours(event) else None

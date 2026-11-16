@@ -1,12 +1,16 @@
 """Payment orchestration (spec steps 15-17).
 
-Covers the whole money path: create the Stripe link, send it on the approved
+Covers the whole money path: create the payment link, send it on the approved
 template, chase it at 15 minutes, expire it at 30 and release the slot, then
-react to whatever Stripe reports.
+react to whatever the payment service reports.
 
-Every handler here is idempotent. Stripe retries webhooks and may deliver the
-same event more than once, so each one checks the current state first and
-returns early if the transition has already happened.
+The payment service is the business's own (integrations/payment_gateway.py):
+Stripe Checkout for Shero US, Razorpay Payment Links for DST India. Both are
+called through the same functions, so nothing below depends on which.
+
+Every handler here is idempotent. Stripe and Razorpay retry webhooks and may
+deliver the same event more than once, so each one checks the current state
+first and returns early if the transition has already happened.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import locale
 from app.core.config import settings
 from app.core.exceptions import IntegrationError, PaymentError
 from app.core.logging import get_logger
@@ -30,7 +35,10 @@ from app.db.models import (
 from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
-from app.integrations.stripe_gw import checkout
+from app.integrations import payment_gateway
+# Kept by this name: it is Shero US's checkout, and payment_gateway.current()
+# returns this same module object for a Stripe business.
+from app.integrations.stripe_gw import checkout  # noqa: F401
 from app.services import (crm_sync, dispatch, kitchen_alerts, order_alerts, orders,
                           loyalty, promotions, receipts, slots)
 from app.services.customers import advance, get_or_create_conversation
@@ -58,14 +66,15 @@ async def send_payment_confirmation(customer: Customer, order: Order,
 
 def amount_text(order: Order) -> str:
     """The amount for a template's "$..." slot: "42.50", or with a coupon
-    "42.50 (you saved $7.50 with SHERO10)" - one line, as Meta requires."""
+    "42.50 (you saved $7.50 with SHERO10)" - one line, as Meta requires. The
+    savings are in the business's currency (locale.money): "$7.50", "₹50.00"."""
     details = []
     loyalty_amount = Decimal(order.loyalty_discount or 0)
     coupon_amount = Decimal(order.discount or 0) - loyalty_amount
     if coupon_amount > 0 and order.promo_code:
-        details.append(f"you saved ${coupon_amount:.2f} with {order.promo_code}")
+        details.append(f"you saved {locale.money(coupon_amount)} with {order.promo_code}")
     if loyalty_amount > 0:
-        details.append(f"{order.loyalty_points} points saved ${loyalty_amount:.2f}")
+        details.append(f"{order.loyalty_points} points saved {locale.money(loyalty_amount)}")
     if order.loyalty_earned:
         details.append(f"earned {order.loyalty_earned} points")
     return f"{order.total:.2f}" + (f" ({'; '.join(details)})" if details else "")
@@ -84,12 +93,13 @@ def payment_short_url(order_number: str) -> str:
 # --- creating the link -------------------------------------------------------
 async def create_payment_link(session: AsyncSession, order: Order,
                               customer: Customer, *, with_summary: bool = False) -> str:
-    """Create the Stripe session, store it, and send the payment template.
+    """Create the payment link (a Stripe session, or a Razorpay link), store
+    it, and send the payment template.
 
     `with_summary` (the web page) sends the full order summary with Pay Now,
     Change menu and Update location instead of the short payment_link.
     """
-    result = await checkout.create_checkout_session(
+    result = await payment_gateway.current().create_checkout_session(
         order_id=str(order.id),
         order_number=order.order_number,
         items=order.items or [],
@@ -308,7 +318,8 @@ PAID_STATES = ("paid", "no_payment_required")
 
 async def settle_lapsed_link(session: AsyncSession, order: Order,
                              customer: Customer) -> str:
-    """An unpaid order whose link has run out: ask Stripe before expiring it.
+    """An unpaid order whose link has run out: ask the payment service (Stripe
+    or Razorpay) before expiring it.
 
     The expiry job is the safety net for a webhook that never arrived - so
     it must not trust our own "not paid" either. A link Stripe says was paid
@@ -319,10 +330,11 @@ async def settle_lapsed_link(session: AsyncSession, order: Order,
     """
     if order.stripe_session_id:
         try:
-            state = await checkout.session_state(order.stripe_session_id)
+            gateway = payment_gateway.current()
+            state = await gateway.session_state(order.stripe_session_id)
             if state and state["status"] == "open":
-                await checkout.expire_session(order.stripe_session_id)
-                state = await checkout.session_state(order.stripe_session_id)
+                await gateway.expire_session(order.stripe_session_id)
+                state = await gateway.session_state(order.stripe_session_id)
         except PaymentError:
             log.warning("payment_expiry_unchecked", order_number=order.order_number)
             return "unchecked"
@@ -382,7 +394,8 @@ async def refund_order(session: AsyncSession, order: Order, customer: Customer,
     if order.payment_status == PaymentStatus.REFUNDED:
         return False
 
-    refund = await checkout.create_refund(order.stripe_payment_intent_id, amount)
+    refund = await payment_gateway.current().create_refund(order.stripe_payment_intent_id,
+                                                           amount)
 
     order.payment_status = PaymentStatus.REFUNDED
     order.stripe_refund_id = refund["id"]

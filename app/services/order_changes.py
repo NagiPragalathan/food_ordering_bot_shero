@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.db.models import (Conversation, Customer, LeadStage, Order, OrderStage,
                            PaymentStatus)
-from app.integrations.stripe_gw import checkout
+from app.integrations import payment_gateway
+from app.integrations.stripe_gw import checkout  # noqa: F401 - tests patch it
 from app.services import crm_sync, orders, slots
 
 log = get_logger(__name__)
@@ -120,7 +121,9 @@ async def _release(session: AsyncSession, order: Order, *, reason: str) -> None:
     # raises when Stripe says it is already expired.
     if order.stripe_session_id:
         try:
-            await checkout.expire_session(order.stripe_session_id)
+            # The business's own payment service: Stripe for Shero US, Razorpay
+            # for DST India (for Shero US this is `checkout` itself).
+            await payment_gateway.current().expire_session(order.stripe_session_id)
         except Exception:
             # Stripe unreachable. The old link stays payable until its own
             # 30-minute expiry, and a payment on it would still be accepted

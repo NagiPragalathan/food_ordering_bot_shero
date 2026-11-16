@@ -43,9 +43,12 @@
 
 <script>
 window.SheroUI = function (token) {
-  const BASE = '/order/' + token;
+  // The business's own prefix (/dst for DST India), as the page was served.
+  const BASE = {{ request.scope.get('root_path', '') | tojson }} + '/order/' + token;
   const $ = (id) => document.getElementById(id);
-  const money = (n) => '$' + Number(n || 0).toFixed(2);
+  // In the business's own currency: $ for Shero US, ₹ for DST India.
+  const CURRENCY = {{ (currency_symbol if currency_symbol is defined else locale.symbol()) | tojson }};
+  const money = (n) => CURRENCY + Number(n || 0).toFixed(2);
   let expired = false;    // once the link dies, one clear screen beats N errors
 
   function esc(s) {

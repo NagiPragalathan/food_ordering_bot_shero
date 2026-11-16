@@ -32,7 +32,9 @@ def generate_order_number() -> str:
     """e.g. SHO-260922-K4T9P (date + random suffix)."""
     stamp = datetime.now(timezone.utc).strftime("%y%m%d")
     suffix = "".join(secrets.choice(ALPHABET) for _ in range(SUFFIX_LENGTH))
-    return f"{ORDER_PREFIX}-{stamp}-{suffix}"
+    # Each business's own prefix: SHO for Shero US, DST for DST India.
+    prefix = getattr(settings, "order_number_prefix", "") or ORDER_PREFIX
+    return f"{prefix}-{stamp}-{suffix}"
 
 
 async def allocate_order_number(session: AsyncSession) -> str:

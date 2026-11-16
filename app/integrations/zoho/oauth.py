@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import httpx
 
+from app.core import tenants
 from app.core.config import settings
 from app.core.exceptions import ConfigurationError, IntegrationError
 from app.core.logging import get_logger
@@ -18,20 +19,25 @@ from app.integrations.base import TokenCache
 
 log = get_logger(__name__)
 
-_token_cache = TokenCache(leeway_seconds=120)
+# One per business: each has its own account and token.
+_token_caches = tenants.PerTenant(lambda: TokenCache(leeway_seconds=120))
+
+
+def _cache() -> TokenCache:
+    return _token_caches.get()
 
 
 async def get_access_token(*, force_refresh: bool = False) -> str:
     """Return a valid Zoho access token, refreshing only when needed."""
     if not force_refresh:
-        cached = _token_cache.get()
+        cached = _cache().get()
         if cached:
             return cached
 
-    async with _token_cache.lock:
+    async with _cache().lock:
         # Another coroutine may have refreshed while we waited for the lock.
         if not force_refresh:
-            cached = _token_cache.get()
+            cached = _cache().get()
             if cached:
                 return cached
 
@@ -61,7 +67,7 @@ async def get_access_token(*, force_refresh: bool = False) -> str:
         # Zoho signals auth failures with HTTP 200 and an "error" key, so the
         # body must be inspected even on a 2xx.
         if "error" in data:
-            _token_cache.invalidate()
+            _cache().invalidate()
             raise IntegrationError(
                 "zoho", f"token refresh rejected: {data['error']}",
                 status_code=response.status_code, payload=data,
@@ -72,14 +78,14 @@ async def get_access_token(*, force_refresh: bool = False) -> str:
             raise IntegrationError("zoho", "token refresh returned no access_token",
                                    payload=data)
 
-        _token_cache.set(token, int(data.get("expires_in", 3600)))
+        _cache().set(token, int(data.get("expires_in", 3600)))
         log.info("zoho_token_refreshed", expires_in=data.get("expires_in"))
         return token
 
 
 def invalidate_token() -> None:
     """Drop the cached token so the next call re-authenticates."""
-    _token_cache.invalidate()
+    _cache().invalidate()
 
 
 def _parse(response: httpx.Response) -> dict:

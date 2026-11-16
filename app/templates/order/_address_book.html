@@ -7,6 +7,8 @@ window.SheroAddressBook = function (deps) {
   const { api, openSheet, toast, esc, $, checkDelivery, kitchen, googleKey,
           busy, loading, SPINNER } = deps;
 
+  // "ZIP code" for Shero US, "PIN code" for DST India.
+  const POSTAL = {{ (postal_label if postal_label is defined else locale.postal_label()) | tojson }};
   let LIST = [];          // saved addresses from the server
   let LABELS = ['Home', 'Office', 'Other'];
   let CONTACT = '';       // the WhatsApp number - shown, never editable
@@ -144,7 +146,7 @@ window.SheroAddressBook = function (deps) {
       input('f-address', 'Street address', editing.address_line1) +
       '<div class="grid grid-cols-2 gap-2">' +
         input('f-apartment', 'Apartment / unit', editing.apartment_unit) +
-        input('f-zip', 'ZIP code', editing.postal_code, 'inputmode="numeric"') +
+        input('f-zip', POSTAL, editing.postal_code, 'inputmode="numeric"') +
       '</div>' +
       input('f-instructions', 'Driver instructions', editing.delivery_instructions) +
       contactBox(),
@@ -190,7 +192,7 @@ window.SheroAddressBook = function (deps) {
       latitude: pin.lat, longitude: pin.lng,
     };
     if (!payload.address_line1) { toast('Enter your street address.'); return; }
-    if (!payload.postal_code) { toast('Enter your ZIP code.'); return; }
+    if (!payload.postal_code) { toast('Enter your ' + POSTAL + '.'); return; }
 
     const done = busy($('addr-save'), 'Saving…');
     try {
@@ -247,7 +249,12 @@ window.SheroAddressBook = function (deps) {
     const has = pin.lat != null && pin.lng != null;
     if (has) return { lat: pin.lat, lng: pin.lng, zoom: 18 };
     if (kitchen && kitchen.lat != null) return { lat: kitchen.lat, lng: kitchen.lng, zoom: 12 };
+    // No kitchen to start from: the whole country (the US, or India).
+    {% if tenant_settings.country_code | upper == 'IN' %}
+    return { lat: 22.5, lng: 79.0, zoom: 4 };
+    {% else %}
     return { lat: 39.8, lng: -98.6, zoom: 4 };
+    {% endif %}
   }
 
   async function startMap(pin) {

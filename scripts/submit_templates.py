@@ -5,6 +5,12 @@
     python -m scripts.submit_templates --json      # the component payloads
     python -m scripts.submit_templates --submit    # create the missing ones
 
+    python -m scripts.submit_templates --tenant dst [--status | --submit]
+        the same for DST India: its own copies of every template ("dst_" +
+        the name, amounts in rupees, buttons on its /dst links), on its own
+        WhatsApp number (DST_GALLABOX_CHANNEL_ID). Template names are unique
+        across the Gallabox account, which is why its copies are prefixed.
+
 `--submit` goes through Gallabox, which forwards each template to Meta and
 needs only `GALLABOX_ACCOUNT_ID` plus the API key the bot already sends with.
 `--submit --via-meta` uses the Graph API instead, for a WABA where you hold a
@@ -29,6 +35,7 @@ import sys
 
 import httpx
 
+from app.core import tenants
 from app.core.config import is_unset, settings
 from app.core.exceptions import ConfigurationError, IntegrationError
 from app.integrations.gallabox import template_admin as admin
@@ -48,7 +55,7 @@ def payload(spec: tpl.TemplateSpec) -> dict:
 
 
 def show() -> None:
-    for index, spec in enumerate(tpl.MANAGED_TEMPLATES, start=1):
+    for index, spec in enumerate(tpl.managed(), start=1):
         print(f"\n{'=' * 72}\n{index}. {spec.name}   [{spec.category}]")
         print(f"   when: {spec.trigger}")
         print("\n   body:\n     " + spec.sample_body.replace("\n", "\n     "))
@@ -71,8 +78,8 @@ async def status() -> int:
         print(f"Could not read the templates: {exc}")
         return 1
 
-    print(f"channel {settings.gallabox_channel_id}\n")
-    for spec in tpl.MANAGED_TEMPLATES:
+    print(f"{tenants.current().name}: channel {settings.gallabox_channel_id}\n")
+    for spec in tpl.managed():
         row = live.get(spec.name)
         if row is None:
             print(f"  missing    {spec.name}")
@@ -82,7 +89,7 @@ async def status() -> int:
         suffix = f"  ({reason})" if reason and reason != "NONE" else ""
         print(f"  {state:<10} {spec.name}{suffix}")
 
-    extra = set(live) - {s.name for s in tpl.MANAGED_TEMPLATES}
+    extra = set(live) - {s.name for s in tpl.managed()}
     for name in sorted(extra):
         print(f"  (not ours) {name}")
     return 0
@@ -96,9 +103,14 @@ async def submit_via_gallabox() -> int:
         print(f"Could not read the existing templates: {exc}")
         return 1
 
+    if is_unset(settings.gallabox_channel_id):
+        print(f"{tenants.current().env_prefix}GALLABOX_CHANNEL_ID is not set: no WhatsApp "
+              f"number to create {tenants.current().name}'s templates on.")
+        return 1
+
     failures = 0
     stuck: list[str] = []
-    for spec in tpl.MANAGED_TEMPLATES:
+    for spec in tpl.managed():
         row = existing.get(spec.name)
         if row is not None:
             state = row.get("status", "?")
@@ -140,7 +152,7 @@ async def submit_via_meta() -> int:
 
     failures = 0
     async with httpx.AsyncClient(timeout=30) as client:
-        for spec in tpl.MANAGED_TEMPLATES:
+        for spec in tpl.managed():
             try:
                 response = await client.post(
                     f"{GRAPH}/{waba}/message_templates",
@@ -180,7 +192,15 @@ def main(argv: list[str]) -> int:
                         help="create the templates that do not exist yet")
     parser.add_argument("--via-meta", action="store_true",
                         help="submit through the Graph API rather than Gallabox")
+    parser.add_argument("--tenant", choices=sorted(tenants.BY_KEY), default=tenants.DEFAULT.key,
+                        help="which business's templates: us (Shero US) or dst (DST India)")
     args = parser.parse_args(argv)
+
+    with tenants.use(tenants.BY_KEY[args.tenant]):
+        return _run(args)
+
+
+def _run(args) -> int:
 
     if args.status:
         return asyncio.run(status())
@@ -190,13 +210,14 @@ def main(argv: list[str]) -> int:
                            else submit_via_gallabox())
 
     if args.json:
-        print(json.dumps([payload(s) for s in tpl.MANAGED_TEMPLATES], indent=2))
+        print(json.dumps([payload(s) for s in tpl.managed()], indent=2))
         return 0
 
     show()
     print(f"\n{'=' * 72}")
     print("These are definitions only - nothing was sent.")
-    print("To create them on the WABA:  python -m scripts.submit_templates --submit")
+    flag = "" if tenants.current().is_default else f" --tenant {tenants.current().key}"
+    print(f"To create them on the WABA:  python -m scripts.submit_templates{flag} --submit")
     return 0
 
 

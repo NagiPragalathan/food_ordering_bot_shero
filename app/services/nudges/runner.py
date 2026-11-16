@@ -81,8 +81,11 @@ class Run:
     """One pass over everyone. Counts what it did, for the log and the page."""
 
     def __init__(self, session: AsyncSession, cfg: NudgeSettings, now: datetime, *,
-                 file_messages: bool = False):
+                 file_messages: bool = False, zoho: bool | None = None):
         self.session, self.cfg, self.now = session, cfg, now
+        # Zoho's stages are read and written only where Zoho is in use for
+        # this business (nudges/crm.in_use); otherwise the bot's own stages.
+        self.zoho = cfg.zoho_sync if zoho is None else zoho
         self.in_hours = in_send_hours(cfg, now)
         self.counts = {"sent": 0, "failed": 0, "moved": 0, "dead": 0}
         # Each message also gets a record in Zoho's Nudge Messages module.
@@ -113,7 +116,7 @@ class Run:
         else:
             lead, template = await self._stage(customer, lead, conversation, entered, lines)
 
-        if lead is not None and (lines or template) and self.cfg.zoho_sync:
+        if lead is not None and (lines or template) and self.zoho:
             await crm.sync(customer, lead, lines, template=template)
 
     async def _stage(self, customer, lead, conversation, entered, lines):
@@ -222,7 +225,7 @@ class Run:
             return False
         # Zoho first: the team's decision there (Converted, closed, a bucket)
         # wins over what the bot was about to send.
-        if self.cfg.zoho_sync:
+        if self.zoho:
             why = await crm.follow(customer, lead, self.now)
             if why:
                 lead.waiting = why
@@ -290,11 +293,12 @@ async def run(session: AsyncSession, now: datetime | None = None) -> dict:
     """One pass. Nothing is sent while the nudges are switched off; Zoho is
     still set up for them (once a day), so it is ready when they are on."""
     cfg = await config.load(session)
-    zoho = await crm.ensure(session) if cfg.zoho_sync else {}
+    use_zoho = cfg.zoho_sync and crm.in_use()
+    zoho = await crm.ensure(session) if use_zoho else {}
     if not cfg.enabled:
         return {"off": True}
     now = now or datetime.now(timezone.utc)
-    job = Run(session, cfg, now, file_messages=bool(zoho.get("module_ready")))
+    job = Run(session, cfg, now, file_messages=bool(zoho.get("module_ready")), zoho=use_zoho)
     active_stages = [r.stage for r in cfg.rules if r.active]
 
     leads = {lead.customer_id: lead for lead in (await session.execute(select(NudgeLead))).scalars()}

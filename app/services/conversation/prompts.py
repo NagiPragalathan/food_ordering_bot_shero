@@ -10,6 +10,8 @@ These are in-conversation replies, which do not need Meta approval. Only the
 
 from __future__ import annotations
 
+from app.core import locale
+
 # --- Reply ids -------------------------------------------------------------
 # Prefixed so a handler can tell what kind of thing was tapped, and so a
 # stale button from an earlier step is recognisable rather than misread.
@@ -128,10 +130,6 @@ CUISINE_LIST_BUTTON = "View options"
 CHECK_AVAILABILITY_LABEL = "Check Availability"
 CHECK_AVAILABILITY_DESC = "See if we deliver to your area"
 
-ASK_AVAILABILITY_LOCATION = (
-    "Share your location pin, or type your ZIP code, "
-    "and I will check if we deliver to you."
-)
 AVAILABILITY_OK = (
     "Good news - we deliver to you! \U0001F389\n\n"
     "Your order will be cooked at {kitchen}{distance}."
@@ -139,10 +137,6 @@ AVAILABILITY_OK = (
 NOT_SERVICEABLE = (
     "Sorry, we do not deliver to your area yet. \U0001F61E\n\n"
     "We are expanding quickly, so please do check back with us soon."
-)
-LOCATION_UNREADABLE = (
-    "I could not read that location. Please share your location pin, "
-    "or type a valid ZIP code."
 )
 
 # --- Menu and cart (steps 7-8) -----------------------------------------------
@@ -177,10 +171,6 @@ SEARCH_NO_RESULTS = (
 )
 
 # --- Location and serviceability (steps 9-10) --------------------------------
-ASK_LOCATION = (
-    "Almost there! Share your location pin, or type your ZIP code, "
-    "so we can check delivery and work out the charge."
-)
 SERVICEABLE_CONFIRMED = "Great - we deliver to you! \U0001F389"
 
 # --- Delivery details (step 12) ----------------------------------------------
@@ -264,10 +254,13 @@ RESTART_KEYWORDS = {"menu", "start", "restart", "hi", "hello", "hey",
 AGENT_KEYWORDS = {"agent", "human", "support", "help", "talk to us"}
 
 
-def format_cart(lines: list[dict], currency_symbol: str = "$") -> str:
-    """Render the working cart for the review message (spec step 8)."""
+def format_cart(lines: list[dict], currency_symbol: str | None = None) -> str:
+    """Render the working cart for the review message (spec step 8), in the
+    business's own currency unless one is given."""
     if not lines:
         return CART_EMPTY
+    if currency_symbol is None:
+        currency_symbol = locale.symbol()
 
     rows = [CART_HEADER, ""]
     total = 0.0
@@ -284,3 +277,29 @@ def format_cart(lines: list[dict], currency_symbol: str = "$") -> str:
     rows += ["", f"Subtotal: {currency_symbol}{total:.2f}",
              "_Delivery and taxes are added at checkout._"]
     return "\n".join(rows)
+
+
+# --- Lines that name the postal code -----------------------------------------
+# "ZIP code" for Shero US, "PIN code" for DST India (app/core/locale.py). Read
+# as p.ASK_LOCATION like every other line; each read is in the terms of the
+# business being served.
+_POSTAL_LINES = {
+    "ASK_AVAILABILITY_LOCATION": (
+        "Share your location pin, or type your {postal}, "
+        "and I will check if we deliver to you."
+    ),
+    "LOCATION_UNREADABLE": (
+        "I could not read that location. Please share your location pin, "
+        "or type a valid {postal}."
+    ),
+    "ASK_LOCATION": (
+        "Almost there! Share your location pin, or type your {postal}, "
+        "so we can check delivery and work out the charge."
+    ),
+}
+
+
+def __getattr__(name: str) -> str:
+    if name in _POSTAL_LINES:
+        return _POSTAL_LINES[name].format(postal=locale.postal_label())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

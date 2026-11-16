@@ -10,7 +10,7 @@ from app.admin.auth import SESSION_COOKIE, authenticate, issue_session
 from app.admin.deps import redirect, render
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.session import get_session
+from app.db.session import get_primary_session
 from fastapi import Depends
 
 log = get_logger(__name__)
@@ -27,7 +27,8 @@ async def login(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
-    session: AsyncSession = Depends(get_session),
+    # One login for both businesses, kept in Shero US's database.
+    session: AsyncSession = Depends(get_primary_session),
 ):
     user = await authenticate(session, email, password)
     if user is None:

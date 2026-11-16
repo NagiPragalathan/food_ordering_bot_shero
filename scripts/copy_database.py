@@ -137,7 +137,7 @@ def main() -> None:
     if not source.is_file():
         raise SystemExit(f"No SQLite database at {source}")
     if args.blob_token:
-        object.__setattr__(settings, "blob_read_write_token", args.blob_token)
+        settings.blob_read_write_token = args.blob_token
     else:
         print("No Blob token: dish photos keep their /media/ paths and will not show on Vercel.")
 

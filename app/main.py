@@ -21,12 +21,14 @@ from app.admin import router as admin_router
 from app.admin.deps import NotAuthenticated
 
 from app.api.routes import (cron, health, media_thumbs, ops, order_addresses,
-                            order_web, receipts, pay, webhooks_gallabox, webhooks_stripe)
+                            order_web, receipts, pay, webhooks_gallabox, webhooks_razorpay,
+                            webhooks_stripe)
 from app.core.http_cache import ImmutableStaticFiles
+from app.core import tenants
 from app.core.config import settings
 from app.core.exceptions import IntegrationError, SheroError
 from app.core.logging import configure_logging, get_logger
-from app.db.session import engine, session_scope
+from app.db.session import dispose_all, primary_session_scope, session_scope
 from app.integrations.gallabox.client import gallabox
 from app.integrations.meta.catalog import meta_catalog
 from app.integrations.uber.direct import uber_direct
@@ -58,14 +60,22 @@ async def lifespan(app: FastAPI):
              outlet_source=settings.outlet_source,
              slot_source=settings.slot_source)
 
-    # Load admin overrides over the environment, and make sure someone can
-    # actually sign in to the dashboard.
+    # Load each business's admin overrides over the environment, and make
+    # sure someone can actually sign in to the dashboard (one login for both).
     try:
-        async with session_scope() as session:
-            await apply_overrides(session)
+        async with primary_session_scope() as session:
             await bootstrap_first_user(session)
     except Exception as exc:  # noqa: BLE001 - the API must still serve /health
         log.error("admin_startup_failed", error=str(exc))
+    for tenant in tenants.each():
+        try:
+            async with session_scope() as session:
+                await apply_overrides(session)
+        except Exception as exc:  # noqa: BLE001 - the API must still serve /health
+            log.error("settings_startup_failed", business=tenant.key, error=str(exc))
+        if not tenant.is_default:
+            log.info("business_enabled", business=tenant.key, prefix=tenant.url_prefix,
+                     missing=settings.missing_credentials())
 
     if settings.is_serverless:
         # Nothing runs between requests on Vercel; Vercel Cron calls /cron/*.
@@ -81,7 +91,7 @@ async def lifespan(app: FastAPI):
     # Release pooled connections held by the long-lived integration clients.
     for client in (gallabox, zoho_client, meta_catalog, uber_direct):
         await client.aclose()
-    await engine.dispose()
+    await dispose_all()
     log.info("application_stopped")
 
 
@@ -112,10 +122,17 @@ async def _fresh_settings(request, call_next):
         await refresh_if_stale()
     return await call_next(request)
 
+
+# Outermost: everything under /dst is DST India (app/core/tenants.py), with
+# its own settings and database, before any other middleware or route runs.
+app.add_middleware(tenants.TenantPathMiddleware)
+
 app.include_router(health.router)
 app.include_router(cron.router)
 app.include_router(webhooks_gallabox.router)
 app.include_router(webhooks_stripe.router)
+# DST India's payments, at /dst/webhooks/razorpay.
+app.include_router(webhooks_razorpay.router)
 app.include_router(pay.router)
 app.include_router(order_web.router)
 app.include_router(order_addresses.router)
@@ -144,7 +161,7 @@ async def not_authenticated_handler(request: Request, _: NotAuthenticated):
 
 # How each upstream is named on the admin pages.
 SERVICE_NAMES = {"gallabox": "WhatsApp (Gallabox)", "stripe": "Stripe", "zoho": "Zoho",
-                 "uber": "Uber Direct", "google": "Google Maps"}
+                 "uber": "Uber Direct", "google": "Google Maps", "razorpay": "Razorpay"}
 
 
 @app.exception_handler(IntegrationError)

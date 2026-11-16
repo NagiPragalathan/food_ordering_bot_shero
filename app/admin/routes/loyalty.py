@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin.deps import redirect, render, require_admin
+from app.core import locale
 from app.db.models import AdminUser, Customer, LoyaltyAccount, MenuItem, Outlet
 from app.db.session import get_session
 from app.services import loyalty
@@ -27,19 +28,26 @@ SECTIONS = [
      ["point_value", "minimum_redeem_points", "redeem_step", "minimum_redeem_subtotal",
       "maximum_redeem_percent", "maximum_redeem_amount", "stack_with_coupons"]),
 ]
+# {cur} is the business's currency symbol: $ for Shero US, ₹ for DST India.
 HINTS = {
-    "points_per_currency": "e.g. 1 = 1 point per $1 of food",
+    "points_per_currency": "e.g. 1 = 1 point per {cur}1 of food",
     "max_earn_per_order": "0 = no cap",
     "repeat_from_order": "the first order number that gets the repeat bonus",
     "milestone_every": "e.g. 5 = every 5th order; 0 = off",
-    "big_order_threshold": "eligible food in $; 0 = off",
-    "point_value": "in $, e.g. 0.01 = 100 points for $1",
-    "maximum_redeem_amount": "in $; 0 = no fixed cap",
+    "big_order_threshold": "eligible food in {cur}; 0 = off",
+    "point_value": "in {cur}, e.g. 0.01 = 100 points for {cur}1",
+    "maximum_redeem_amount": "in {cur}; 0 = no fixed cap",
     "maximum_redeem_percent": "% of the food points may cover",
 }
 DAY_LABELS = dict(zip(loyalty.DAYS, ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")))
 # The examples table: a few order sizes and order numbers.
 EXAMPLE_SPENDS = (Decimal(20), Decimal(50), Decimal(100))
+# Rupee orders are bigger numbers: ₹200, ₹500, ₹1000.
+EXAMPLE_SPENDS_OTHER = (Decimal(200), Decimal(500), Decimal(1000))
+
+
+def example_spends() -> tuple[Decimal, ...]:
+    return EXAMPLE_SPENDS if locale.currency() == "USD" else EXAMPLE_SPENDS_OTHER
 EXAMPLE_ORDERS = (1, 2, 5, 10)
 
 
@@ -51,7 +59,8 @@ def _fields(rules) -> list[dict]:
         for key in keys:
             value = values[key]
             fields.append({"key": key, "label": loyalty.Policy.model_fields[key].description,
-                           "value": value, "hint": HINTS.get(key, ""),
+                           "value": value,
+                           "hint": HINTS.get(key, "").format(cur=locale.symbol()),
                            "kind": "checkbox" if isinstance(value, bool) else
                                    "text" if key == "name" else "number"})
         sections.append({"title": title, "intro": intro, "fields": fields})
@@ -61,7 +70,7 @@ def _fields(rules) -> list[dict]:
 def _examples(rules) -> list[dict]:
     """What the current rules give, worked out by the same code a payment uses."""
     rows = []
-    for spend in EXAMPLE_SPENDS:
+    for spend in example_spends():
         cells = []
         for number in EXAMPLE_ORDERS:
             if not rules.earning_enabled or spend < rules.minimum_earn_subtotal:

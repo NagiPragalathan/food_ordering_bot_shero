@@ -3,7 +3,8 @@
 {% block title %}Menu{% endblock %}
 {% block heading %}Menu{% endblock %}
 {% block subheading %}
-  <p class="text-xs text-stone-500">{{ item_count }} item(s) shown</p>
+  <p class="text-xs text-stone-500">{{ item_count }} item(s){% if needs_price %} ·
+    <span class="font-semibold text-amber-700">{{ needs_price }} dish{{ 'es' if needs_price != 1 else '' }} need a {{ locale.symbol() }} price</span> (not sold until priced){% endif %}</p>
 {% endblock %}
 
 {% block actions %}
@@ -268,7 +269,7 @@
                 {% if item.pack_size %}{{ item.pack_size }}{% endif %}
                 {% if item.serves %} · {{ item.serves }}{% endif %}
                 {% if item.cost_price %}
-                  · cost ${{ '%.2f' | format(item.cost_price) }}
+                  · cost {{ locale.money(item.cost_price) }}
                   {% if item.margin_percent %}
                     <span class="text-emerald-700">({{ item.margin_percent }}% margin)</span>
                   {% endif %}
@@ -286,7 +287,7 @@
                 Available
               </label>
               <div class="flex items-center gap-1">
-                <span class="text-sm text-stone-400">$</span>
+                <span class="text-sm text-stone-400">{{ locale.symbol() }}</span>
                 <input name="price" value="{{ '%.2f' | format(item.price) }}"
                        inputmode="decimal"
                        class="w-20 rounded-lg border border-stone-300 px-2 py-1 text-right text-sm tabular-nums
@@ -392,7 +393,7 @@
       <div class="border-t border-stone-100 bg-stone-50/60 px-5 py-2 text-right">
         <form method="post"
               action="{{ url_for('admin_category_delete', category_id=items[0].category.id) }}"
-              onsubmit="return confirm('Delete the {{ category }} category and all {{ items | length }} dish(es) in it? This cannot be undone.')">
+              onsubmit="return confirm('Delete the {{ category }} category and every dish in it? This cannot be undone.')">
           <button class="text-xs font-medium text-red-700 hover:underline">
             Delete the {{ category }} category
           </button>
@@ -402,6 +403,9 @@
     </details>
   {% endfor %}
   </div>
+  {% if page.pages > 1 %}
+  <div class="mt-5 overflow-hidden rounded-2xl border border-stone-200 bg-white">{{ ui.pager(page, url_with) }}</div>
+  {% endif %}
 {% else %}
   <div class="rounded-xl border border-dashed border-stone-300 bg-white py-16 text-center">
     <p class="text-sm text-stone-500">No menu items here yet.</p>

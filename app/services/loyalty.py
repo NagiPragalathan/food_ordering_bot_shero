@@ -10,6 +10,7 @@ from datetime import date
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select, update
+from app.core.config import settings
 from app.core.exceptions import BotFlowError
 from app.db.models import AppSetting, Customer, LoyaltyAccount, LoyaltyEntry, Order, PaymentStatus
 
@@ -38,7 +39,8 @@ class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_default=True)
     enabled: bool = Field(False, description="Enable the loyalty program")
     name: str = Field("Shero Rewards", min_length=1, max_length=60, description="Program name")
-    currency: str = Field("USD", pattern="^[A-Z]{3}$", description="Program currency (matches order currency)")
+    # The business's own currency (USD for Shero US, INR for DST India).
+    currency: str = Field(default_factory=lambda: settings.currency.upper(), pattern="^[A-Z]{3}$", description="Program currency (matches order currency)")
     earning_enabled: bool = Field(True, description="Allow earning points")
     redemption_enabled: bool = Field(True, description="Allow spending points")
     points_per_currency: Decimal = Field(1, ge=0, le=1000, description="Points per currency unit of eligible food spend")
@@ -97,9 +99,24 @@ class Policy(BaseModel):
             raise ValueError("Set the food amount a big-order bonus needs")
         return self
 
+# A starting programme in rupees for DST India, the same ~1% back as Shero
+# US's dollar one: a point per Rs 10 of food, worth Rs 0.10, from Rs 200 of
+# food, at most Rs 200 off an order. Used until the Loyalty page saves its own.
+RUPEE_DEFAULTS = {"points_per_currency": Decimal("0.1"), "minimum_earn_subtotal": Decimal("200"),
+                  "point_value": Decimal("0.10"), "minimum_redeem_subtotal": Decimal("200"),
+                  "maximum_redeem_amount": Decimal("200")}
+
+
+def default_policy() -> Policy:
+    """The programme before the Loyalty page saves one, in the business's money."""
+    if settings.currency.upper() == "INR":
+        return Policy(**RUPEE_DEFAULTS)
+    return Policy()
+
+
 async def policy(session) -> Policy:
     row = (await session.execute(select(AppSetting).where(AppSetting.key == KEY))).scalar_one_or_none()
-    return Policy.model_validate_json(row.value) if row and row.value else Policy()
+    return Policy.model_validate_json(row.value) if row and row.value else default_policy()
 
 async def save_policy(session, data: dict, actor: str) -> Policy:
     rules = Policy.model_validate(data)

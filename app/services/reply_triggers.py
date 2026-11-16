@@ -46,6 +46,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenants
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import Conversation, ConversationStep
@@ -145,14 +146,32 @@ def dump(triggers: list[Trigger]) -> str:
                       ensure_ascii=False)
 
 
+# DST India's number also runs the client's Gallabox bot flow, whose Welcome
+# Menu has "Hungry Now? Order Food": with nothing saved there, the bot starts
+# only on that (and on Order Food, the nudges' button), never on every message.
+DST_TRIGGERS = (Trigger("Hungry Now? Order Food", EXACT, WHATSAPP),
+                Trigger("Order Food", CONTAINS, WHATSAPP))
+
+
+def _shares_number_with_gallabox_flow() -> bool:
+    return not tenants.current().is_default
+
+
 def triggers() -> list[Trigger]:
-    return parse(settings.bot_trigger_keywords)
+    saved = (settings.bot_trigger_keywords or "").strip()
+    if not saved and _shares_number_with_gallabox_flow():
+        return list(DST_TRIGGERS)
+    return parse(saved)
 
 
 def mode() -> str:
     """`any` or `keywords`. Unset, or keywords with an empty list, is `any`:
-    a missing setting must never silently switch the bot off."""
+    a missing setting must never silently switch the bot off. Except on DST
+    India's number, where unset is keywords (DST_TRIGGERS): there the
+    Gallabox flow answers every other message."""
     chosen = (settings.bot_reply_trigger or "").strip().lower()
+    if not chosen and _shares_number_with_gallabox_flow():
+        chosen = KEYWORDS
     return KEYWORDS if chosen == KEYWORDS and triggers() else ANY
 
 
@@ -221,7 +240,8 @@ async def decide(session: AsyncSession, event: InboundEvent,
         return Decision(True, "order in progress")
     if await _answered_anyway(session, number, message):
         return Decision(True, "coupon or nudge reply")
-    if menu and await welcome_menu.due(session, number, now, _last_active(conversation)):
+    if menu and menu.we_send and await welcome_menu.due(session, number, now,
+                                                        _last_active(conversation)):
         return Decision(False, "welcome menu", action=welcome_menu.SEND)
     return Decision(False, "no trigger")
 

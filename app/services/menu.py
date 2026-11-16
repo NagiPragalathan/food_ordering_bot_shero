@@ -18,6 +18,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import Category, Cuisine, MenuItem
 
@@ -71,6 +72,15 @@ class ItemOption:
         return " · ".join(parts)
 
 
+
+def on_sale():
+    """A dish customers can order: switched on. For a business that requires
+    a price (PRICE_REQUIRED: DST India, whose ERP rows can have no Mrp) also
+    priced above zero, so nothing is sold at nothing even if switched on by
+    mistake. Shero US sells every switched-on dish, as it always has."""
+    available = MenuItem.is_available.is_(True)
+    return available & (MenuItem.price > 0) if settings.price_required else available
+
 async def list_cuisines(session: AsyncSession) -> list[CuisineOption]:
     """Active cuisines that actually have something available to order."""
     rows = await session.execute(
@@ -79,7 +89,7 @@ async def list_cuisines(session: AsyncSession) -> list[CuisineOption]:
         .join(MenuItem, MenuItem.category_id == Category.id)
         .where(Cuisine.is_active.is_(True),
                Category.is_active.is_(True),
-               MenuItem.is_available.is_(True))
+               on_sale())
         .group_by(Cuisine.id)
         .order_by(Cuisine.position, Cuisine.name)
     )
@@ -99,7 +109,7 @@ async def list_categories(session: AsyncSession,
         .where(Cuisine.slug == cuisine_slug,
                Cuisine.is_active.is_(True),
                Category.is_active.is_(True),
-               MenuItem.is_available.is_(True))
+               on_sale())
         .group_by(Category.id)
         .order_by(Category.position, Category.name)
     )
@@ -118,7 +128,7 @@ async def list_items(session: AsyncSession, cuisine_slug: str,
         .join(Cuisine, Category.cuisine_id == Cuisine.id)
         .where(Cuisine.slug == cuisine_slug,
                Category.slug == category_slug,
-               MenuItem.is_available.is_(True))
+               on_sale())
         .order_by(MenuItem.position, MenuItem.name)
     )
     return [_to_option(item) for item in rows.scalars()]
@@ -142,7 +152,7 @@ async def get_by_retailer_ids(session: AsyncSession,
     rows = await session.execute(
         select(MenuItem).where(
             MenuItem.retailer_id.in_(retailer_ids),
-            MenuItem.is_available.is_(True),
+            on_sale(),
         )
     )
     return {item.retailer_id: _to_option(item) for item in rows.scalars()}
@@ -176,7 +186,7 @@ async def search_items(session: AsyncSession, term: str, *,
         select(MenuItem)
         .join(Category, MenuItem.category_id == Category.id)
         .join(Cuisine, Category.cuisine_id == Cuisine.id)
-        .where(MenuItem.is_available.is_(True),
+        .where(on_sale(),
                Cuisine.is_active.is_(True),
                func.lower(MenuItem.name).like(f"%{cleaned}%"))
     )
@@ -206,3 +216,9 @@ def _to_option(item: MenuItem) -> ItemOption:
         image_url=item.image_url,
         description=item.description,
     )
+
+
+async def needs_price(session: AsyncSession) -> int:
+    """Dishes on the menu with no price yet (an ERP row without an Mrp)."""
+    rows = await session.execute(select(MenuItem.id).where(MenuItem.price <= 0))
+    return len(rows.all())

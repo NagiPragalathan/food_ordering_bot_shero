@@ -11,6 +11,7 @@ Start here.
 | [nudges.md](nudges.md) | WhatsApp nudges by stage, the No / Later / No response follow-ups, and who got what |
 | [kitchen-payouts.md](kitchen-payouts.md) | Splitting each order between its kitchen partner and Shero, and the orders with each side's amount |
 | [admin-dashboard.md](admin-dashboard.md) | Running the bot day to day: menu, import, orders, settings |
+| [dst-india.md](dst-india.md) | DST India, the second business: its own tab, database, Razorpay payments and own delivery staff; setting it up |
 | [zoho-setup.md](zoho-setup.md) | What the Zoho admin needs to create — fields, picklists, the Orders module |
 | [whatsapp-templates.md](whatsapp-templates.md) | The 10 templates to submit for Meta approval |
 | [open-questions.md](open-questions.md) | Decisions we still need, and the assumptions we made to keep moving |

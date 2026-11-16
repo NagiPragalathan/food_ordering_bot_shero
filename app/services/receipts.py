@@ -66,6 +66,8 @@ def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.set_margins(18, 18, 18)
     pdf.add_page()
+    # The PDF's built-in font has no rupee sign, so other currencies are
+    # written by code: "INR 249.00".
     currency = "$" if (order.currency or "USD").upper() == "USD" else f"{order.currency} "
 
     # Header: logo, business, and the bill's own details on the right.
@@ -185,7 +187,7 @@ def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
     if order.stripe_payment_intent_id:
         pdf.cell(0, 4, _t(f"Payment reference: {order.stripe_payment_intent_id}"),
                  new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 4, "Paid online by card through Stripe. Thank you for ordering with Shero!",
+    pdf.cell(0, 4, f"Paid online {_paid_through()}. Thank you for ordering with Shero!",
              new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
 
@@ -195,6 +197,13 @@ def _label(pdf: FPDF, text: str) -> None:
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_text_color(*MUTED)
     pdf.cell(0, 5, text.upper(), new_x="LMARGIN", new_y="NEXT")
+
+
+def _paid_through() -> str:
+    """How the business takes payment: Stripe (card) or Razorpay."""
+    if settings.payment_provider == "razorpay":
+        return "through Razorpay"
+    return "by card through Stripe"
 
 
 def _money(currency: str, amount) -> str:

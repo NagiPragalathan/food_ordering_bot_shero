@@ -2,6 +2,7 @@
 
     python -m scripts.check_gallabox                   # offline format checks
     python -m scripts.check_gallabox --send 17325550142  # real end-to-end test
+    python -m scripts.check_gallabox --tenant dst        # DST India's number
 
 The offline pass catches the common mistakes (blank value, secret pasted into
 the key field, a channel ID that is not an ObjectId) without touching the
@@ -23,6 +24,7 @@ import sys
 
 import httpx
 
+from app.core import tenants
 from app.core.config import settings
 
 # Gallabox ids are MongoDB ObjectIds: 24 lowercase hex characters,
@@ -140,9 +142,19 @@ def main() -> int:
         help="send a real WhatsApp test message to this number (digits, with "
              "country code) to prove all three values work together",
     )
+    parser.add_argument(
+        "--tenant", choices=sorted(tenants.BY_KEY), default=tenants.DEFAULT.key,
+        help="which business's WhatsApp number: us (Shero US) or dst (DST India, "
+             "DST_GALLABOX_CHANNEL_ID; the API key is the shared account's)",
+    )
     args = parser.parse_args()
 
-    print("Gallabox credential check")
+    with tenants.use(tenants.BY_KEY[args.tenant]):
+        return _check(args)
+
+
+def _check(args) -> int:
+    print(f"Gallabox credential check - {tenants.current().name}")
     print(f"  base URL   {settings.gallabox_base_url}")
     print(f"  API key    {_masked(settings.gallabox_api_key)}")
     print(f"  API secret {_masked(settings.gallabox_api_secret)}")

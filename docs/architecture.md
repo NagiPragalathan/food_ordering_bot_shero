@@ -113,6 +113,13 @@ customer and the order, and drives slots, the Uber pickup and the kitchen
 alert. The kitchen is alerted on the delivery day (`services/kitchen_alerts.py`),
 not at payment.
 
+**Two businesses, one service.** Shero US and DST India are complete,
+separate copies of the bot - each with its own database, settings, WhatsApp
+number, payments and delivery - sharing the code and the admin logins. Which
+one is being served is a ContextVar set at the edge (the `/dst` path prefix,
+the Gallabox channel, the job loop), so the services read `settings` and open
+sessions the same way for both. See [dst-india.md](dst-india.md).
+
 **Admin settings override the environment.** `.env` is the floor; values saved
 through the Settings page are stored encrypted (Fernet) and applied onto the
 live settings singleton, so a key can be rotated without a redeploy.

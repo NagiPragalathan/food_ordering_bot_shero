@@ -135,16 +135,20 @@ window.SheroCheckout = function (ui, opts) {
     const box = $('area-note');
     if (!box) { toast('Sorry, we do not deliver to ' + info.address + ' yet.'); return; }
     $('slots-wrap') && $('slots-wrap').classList.add('hidden');
-    const far = info.miles != null
+    // In the business's own unit (miles or km); older answers give only miles.
+    const away = info.distance !== undefined ? info.distance : info.miles;
+    const range = info.range !== undefined ? info.range : info.range_miles;
+    const unit = info.unit || 'mi';
+    const far = away != null
       ? '<div class="mt-3 grid grid-cols-2 gap-2 text-center">' +
           '<div class="rounded-xl bg-white/80 px-2 py-2 ring-1 ring-amber-200">' +
-            '<div class="text-lg font-bold tabular-nums text-amber-900">' + esc(fmtMiles(info.miles)) + '</div>' +
+            '<div class="text-lg font-bold tabular-nums text-amber-900">' + esc(fmtDistance(away, unit)) + '</div>' +
             '<div class="text-[11px] text-amber-800/80">to our nearest kitchen</div></div>' +
           '<div class="rounded-xl bg-white/80 px-2 py-2 ring-1 ring-amber-200">' +
             '<div class="text-lg font-bold tabular-nums text-amber-900">' +
-              (info.range_miles != null ? esc(fmtMiles(info.range_miles)) : 'ZIP list') + '</div>' +
+              (range != null ? esc(fmtDistance(range, unit)) : {{ ((postal_short if postal_short is defined else locale.postal_short()) ~ ' list') | tojson }}) + '</div>' +
             '<div class="text-[11px] text-amber-800/80">' +
-              (info.range_miles != null ? 'how far it delivers' : 'set delivery area') + '</div></div>' +
+              (range != null ? 'how far it delivers' : 'set delivery area') + '</div></div>' +
         '</div>'
       : '';
     box.innerHTML =
@@ -175,9 +179,9 @@ window.SheroCheckout = function (ui, opts) {
     box.firstChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  function fmtMiles(m) {
+  function fmtDistance(m, unit) {
     const n = Number(m);
-    return (n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(n < 10 ? 1 : 0)) + ' mi';
+    return (n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(n < 10 ? 1 : 0)) + ' ' + (unit || 'mi');
   }
 
   // Price the order and show the summary. `button` shows the wait; `keep`

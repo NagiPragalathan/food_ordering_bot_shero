@@ -19,6 +19,24 @@
         {% else %}No paid orders waiting right now.{% endif %}
         {{ stats.customers }} customer(s) have messaged the bot.
       </p>
+      <div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm" data-channel>
+        {% if channel.number %}
+        <a href="{{ channel.chat_url }}" target="_blank" rel="noopener"
+           title="Open this number in WhatsApp"
+           class="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 font-semibold text-white ring-1 ring-white/25 transition hover:bg-white/25">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 21l1.7-5A8.5 8.5 0 1112 20.5a8.4 8.4 0 01-4-1L3 21z"/><path d="M9 9.5c.3 1.6 1.9 3.3 3.5 3.9l1.2-1 2 1-.4 1.3c-2.6.4-6.6-3-6.9-6l1.3-.5.9 2-.6 1"/></svg>
+          <span class="text-white/70 font-normal">WhatsApp</span> {{ channel.number }}
+        </a>
+        {% else %}
+        <span class="inline-flex items-center gap-2 rounded-full bg-amber-400/25 px-3 py-1.5 font-semibold text-white ring-1 ring-amber-200/40">
+          WhatsApp number not set
+          <code class="font-mono text-xs font-normal text-white/75">{{ tenant.env_prefix }}WHATSAPP_BUSINESS_NUMBER</code>
+        </span>
+        {% endif %}
+        {% if channel.channel_id %}
+        <span class="text-xs text-white/65">Gallabox channel <code class="font-mono">{{ channel.channel_id }}</code></span>
+        {% endif %}
+      </div>
     </div>
     <div class="flex flex-wrap gap-2">
       <a href="{{ url_for('admin_orders') }}" class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-brand-700 shadow-lg shadow-brand-900/20 transition hover:bg-brand-50">
@@ -57,8 +75,8 @@
 
 <div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
   {{ ui.stat('Paid orders', stats.paid_orders, icon='M3 3h2l2 12h11l2-8H6M9 20a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z') }}
-  {{ ui.stat('Revenue', '$%.2f' | format(stats.revenue), 'all time', 'good', icon='M12 3v18M17 7.5C17 5.6 14.8 4.5 12 4.5S7 5.6 7 7.7c0 4.6 10 2.4 10 7.3 0 2.1-2.2 3.5-5 3.5s-5-1.3-5-3.3') }}
-  {{ ui.stat('Last 30 days', '$%.2f' | format(stats.revenue_30d), icon='M3 17l6-6 4 4 8-8M15 7h6v6') }}
+  {{ ui.stat('Revenue', locale.money(stats.revenue), 'all time', 'good', icon='M12 3v18M17 7.5C17 5.6 14.8 4.5 12 4.5S7 5.6 7 7.7c0 4.6 10 2.4 10 7.3 0 2.1-2.2 3.5-5 3.5s-5-1.3-5-3.3') }}
+  {{ ui.stat('Last 30 days', locale.money(stats.revenue_30d), icon='M3 17l6-6 4 4 8-8M15 7h6v6') }}
   {{ ui.stat('Customers', stats.customers, '%d converted' | format(stats.converted), 'accent', icon='M16 19v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 10a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM21 19v-1a4 4 0 00-3-3.9M15.5 3.1a3.5 3.5 0 010 6.8') }}
 </div>
 
@@ -109,7 +127,7 @@
               </div>
             </div>
             <div class="flex shrink-0 items-center gap-2">
-              <span class="text-sm font-semibold tabular-nums">${{ '%.2f' | format(order.total) }}</span>
+              <span class="text-sm font-semibold tabular-nums">{{ locale.money(order.total) }}</span>
               {{ ui.stage_badge(order.stage) }}
             </div>
           </div>
@@ -134,7 +152,7 @@
               <div class="text-xs text-stone-500">{{ order.created_at.strftime('%d %b, %H:%M') }}</div>
             </div>
             <div class="flex shrink-0 items-center gap-2">
-              <span class="text-sm tabular-nums">${{ '%.2f' | format(order.total) }}</span>
+              <span class="text-sm tabular-nums">{{ locale.money(order.total) }}</span>
               {{ ui.payment_badge(order.payment_status) }}
             </div>
           </div>

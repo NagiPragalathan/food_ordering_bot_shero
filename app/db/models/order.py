@@ -85,8 +85,12 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
     payment_status: Mapped[str] = mapped_column(
         String(20), default=PaymentStatus.NOT_STARTED, nullable=False, index=True
     )
+    # Named for Stripe, used by either payment service (payment_gateway.py):
+    # the checkout link - a Stripe session (cs_...) or a Razorpay link (plink_...).
     stripe_session_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    # The payment taken - a Stripe payment intent (pi_...) or Razorpay payment (pay_...).
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    # The refund - a Stripe refund (re_...) or Razorpay refund (rfnd_...).
     stripe_refund_id: Mapped[str | None] = mapped_column(String(255))
     checkout_url: Mapped[str | None] = mapped_column(Text)
     payment_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

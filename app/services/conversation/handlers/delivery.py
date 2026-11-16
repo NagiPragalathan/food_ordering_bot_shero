@@ -11,8 +11,8 @@ enforced by `missing_details()` - checked again at summary time, not just here.
 
 from __future__ import annotations
 
-import re
 
+from app.core import locale
 from app.core.exceptions import NoSlotsAvailableError
 from app.core.logging import get_logger
 from app.db.models import (
@@ -36,8 +36,6 @@ log = get_logger(__name__)
 
 MAX_SLOT_ROWS = 10
 DETAIL_CURSOR = "detail_index"
-# A US ZIP (or ZIP+4) at the very end of a typed address.
-TRAILING_ZIP = re.compile(r"\b(\d{5})(?:-\d{4})?\s*$")
 
 PROMPT_FOR_STEP = {
     ConversationStep.AWAIT_ADDRESS: p.ASK_ADDRESS,
@@ -76,11 +74,12 @@ async def handle_address(ctx: FlowContext) -> None:
         await ctx.reply_text(p.ADDRESS_REASK)
         return
     ctx.customer.address_line1 = address
-    # "12 Maple St, Edison NJ 08837": the ZIP typed with the street is the
-    # one it is delivered to, whatever an earlier pin or ZIP said.
-    typed_zip = TRAILING_ZIP.search(address)
-    if typed_zip:
-        ctx.customer.postal_code = typed_zip.group(1)
+    # "12 Maple St, Edison NJ 08837" (or "..., Chennai 600028"): the ZIP or
+    # PIN typed with the street is the one it is delivered to, whatever an
+    # earlier pin or code said. A US ZIP (or ZIP+4); an Indian 6-digit PIN.
+    typed_code = locale.trailing_postal_code().search(address)
+    if typed_code:
+        ctx.customer.postal_code = typed_code.group(1)
     await _advance_detail(ctx)
 
 

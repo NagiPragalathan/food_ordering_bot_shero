@@ -22,7 +22,24 @@
       </label>
     </div>
 
-    {% if welcome.enabled and trigger_mode == 'keywords' %}
+    {% if sent_by is defined %}
+    <label class="block">
+      <span class="text-xs font-medium text-stone-700">Who sends it</span>
+      <select name="sent_by" class="mt-1 w-full rounded-lg border border-stone-300 px-2 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+        {% for value, text in sent_by.items() %}
+        <option value="{{ value }}" {% if welcome.sent_by == value %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+
+    {% if welcome.enabled and trigger_mode == 'keywords' and not welcome.we_send %}
+      <div data-menu-by-gallabox class="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+        <b>On, sent by your Gallabox flow.</b> The bot never sends a menu. When a customer picks
+        an ordering bot option it starts ordering; any other option leaves the chat to the flow
+        for 24 hours.
+      </div>
+    {% elif welcome.enabled and trigger_mode == 'keywords' %}
       <div class="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
         <b>On.</b> A message with no trigger keyword gets this menu, once a day: not while the
         customer is ordering, already got the menu, or is in a Gallabox flow.
@@ -49,7 +66,7 @@
         <span>Button (up to {{ label_limit }} characters)</span><span>Goes to</span>
       </div>
       <div class="space-y-2">
-        {% for i in range(3) %}
+        {% for i in range(3 if welcome.we_send else [6, welcome.buttons | length + 1] | max) %}
           {% set b = welcome.buttons[i] if i < welcome.buttons | length else none %}
           <div class="grid gap-2 rounded-lg border border-stone-100 p-2 sm:grid-cols-[1fr_15rem] sm:border-0 sm:p-0">
             <input name="label" value="{{ b.label if b else '' }}" maxlength="{{ label_limit }}"
@@ -64,7 +81,8 @@
           </div>
         {% endfor %}
       </div>
-      <p class="mt-2 text-[11px] text-stone-500">Leave a button blank to drop it. WhatsApp shows at most three.</p>
+      <p class="mt-2 text-[11px] text-stone-500">Leave a button blank to drop it.
+        {% if welcome.we_send %}WhatsApp shows at most three.{% else %}Use the options' exact words in the Gallabox flow (up to {{ label_limit }} characters each).{% endif %}</p>
     </div>
 
     <div class="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">

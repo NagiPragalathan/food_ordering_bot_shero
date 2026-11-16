@@ -137,6 +137,31 @@ async def test_stripe() -> TestResult:
                       f"Connected to {name} in {mode} - {detail}.")
 
 
+async def test_razorpay() -> TestResult:
+    """List one payment link: proves the key id and secret, changes nothing."""
+    missing = _missing({
+        "Key ID": settings.razorpay_key_id,
+        "Key Secret": settings.razorpay_key_secret,
+    })
+    if missing:
+        return TestResult("Razorpay", False, f"Not configured - missing {missing}.")
+
+    from app.integrations.razorpay_gw import checkout as razorpay_checkout
+
+    try:
+        await razorpay_checkout._api("GET", "/payment_links", params={"count": 1})
+    except IntegrationError as exc:
+        if exc.status_code in (401, 403):
+            return TestResult("Razorpay", False, "The Key ID or Key Secret was rejected.")
+        return TestResult("Razorpay", False, f"Razorpay returned an error: {exc.message[:200]}")
+
+    mode = "TEST mode" if razorpay_checkout.test_mode() else "LIVE mode"
+    webhook = ("webhook secret set" if not is_unset(settings.razorpay_webhook_secret)
+               else "webhook secret NOT set - payments will not be confirmed")
+    return TestResult("Razorpay", not is_unset(settings.razorpay_webhook_secret),
+                      f"Keys accepted in {mode} - {webhook}.")
+
+
 async def test_uber() -> TestResult:
     missing = _missing({
         "Customer ID": settings.uber_customer_id,
@@ -206,6 +231,7 @@ TESTS = {
     "zoho": test_zoho,
     "gallabox": test_gallabox,
     "stripe": test_stripe,
+    "razorpay": test_razorpay,
     "uber": test_uber,
     "meta": test_meta,
     "maps": test_maps,

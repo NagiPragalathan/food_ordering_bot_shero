@@ -98,7 +98,7 @@ async def handle(ctx) -> bool:
         lead.stage_sent_at, lead.next_due_at, lead.waiting = now, None, None
         lead.attempts = lead.failures = 0
         await session.flush()
-        if cfg.zoho_sync:
+        if cfg.zoho_sync and crm.in_use():
             await crm.sync(customer, lead, lines)
         return False
 
@@ -120,6 +120,6 @@ async def handle(ctx) -> bool:
     await session.flush()
     log.info("nudge_reply", customer_id=str(customer.id), reply=label, template=send.template)
     await ctx.reply_text(reply)
-    if cfg.zoho_sync:
+    if cfg.zoho_sync and crm.in_use():
         await crm.sync(customer, lead, lines)
     return True

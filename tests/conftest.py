@@ -21,6 +21,67 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import settings
 from app.db.models import Base, Category, Cuisine, Customer, MenuItem, Outlet
 
+# Every service key a developer's .env may hold. A test runs with all of them
+# blank, so nothing can reach a live account: Stripe falls back to its mock
+# checkout, and the other clients refuse before they call anyone.
+SERVICE_KEYS = (
+    "gallabox_api_key", "gallabox_api_secret", "gallabox_account_id",
+    "stripe_secret_key", "stripe_publishable_key", "stripe_webhook_secret",
+    "uber_customer_id", "uber_client_id", "uber_client_secret",
+    "zoho_client_id", "zoho_client_secret", "zoho_refresh_token",
+    "google_maps_api_key", "google_maps_browser_key",
+    "meta_catalog_id", "meta_system_user_token",
+)
+
+
+class NetworkBlocked(RuntimeError):
+    """A test tried to reach the network."""
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """No test may reach a real service.
+
+    A developer's .env holds live keys (Stripe, Gallabox, Uber, Google), and a
+    test that forgot to fake a client would charge, message or book for real.
+    Three layers: every service key is blank; httpx - which every integration
+    client uses - refuses to send; and a socket may only connect to this
+    machine (asyncio on Windows wires its event loop over a local socket pair,
+    and the ASGI test clients never open a socket at all).
+    """
+    import socket
+
+    import httpx
+
+    from app.core import tenants
+    from app.core.config import settings_for
+
+    # Every business's copy: DST India shares the Gallabox account's keys.
+    for tenant in tenants.ALL:
+        own = settings_for(tenant)
+        for key in (*SERVICE_KEYS, "razorpay_key_id", "razorpay_key_secret",
+                    "razorpay_webhook_secret"):
+            monkeypatch.setattr(own, key, "")
+
+    def refuse(self, request, *args, **kwargs):
+        raise NetworkBlocked(f"test tried to call {request.url}")
+
+    async def refuse_async(self, request, *args, **kwargs):
+        raise NetworkBlocked(f"test tried to call {request.url}")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", refuse_async)
+
+    real_connect = socket.socket.connect
+
+    def local_only(sock, address):
+        host = address[0] if isinstance(address, tuple) else address
+        if host in ("127.0.0.1", "::1", "localhost") or not isinstance(address, tuple):
+            return real_connect(sock, address)
+        raise NetworkBlocked(f"test tried to connect to {host}")
+
+    monkeypatch.setattr(socket.socket, "connect", local_only)
+
 
 @pytest.fixture(autouse=True)
 def _answer_everyone(monkeypatch):

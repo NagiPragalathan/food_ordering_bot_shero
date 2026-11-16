@@ -15,7 +15,8 @@ from sqlalchemy import Column, MetaData, PrimaryKeyConstraint, String, Table, po
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.core.config import settings
+from app.core import tenants
+from app.core.config import settings_for
 from app.db.url import driver_url
 
 # Importing the models package registers every table on Base.metadata.
@@ -26,8 +27,19 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Which business's database: Shero US by default, DST India with
+#   alembic -x tenant=dst upgrade head
+# Each business has its own database with the same tables (app/core/tenants.py).
+_wanted = context.get_x_argument(as_dictionary=True).get("tenant", tenants.DEFAULT.key)
+TENANT = tenants.by_key(_wanted)
+if TENANT is None:
+    raise SystemExit(f"unknown tenant {_wanted!r}: use one of {', '.join(tenants.BY_KEY)}")
+_url = settings_for(TENANT).database_url.strip()
+if not _url:
+    raise SystemExit(f"{TENANT.name} has no database: set {TENANT.env_prefix}DATABASE_URL")
+
 # The same driver-form URL the app uses (hosted Postgres URLs are rewritten).
-DATABASE_URL = driver_url(settings.database_url)
+DATABASE_URL = driver_url(_url)
 # "%" is configparser syntax; an encoded password (%40) must be escaped.
 config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 

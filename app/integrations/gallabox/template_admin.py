@@ -21,7 +21,7 @@ from app.core.config import is_unset, settings
 from app.core.exceptions import ConfigurationError
 from app.core.logging import get_logger
 from app.integrations.gallabox.client import gallabox
-from app.integrations.gallabox.templates import TemplateSpec
+from app.integrations.gallabox.templates import TemplateSpec, for_business
 
 log = get_logger(__name__)
 
@@ -44,6 +44,15 @@ EXAMPLES = {
     "address": "6360 Lawyers Hill Road, Apt 4, 21075",
 }
 
+# DST India's reviewer sees Indian examples: rupees, a PIN code, a +91 number.
+EXAMPLES_IN = {
+    "amount": "749.00",
+    "delivery_address": "12 Anna Nagar 2nd Avenue, Flat 4, 600040",
+    "customer": "Asha Menon, +91 98400 12345",
+    "address": "12 Anna Nagar 2nd Avenue, Flat 4, 600040",
+    "kitchen": "Shero Anna Nagar",
+}
+
 EXAMPLE_ORDER_NUMBER = "SHO-260923-AB12X"
 EXAMPLE_RECEIPT_TOKEN = "IlNITy0yNjA5MjMtQUIxMlgi.hN0bK3Yx8QeWm2cVdL5pRs7uTzA"
 # What a signed ordering-link token looks like, for Meta's reviewer.
@@ -51,8 +60,19 @@ EXAMPLE_LINK_TOKEN = "IjI4NTVjM2JmLTliY2YtNGU2NS04MDlmLWM5ZjUxMDk0YjNjYyI.arW2Wg
 
 
 def example_for(param: str) -> str:
-    """A believable sample value for one body parameter."""
+    """A believable sample value for one body parameter, in the current
+    business's terms (its order numbers, currency and addresses)."""
+    if param == "order_number":
+        return example_order_number()
+    if settings.country_code.upper() == "IN" and param in EXAMPLES_IN:
+        return EXAMPLES_IN[param]
     return EXAMPLES.get(param, param.replace("_", " ").title())
+
+
+def example_order_number() -> str:
+    """SHO-260923-AB12X, or DST-260923-AB12X for DST India."""
+    prefix = getattr(settings, "order_number_prefix", "") or "SHO"
+    return EXAMPLE_ORDER_NUMBER.replace("SHO-", f"{prefix}-", 1)
 
 
 def _order_page_base_url() -> str:
@@ -107,10 +127,12 @@ def check_body(spec: TemplateSpec) -> None:
 
 
 def components(spec: TemplateSpec) -> list[dict]:
-    """Meta's `components` array for one template.
+    """Meta's `components` array for one template, as the current business
+    has it (DST India: its prefixed name, ₹, buttons on its own /dst links).
 
     Accepted as-is by both Gallabox and the Graph API.
     """
+    spec = for_business(spec)
     check_body(spec)
     body: dict = {"type": "BODY", "text": spec.sample_body}
     if spec.param_count:
@@ -125,7 +147,7 @@ def components(spec: TemplateSpec) -> list[dict]:
         elif spec.url_base == "receipt":
             base, example = _receipt_base_url(), EXAMPLE_RECEIPT_TOKEN
         else:
-            base, example = _button_base_url(), EXAMPLE_ORDER_NUMBER
+            base, example = _button_base_url(), example_order_number()
         buttons.append({
             "type": "URL",
             "text": spec.button_label or "Open",
@@ -151,10 +173,11 @@ def components(spec: TemplateSpec) -> list[dict]:
 
 
 def creation_payload(spec: TemplateSpec, *, channel_id: str | None = None) -> dict:
-    """The body Gallabox expects when creating one template."""
+    """The body Gallabox expects when creating one template: on the current
+    business's own WhatsApp number, under its own name for the template."""
     return {
         "channelId": channel_id or settings.gallabox_channel_id,
-        "name": spec.name,
+        "name": for_business(spec).name,
         # Matches the language the send path uses in `messages.template_message`.
         # A template approved as "en" cannot be sent as "en_US".
         "language": "en",
@@ -228,6 +251,6 @@ async def create_template(spec: TemplateSpec, *,
     created = await gallabox.post(_account_path(),
                                   json=creation_payload(spec, channel_id=channel_id))
     record = created if isinstance(created, dict) else {}
-    log.info("whatsapp_template_created", name=spec.name,
+    log.info("whatsapp_template_created", name=for_business(spec).name,
              status=record.get("status"), template_id=record.get("whatsappTemplateId"))
     return record

@@ -37,6 +37,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import locale
 from app.core.logging import get_logger
 from app.db.models import (Conversation, Customer, DiscountType, Order, OrderStage,
                            Outlet, PaymentStatus, Placement, Promotion)
@@ -299,8 +300,9 @@ def amount_problem(promotion: Promotion, *, dish_total: Decimal,
     minimum = money(promotion.min_order or 0)
     if money(dish_total) < minimum:
         short = minimum - money(dish_total)
-        return (f"Add ${short:.2f} more to use {promotion.code} "
-                f"(minimum order ${minimum:.2f}).")
+        cur = locale.symbol()
+        return (f"Add {cur}{short:.2f} more to use {promotion.code} "
+                f"(minimum order {cur}{minimum:.2f}).")
     if promotion.discount_type == DiscountType.FREE_DELIVERY:
         if delivery_fee is not None and money(delivery_fee) <= 0:
             return "Delivery is already free on this order."
@@ -313,16 +315,17 @@ def amount_problem(promotion: Promotion, *, dish_total: Decimal,
 
 # --- describing an offer -----------------------------------------------------
 def headline(promotion: Promotion) -> str:
-    """"20% off, up to $10" / "$5 off" / "Free delivery"."""
+    """"20% off, up to $10" / "$5 off" / "Free delivery" (₹ for DST India)."""
     value = money(promotion.discount_value or 0)
+    cur = locale.symbol()
     match promotion.discount_type:
         case DiscountType.PERCENT:
             text = f"{plain(value)}% off"
             if promotion.max_discount is not None:
-                text += f", up to ${plain(money(promotion.max_discount))}"
+                text += f", up to {cur}{plain(money(promotion.max_discount))}"
             return text
         case DiscountType.FLAT:
-            return f"${plain(value)} off"
+            return f"{cur}{plain(value)} off"
         case DiscountType.FREE_DELIVERY:
             return "Free delivery"
     return "Discount"
@@ -335,7 +338,7 @@ def default_tag(promotion: Promotion) -> str:
         case DiscountType.PERCENT:
             return f"FLAT {plain(value)}% OFF"
         case DiscountType.FLAT:
-            return f"${plain(value)} OFF"
+            return f"{locale.symbol()}{plain(value)} OFF"
         case DiscountType.FREE_DELIVERY:
             return "FREE DELIVERY"
     return "OFFER"
@@ -346,7 +349,7 @@ def conditions(promotion: Promotion, *, with_end: bool = True) -> list[str]:
     the end date, for a view that shows the dates separately."""
     terms = []
     if promotion.min_order and money(promotion.min_order) > 0:
-        terms.append(f"Min order ${plain(money(promotion.min_order))}")
+        terms.append(f"Min order {locale.symbol()}{plain(money(promotion.min_order))}")
     if promotion.first_order_only:
         terms.append("First order only")
     if promotion.per_customer_limit == 1:

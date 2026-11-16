@@ -6,7 +6,8 @@ and /cron/daily once a day (api/routes/cron.py), and this module decides
 which jobs are due on each call, keeping the same rhythm as the scheduler:
 
     every minute     payment reminders, payment expiry
-    every 5 minutes  feedback requests, courier booking, kitchen alerts, nudges
+    every 5 minutes  feedback requests, courier booking, kitchen alerts, nudges,
+                     menu photos still linked from the ERP
     daily            delivery slot top-up
 
 A minute Vercel skips simply delays the 5-minute jobs to the next multiple
@@ -23,7 +24,8 @@ from app.workers import jobs
 log = get_logger(__name__)
 
 EVERY_MINUTE = ("payment_reminders", "payment_expiry")
-EVERY_5_MINUTES = ("feedback_requests", "courier_dispatch", "kitchen_alerts", "nudges")
+EVERY_5_MINUTES = ("feedback_requests", "courier_dispatch", "kitchen_alerts", "nudges",
+                   "menu_photos")
 DAILY = ("slot_generation",)
 
 
@@ -42,7 +44,7 @@ async def run(names: tuple[str, ...]) -> dict[str, object]:
     results: dict[str, object] = {}
     for name in names:
         try:
-            results[name] = await jobs.ALL_JOBS[name]()
+            results[name] = await jobs.everywhere(jobs.ALL_JOBS[name])
         except Exception as exc:  # noqa: BLE001 - report it and run the next job
             log.error("cron_job_failed", job=name, error=str(exc))
             results[name] = f"error: {exc}"

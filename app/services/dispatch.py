@@ -67,9 +67,17 @@ def auto_booking_paused() -> str:
     return PAUSED_FOR_TEST_PAYMENTS if settings.stripe_secret_key.startswith("sk_test") else ""
 
 
+def uses_uber() -> bool:
+    """Uber Direct carries this business's orders (Shero US). A business whose
+    own staff deliver (DST India) books no courier at all: its Delivery queue
+    lists the orders for its riders instead (`own_queue`)."""
+    return settings.delivery_provider == "uber"
+
+
 def due_time(slot_starts_at: datetime | None) -> datetime | None:
-    """When an order is sent to Uber: UBER_DISPATCH_HOURS_BEFORE its slot."""
-    if slot_starts_at is None:
+    """When an order is sent to Uber: UBER_DISPATCH_HOURS_BEFORE its slot.
+    None for a business whose own staff deliver: there is nothing to send."""
+    if slot_starts_at is None or not uses_uber():
         return None
     return as_utc(slot_starts_at) - timedelta(hours=settings.uber_dispatch_hours_before)
 
@@ -80,6 +88,8 @@ async def due_orders(session: AsyncSession, now: datetime | None = None) -> list
     The send time is stored at payment; an order paid before that existed
     falls back to its slot start minus the dispatch window.
     """
+    if not uses_uber():
+        return []
     now = now or datetime.now(timezone.utc)
     window_end = now + timedelta(hours=settings.uber_dispatch_hours_before)
     rows = await session.execute(
@@ -338,4 +348,45 @@ def matches(row: QueueRow, *, query: str = "", when: str = "", now: datetime,
 
 def status_counts(rows: list[QueueRow]) -> dict[str, int]:
     """How many rows have each status (for the page's tabs)."""
-    return {status: sum(1 for r in rows if r.status == status) for status in STATUSES}
+    statuses = STATUSES if uses_uber() else OWN_STATUSES
+    return {status: sum(1 for r in rows if r.status == status) for status in statuses}
+
+
+# --- the business's own riders (DELIVERY_PROVIDER=own) ---------------------------
+TO_DELIVER, ON_THE_WAY, DELIVERED = "To deliver", "Out for delivery", "Delivered"
+OWN_STATUSES = (TO_DELIVER, ON_THE_WAY, DELIVERED, MISSED, CANCELLED)
+
+
+async def own_queue(session: AsyncSession, now: datetime | None = None,
+                    limit: int = 200) -> list[QueueRow]:
+    """Every paid order for the business's own riders, soonest slot first:
+    those still to deliver, and those whose slot ended in the last two days.
+    The riders' steps are the order's own stages (Out for Delivery, Delivered),
+    set from here or the Orders page, which also message the customer."""
+    now = now or datetime.now(timezone.utc)
+    rows = await session.execute(
+        select(Order, DeliverySlot, Customer)
+        .join(DeliverySlot, DeliverySlot.id == Order.slot_id)
+        .join(Customer, Customer.id == Order.customer_id)
+        .where(Order.payment_status.in_((str(PaymentStatus.PAID), str(PaymentStatus.REFUNDED))),
+               DeliverySlot.ends_at > now - timedelta(days=2))
+        .order_by(DeliverySlot.starts_at)
+        .limit(limit)
+    )
+    out = []
+    for order, slot, customer in rows.all():
+        start, end = as_utc(slot.starts_at), as_utc(slot.ends_at)
+        out.append(QueueRow(order=order, customer=customer, slot_start=start, slot_end=end,
+                            send_at=None, status=_own_status(order, end, now)))
+    return out
+
+
+def _own_status(order: Order, slot_end: datetime, now: datetime) -> str:
+    stage = str(order.stage)
+    if stage == str(OrderStage.DELIVERED):
+        return DELIVERED
+    if stage in (str(OrderStage.CANCELLED), str(OrderStage.REFUNDED))             or order.payment_status == str(PaymentStatus.REFUNDED):
+        return CANCELLED
+    if stage == str(OrderStage.OUT_FOR_DELIVERY):
+        return ON_THE_WAY
+    return MISSED if slot_end <= now else TO_DELIVER

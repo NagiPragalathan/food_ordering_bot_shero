@@ -33,6 +33,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import locale
 from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
 from app.services import media, sheet_images
@@ -94,6 +95,7 @@ class ImportResult:
     items_created: int = 0
     items_updated: int = 0
     items_deactivated: int = 0
+    items_removed: int = 0          # deleted: not in a "replace the whole menu" import
     images_stored: int = 0
     images_failed: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -111,6 +113,8 @@ class ImportResult:
         ]
         if self.items_deactivated:
             parts.append(f"{self.items_deactivated} deactivated")
+        if self.items_removed:
+            parts.append(f"{self.items_removed} removed")
         if self.images_stored:
             parts.append(f"{self.images_stored} image(s) stored")
         if self.images_failed:
@@ -207,7 +211,7 @@ def extract_pack_details(description: str) -> tuple[str | None, str | None]:
 
 
 def _to_decimal(value: str) -> Decimal | None:
-    text = (value or "").replace("$", "").replace(",", "").strip()
+    text = locale.amount_text(value or "")
     if not text:
         return None
     try:

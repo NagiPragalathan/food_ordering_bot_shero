@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.deps import redirect, render, require_admin
+from app.core import tenants
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import AdminUser, AppSetting
@@ -43,6 +44,9 @@ async def bot_replies_page(
     return render(request, "admin/bot_replies.html", {
         "current_user": current_user,
         "mode": allowlist.mode(),
+        # "Off" is offered where the number also runs a Gallabox bot flow
+        # (DST India), or where it is already off.
+        "offer_off": not tenants.current().is_default or allowlist.is_off(),
         "entries": allowlist.entries(),
         "last": last,
         "check": _check(check) if check.strip() else None,
@@ -58,7 +62,8 @@ async def bot_replies_page(
         "asks_email": settings.asks_customer_email,
         "welcome": welcome_menu.load(),
         "goes_to": welcome_menu.GOES_TO,
-        "label_limit": welcome_menu.LABEL_LIMIT,
+        "sent_by": welcome_menu.SENT_BY,
+        "label_limit": welcome_menu.load().label_limit,
         "text_limit": welcome_menu.TEXT_LIMIT,
     })
 
@@ -77,7 +82,8 @@ async def save_welcome_menu(
                     if str(label).strip())
     menu = welcome_menu.Menu(enabled=form.get("enabled") == "1",
                              text=str(form.get("text") or "").replace("\r\n", "\n").strip(),
-                             buttons=buttons)
+                             buttons=buttons,
+                             sent_by=str(form.get("sent_by") or welcome_menu.BOT_SENDS))
     found = welcome_menu.problems(menu)
     if found:
         return redirect(url, flash=("error", " ".join(found)))
@@ -89,8 +95,11 @@ async def save_welcome_menu(
     if not menu.enabled:
         return redirect(url, flash=("success", "Welcome menu off."))
     if not reply_triggers.is_keyword_mode():
-        return redirect(url, flash=("success", "Welcome menu saved. It is sent once Reply to "
+        return redirect(url, flash=("success", "Welcome menu saved. It is used once Reply to "
                                                "any message is switched off."))
+    if not menu.we_send:
+        return redirect(url, flash=("success", "Welcome menu on: the Gallabox flow sends it; "
+                                               "the bot answers only its ordering options."))
     return redirect(url, flash=("success", "Welcome menu on: a new chat gets it first."))
 
 
@@ -133,9 +142,18 @@ async def save_bot_replies(
     if mode == allowlist.ALLOWLIST and not listed:
         # An empty whitelist would silence the bot for everyone.
         return redirect(url, flash=("error", "Add at least one WhatsApp number to the "
-                                             "whitelist, or choose Reply to everyone."))
+                                             "whitelist, or choose Reply to everyone"
+                                             + (" or Off." if not tenants.current().is_default
+                                                else ".")))
 
     values = {"BOT_REPLY_MODE": mode}
+    if mode == allowlist.OFF:
+        changed = await save_many(session, values, updated_by=current_user.email,
+                                  allow_blank=set(values))
+        log.info("bot_replies_saved", mode=mode, changed=changed, by=current_user.email)
+        return redirect(url, flash=("success", f"Off: the bot answers nobody on the "
+                                               f"{tenants.current().name} number. Every "
+                                               "message goes to your team in Gallabox."))
     if listed:      # an empty list is never stored: switching back keeps the old one
         values["BOT_ALLOWED_NUMBERS"] = allowlist.format_entries(listed)
     # Stored even when equal to .env, so this page alone decides from now on.
@@ -212,4 +230,4 @@ def _check(number: str) -> dict:
         return {"error": "Enter a full WhatsApp number, 10 to 15 digits with country code."}
     return {"number": "".join(ch for ch in number if ch.isdigit()),
             "replies": allowlist.permits(number), "entry": allowlist.match(number),
-            "everyone": allowlist.mode() == allowlist.ALL}
+            "everyone": allowlist.mode() == allowlist.ALL, "off": allowlist.is_off()}

@@ -27,7 +27,8 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import is_unset, settings
+from app.core import tenants
+from app.core.config import build_settings, current_settings, is_unset, settings
 from app.core.logging import get_logger
 from app.db.models import AppSetting
 
@@ -59,6 +60,12 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("DELIVERY_MAX_MILES",
          "Maximum delivery distance: miles from the kitchen, straight line "
          "(10 at most - Uber's limit)", False),
+        ("OWN_DELIVERY_FEE",
+         "Delivery charge: a flat amount per order (0 = free delivery)", False),
+        ("FREE_DELIVERY_ABOVE",
+         "Free delivery when the dishes come to at least this much (0 = never)", False),
+        ("OWN_DELIVERY_MAX_KM",
+         "Maximum delivery distance: km from the kitchen, straight line", False),
         ("PUBLIC_BASE_URL", "Public API URL", False),
         ("PAY_REDIRECT_BASE_URL", "Pay redirect URL", False),
     ],
@@ -75,6 +82,19 @@ OTHER_EDITABLE: list[tuple[str, str, bool]] = [
     ("ASK_CUSTOMER_EMAIL", "Ask new customers for their email (on / off)", False),
     ("ORDER_ALERT_NUMBERS", "WhatsApp numbers told about every paid order", False),
 ]
+
+# Shown only to the business that delivers that way (DELIVERY_PROVIDER).
+UBER_ONLY = {"UBER_DISPATCH_HOURS_BEFORE", "DELIVERY_MAX_MILES"}
+OWN_DELIVERY_ONLY = {"OWN_DELIVERY_FEE", "FREE_DELIVERY_ABOVE", "OWN_DELIVERY_MAX_KM"}
+
+
+def setting_groups() -> dict[str, list[tuple[str, str, bool]]]:
+    """SETTING_GROUPS as the current business's Settings page shows them:
+    the Uber fields for Uber delivery, the own-delivery ones for its own staff."""
+    hidden = OWN_DELIVERY_ONLY if settings.delivery_provider == "uber" else UBER_ONLY
+    return {title: [f for f in fields if f[0] not in hidden]
+            for title, fields in SETTING_GROUPS.items()}
+
 
 EDITABLE_KEYS: dict[str, tuple[str, bool]] = {
     key: (label, secret)
@@ -97,6 +117,10 @@ NUMBER_RANGES: dict[str, tuple[float, float]] = {
     # Uber Direct delivers 10 miles from the pickup at most, measured in a
     # straight line, so a kitchen may reach less than that, never more.
     "DELIVERY_MAX_MILES": (1, 10),
+    # The business's own riders: as far as it chooses, within reason.
+    "OWN_DELIVERY_MAX_KM": (1, 100),
+    "OWN_DELIVERY_FEE": (0, 100000),
+    "FREE_DELIVERY_ABOVE": (0, 1000000),
 }
 
 
@@ -184,9 +208,10 @@ async def apply_overrides(session: AsyncSession) -> int:
     # An override that was applied earlier but is gone now (cleared by
     # another process, say a script's disconnect) falls back to the
     # environment, so the minute-ly refresh really does drop a token.
-    for key in _applied - set(overrides):
+    applied_keys = _applied.get()
+    for key in applied_keys - set(overrides):
         _restore_default(key)
-    _applied.clear()
+    applied_keys.clear()
 
     for key, value in overrides.items():
         field = key.lower()
@@ -203,8 +228,8 @@ async def apply_overrides(session: AsyncSession) -> int:
         except (TypeError, ValueError):
             log.warning("setting_bad_value", key=key)
             continue
-        object.__setattr__(settings, field, coerced)
-        _applied.add(key)
+        object.__setattr__(current_settings(), field, coerced)
+        applied_keys.add(key)
         applied += 1
 
     if applied:
@@ -212,8 +237,9 @@ async def apply_overrides(session: AsyncSession) -> int:
     return applied
 
 
-_applied: set[str] = set()      # override keys currently applied in this process
-_refreshed_at: float = 0.0      # time.monotonic() of the last apply_overrides
+# Per business: each has its own saved settings, in its own database.
+_applied: tenants.PerTenant[set[str]] = tenants.PerTenant(set)   # keys applied here
+_refreshed_at: dict[str, float] = {}   # time.monotonic() of the last apply_overrides
 REFRESH_SECONDS = 60
 
 
@@ -223,10 +249,10 @@ async def refresh_if_stale(max_age: float = REFRESH_SECONDS) -> None:
     For serverless hosts (see app.main). Never raises: a database hiccup
     leaves the settings already in memory in place and is logged.
     """
-    global _refreshed_at
-    if time.monotonic() - _refreshed_at < max_age:
+    key = tenants.current().key
+    if time.monotonic() - _refreshed_at.get(key, 0.0) < max_age:
         return
-    _refreshed_at = time.monotonic()
+    _refreshed_at[key] = time.monotonic()
     from app.db.session import session_scope     # late: session imports settings
 
     try:
@@ -245,9 +271,9 @@ def _restore_default(key: str) -> None:
     field = key.lower()
     if not hasattr(settings, field):
         return
-    fresh = type(settings)()            # re-reads .env and the environment
-    object.__setattr__(settings, field, getattr(fresh, field))
-    _applied.discard(key)
+    fresh = build_settings(tenants.current())   # re-reads .env and the environment
+    object.__setattr__(current_settings(), field, getattr(fresh, field))
+    _applied.get().discard(key)
 
 
 def _coerce(field: str, value: str):

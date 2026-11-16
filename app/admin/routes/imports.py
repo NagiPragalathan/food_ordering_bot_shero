@@ -11,6 +11,7 @@ from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
 from app.db.models import AdminUser, Category, Cuisine, MenuItem
 from app.db.session import get_session
+from app.services import erp_import
 from app.services.menu_import import import_from_csv_text, import_from_sheet
 
 log = get_logger(__name__)
@@ -47,7 +48,37 @@ async def import_form(
         "current_user": current_user,
         "cuisines": cuisines,
         "counts": counts,
+        "photos_waiting": await erp_import.photos_waiting(session),
     })
+
+
+@router.post("/erp", name="admin_import_erp")
+async def import_erp(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    cuisine: str = Form(default=""),
+    replace: str = Form(default=""),
+    session: AsyncSession = Depends(get_session),
+    current_user: AdminUser = Depends(require_admin),
+):
+    """Import the ERP's item exports, one cuisine per file (services/erp_import.py)."""
+    url = str(request.url_for("admin_import"))
+    uploads = [f for f in files if f.filename]
+    if not uploads:
+        return redirect(url, flash=("error", "Choose at least one Excel file."))
+    if cuisine.strip() and len(uploads) > 1:
+        return redirect(url, flash=("error", "Type a cuisine name only when uploading one "
+                                             "file; with several, each is named after its file."))
+    batch = []
+    for upload in uploads:
+        batch.append((upload.filename, await upload.read(), cuisine.strip()))
+    try:
+        result = await erp_import.import_exports(session, batch, replace=replace == "on")
+    except erp_import.ErpImportError as exc:
+        return redirect(url, flash=("error", str(exc)))
+    log.info("menu_import_erp", by=current_user.email, files=[u.filename for u in uploads],
+             replace=replace == "on", summary=result.summary())
+    return redirect(url, flash=_flash_for(result))
 
 
 @router.post("/sheet", name="admin_import_sheet")

@@ -20,8 +20,11 @@ URL, because Stripe checkout URLs exceed the button limit.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
+
+from app.core import locale
+from app.core.config import settings
 
 Category = Literal["UTILITY", "MARKETING"]
 # static_url: a fixed link (the shop's website), the same for every customer.
@@ -371,8 +374,71 @@ RENAMED: dict[str, str] = {
 }
 
 
+# --- one business's copies ---------------------------------------------------------
+# Shero US and DST India are two WhatsApp numbers in one Gallabox account, and
+# a template name is unique across the account. So DST India's copy of each
+# catalogue template above is the same message under a prefixed name
+# (settings.template_prefix: "dst_payment_confirmed_v4"), with its money in
+# its own currency. Shero US's prefix is empty: its names are unchanged.
+# Only the catalogue is renamed; a nudge message or an SMO/F1-F12 template
+# already carries its full name.
+US_FLAG = "🇺🇸"
+
+
+def wire_name(name: str | TemplateSpec) -> str:
+    """The name a template goes to Gallabox under, for the business being served."""
+    name = getattr(name, "name", name)
+    prefix = settings.template_prefix
+    return f"{prefix}{name}" if prefix and name in BY_NAME else name
+
+
+def catalogue_name(name: str) -> str:
+    """The catalogue name of a template seen on Gallabox: "dst_order_summary_v2"
+    -> "order_summary_v2" for DST India. Any other name comes back as it is."""
+    prefix = settings.template_prefix
+    if prefix and name.startswith(prefix) and name[len(prefix):] in BY_NAME:
+        return name[len(prefix):]
+    return name
+
+
+def _flag(country: str) -> str:
+    code = (country or "").strip().upper()
+    if len(code) != 2 or not code.isalpha():
+        return US_FLAG
+    return "".join(chr(0x1F1E6 + ord(ch) - ord("A")) for ch in code)
+
+
+def business_body(text: str) -> str:
+    """A body in the current business's terms: its currency in front of an
+    amount ("${{3}}" -> "₹{{3}}") and its country's flag."""
+    symbol = locale.symbol()
+    if symbol != "$":
+        text = text.replace("${{", symbol + "{{")
+    flag = _flag(settings.country_code)
+    if flag != US_FLAG:
+        text = text.replace(US_FLAG, flag)
+    return text
+
+
+def for_business(spec: TemplateSpec) -> TemplateSpec:
+    """`spec` as the current business sends and submits it: its wire name and
+    body. Shero US gets the very same object back."""
+    if spec.name not in BY_NAME:
+        return spec
+    name, body = wire_name(spec.name), business_body(spec.sample_body)
+    if name == spec.name and body == spec.sample_body:
+        return spec
+    return replace(spec, name=name, sample_body=body)
+
+
+def managed() -> tuple[TemplateSpec, ...]:
+    """Every catalogue template, as the current business has it."""
+    return tuple(for_business(spec) for spec in MANAGED_TEMPLATES)
+
+
 def render(spec: TemplateSpec, *values: object, button_value: str | None = None) -> dict:
-    """Build the Gallabox template block, validating arity first."""
+    """Build the Gallabox template block, validating arity first. Sent under
+    the current business's name for it (`wire_name`)."""
     if len(values) != spec.param_count:
         raise ValueError(
             f"template '{spec.name}' expects {spec.param_count} parameters "
@@ -386,4 +452,5 @@ def render(spec: TemplateSpec, *values: object, button_value: str | None = None)
     # Every template here has its one URL button first (index 0); quick
     # replies after it need no runtime value.
     button_values = [url_button_value(0, button_value)] if button_value else None
-    return template_message(spec.name, [str(v) for v in values], button_values=button_values)
+    return template_message(wire_name(spec.name), [str(v) for v in values],
+                            button_values=button_values)

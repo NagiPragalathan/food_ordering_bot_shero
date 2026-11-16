@@ -12,8 +12,8 @@
 {% endblock %}
 
 {% macro usd(v) -%}
-  {%- if v is not none and v < 0 -%}<span class="text-red-700">−${{ '%.2f' | format(-v) }}</span>
-  {%- else -%}${{ '%.2f' | format(v) }}{%- endif -%}
+  {%- if v is not none and v < 0 -%}<span class="text-red-700">−{{ locale.money(-v) }}</span>
+  {%- else -%}{{ locale.money(v) }}{%- endif -%}
 {%- endmacro %}
 {% macro pct(v) %}{{ '%g' | format(v) }}%{% endmacro %}
 
@@ -89,7 +89,7 @@
   {{ ui.stat('Customers paid', usd(totals.paid), '%d order%s' | format(totals.orders, '' if totals.orders == 1 else 's')) }}
   {{ ui.stat('Kitchens get', usd(totals.kitchen), 'of food ' ~ usd(totals.food), 'good') }}
   {{ ui.stat('Shero gets', usd(totals.shero), 'after coupons, delivery, fees and tax') }}
-  {{ ui.stat('Delivery, fees and tax', usd(totals.passed_on), 'passed on to Uber and tax, not split') }}
+  {{ ui.stat('Delivery, fees and tax', usd(totals.passed_on), 'passed on to Uber and tax, not split' if tenant_settings.delivery_provider == 'uber' else 'delivery and tax, not split') }}
 </div>
 
 {% if not kitchen_id and per_kitchen | length > 1 %}
@@ -183,10 +183,14 @@
   const kp = document.getElementById('kp'), sp = document.getElementById('sp');
   const same = document.getElementById('same-for-all'), per = document.getElementById('per-kitchen');
   const example = document.getElementById('split-example');
+  const CUR = {{ locale.symbol() | tojson }};
+  const EXAMPLE_FOOD = {{ 100 if locale.currency() == 'USD' else 1000 }};
   const rest = (v) => (v === '' || isNaN(+v)) ? '' : String(Math.round((100 - +v) * 100) / 100);
   const describe = () => {
     const k = +kp.value || 0;
-    example.textContent = `Example: $100 of food - kitchen partner $${k.toFixed(2)}, Shero $${(100 - k).toFixed(2)} (plus delivery, fees and tax, passed on).`;
+    // In the business's currency: $100 of food for Shero US, ₹1000 for DST India.
+    const food = EXAMPLE_FOOD, part = food * k / 100;
+    example.textContent = `Example: ${CUR}${food} of food - kitchen partner ${CUR}${part.toFixed(2)}, Shero ${CUR}${(food - part).toFixed(2)} (plus delivery, fees and tax, passed on).`;
     // Kitchens left empty follow the shared percentage.
     per.querySelectorAll('tr').forEach((row) => {
       const ki = row.querySelector('[data-k]'), si = row.querySelector('[data-s]');

@@ -11,7 +11,11 @@ the admin page). A number the bot does not answer is left alone and keeps
 reaching the team in Gallabox exactly as if the bot were not there.
 
 Nothing saved means the bot replies to everyone, so a fresh install never
-silently switches the bot off.
+silently switches the bot off - except on DST India's number, which already
+runs the client's own Gallabox bot flow: there it starts Off (answering
+nobody, DstSettings.bot_reply_mode) until the team switches it on.
+
+    BOT_REPLY_MODE        off   - nobody: every message is left to Gallabox
 """
 
 from __future__ import annotations
@@ -20,8 +24,8 @@ from dataclasses import dataclass
 
 from app.core.config import settings
 
-ALL, ALLOWLIST = "all", "allowlist"
-MODES = (ALL, ALLOWLIST)
+ALL, ALLOWLIST, OFF = "all", "allowlist", "off"
+MODES = (ALL, ALLOWLIST, OFF)
 
 # A number given without its country code is matched against the end of the
 # incoming one. Ten digits is the shortest national number we would accept that
@@ -85,16 +89,24 @@ def allowed_numbers() -> set[str]:
 
 
 def mode() -> str:
-    """`all` or `allowlist`, as set; unset falls back to the list."""
+    """`all`, `allowlist` or `off`, as set; unset falls back to the list.
+    A whitelist with no numbers on it answers nobody, so it reads as `off`."""
     chosen = (settings.bot_reply_mode or "").strip().lower()
+    if chosen == ALLOWLIST and not allowed_numbers():
+        return OFF
     if chosen in MODES:
         return chosen
     return ALLOWLIST if allowed_numbers() else ALL
 
 
+def is_off() -> bool:
+    """True while the bot answers nobody on this business's number."""
+    return mode() == OFF
+
+
 def is_restricted() -> bool:
-    """True while the bot answers only the whitelist."""
-    return mode() == ALLOWLIST
+    """True while the bot answers only the whitelist (or nobody)."""
+    return mode() in (ALLOWLIST, OFF)
 
 
 def permits(number: str) -> bool:
@@ -104,8 +116,11 @@ def permits(number: str) -> bool:
     at least ten digits - the same number written without its country code,
     so `7401268091` and `917401268091` both mean the same phone.
     """
-    if mode() == ALL:
+    chosen = mode()
+    if chosen == ALL:
         return True
+    if chosen == OFF:
+        return False
     return match(number) is not None
 
 

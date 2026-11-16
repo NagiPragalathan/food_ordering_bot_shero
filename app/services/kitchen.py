@@ -188,8 +188,10 @@ def _evaluate(kitchen: Outlet, point: GeoPoint | None, zip_code: str) -> Service
     zip_ok = kitchen.serves_postal_code(zip_code)
 
     if mode == "zips":
-        ok, reason = zip_ok, ("in the delivery ZIP list" if zip_ok
-                              else "outside the delivery ZIP list")
+        from app.core import locale
+
+        ok, reason = zip_ok, (f"in the delivery {locale.postal_short()} list" if zip_ok
+                              else f"outside the delivery {locale.postal_short()} list")
     elif mode == "both":
         ok = radius_ok and zip_ok
         reason = _both_reason(radius_ok, zip_ok)
@@ -210,9 +212,14 @@ UBER_MAX_MILES = 10.0
 
 def max_km() -> float:
     """The furthest any kitchen delivers: DELIVERY_MAX_MILES (Settings page or
-    .env), and never more than Uber's 10 miles whatever is stored."""
+    .env), and never more than Uber's 10 miles whatever is stored.
+
+    A business whose own staff deliver (DST India) has no Uber limit: its
+    cap is OWN_DELIVERY_MAX_KM from its own Settings page."""
     from app.core.config import settings
 
+    if settings.delivery_provider == "own":
+        return float(settings.own_delivery_max_km or 10.0)
     miles = settings.delivery_max_miles
     if not miles or miles <= 0 or miles > UBER_MAX_MILES:
         miles = UBER_MAX_MILES
@@ -229,11 +236,14 @@ def reach_km(kitchen: Outlet) -> float:
 def _both_reason(radius_ok: bool, zip_ok: bool) -> str:
     if radius_ok and zip_ok:
         return "inside the delivery area"
+    from app.core import locale
+
+    code = locale.postal_short()
     if not radius_ok and not zip_ok:
-        return "outside the delivery range and not in the ZIP list"
+        return f"outside the delivery range and not in the {code} list"
     if not radius_ok:
         return "beyond the delivery range"
-    return "not in the delivery ZIP list"
+    return f"not in the delivery {code} list"
 
 
 def miles(km: float | None) -> float | None:

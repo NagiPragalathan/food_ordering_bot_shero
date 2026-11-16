@@ -1,4 +1,4 @@
-"""Settings: connect Zoho, WhatsApp, Stripe, Uber and Meta from the browser.
+"""Settings: connect Zoho, WhatsApp, Stripe or Razorpay, Uber and Meta from the browser.
 
 Values saved here override the environment, so credentials can be rotated
 without a redeploy. Secrets are encrypted at rest and never rendered back to
@@ -17,7 +17,10 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.deps import redirect, render, require_admin
+from app.core import tenants
 from app.core.config import is_unset, settings
+from app.integrations import payment_gateway
+from app.integrations.razorpay_gw import checkout as razorpay_checkout
 from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
 from app.db.models import AdminUser
@@ -26,7 +29,7 @@ from app.integrations.zoho import oauth as zoho_oauth
 from app.services import connection_tests, dispatch, order_alerts, zoho_connect
 from app.services.settings_store import (
     EDITABLE_KEYS,
-    SETTING_GROUPS,
+    setting_groups,
     SecretsUnavailable,
     SettingValueError,
     save_many,
@@ -46,7 +49,7 @@ async def settings_page(
     overridden = await stored_keys(session)
 
     groups = []
-    for title, fields in SETTING_GROUPS.items():
+    for title, fields in setting_groups().items():
         rendered = []
         for key, label, is_secret in fields:
             current = getattr(settings, key.lower(), "")
@@ -77,7 +80,26 @@ async def settings_page(
         },
         # The Order alerts card (saved by admin/routes/order_alerts.py).
         "alert_entries": order_alerts.entries(),
+        # DST India pays through Razorpay; Shero US's page has no such card.
+        "razorpay": razorpay_card() if payment_gateway.uses_razorpay() else None,
     })
+
+
+def razorpay_card() -> dict:
+    """What the Razorpay card shows: whether the keys are in .env, test or
+    live, and the webhook to register in the Razorpay dashboard."""
+    prefix = tenants.current().env_prefix
+    keys_set = not (is_unset(settings.razorpay_key_id) or is_unset(settings.razorpay_key_secret))
+    return {
+        "keys_set": keys_set,
+        "mode": ("test" if razorpay_checkout.test_mode() else "live") if keys_set else "",
+        "webhook_secret_set": not is_unset(settings.razorpay_webhook_secret),
+        # Under the business's own prefix: https://<domain>/dst/webhooks/razorpay.
+        "webhook_url": f"{settings.public_base_url.rstrip('/')}/webhooks/razorpay",
+        "events": "payment_link.paid",
+        "env": {name: f"{prefix}{name}" for name in
+                ("RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET")},
+    }
 
 
 @router.post("", name="admin_settings_save")

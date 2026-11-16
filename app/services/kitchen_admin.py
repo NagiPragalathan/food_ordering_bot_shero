@@ -18,6 +18,7 @@ import tzfpy
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import locale
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import Outlet
@@ -56,13 +57,20 @@ class KitchenForm:
     is_active: bool
 
 
+def max_radius() -> float:
+    """The largest delivery radius a kitchen may have, in the business's unit:
+    Uber's 10 miles (or less, from Settings) for Shero US; the business's own
+    maximum distance for DST India's delivery staff."""
+    return locale.from_km(kitchen_service.max_km()) or 0.0
+
+
 def parse_form(form) -> KitchenForm:
     """Read and check the posted kitchen form."""
     def text(key: str) -> str:
         return str(form.get(key) or "").strip()
 
     required = {"name": "Kitchen name", "address_line1": "Street address",
-                "city": "City", "state": "State", "postal_code": "ZIP"}
+                "city": "City", "state": "State", "postal_code": locale.postal_short()}
     missing = [label for key, label in required.items() if not text(key)]
     if missing:
         raise KitchenFormError(f"Fill in: {', '.join(missing)}.")
@@ -74,15 +82,20 @@ def parse_form(form) -> KitchenForm:
             and not (-90 <= latitude <= 90 and -180 <= longitude <= 180)):
         raise KitchenFormError("Latitude or longitude is out of range.")
 
+    # The radius is typed in the business's own unit: miles for Shero US, km
+    # for DST India (the field keeps its old name, radius_miles).
     radius = _number(text("radius_miles"))
     if radius is None or radius <= 0:
         radius = DEFAULT_RADIUS_MILES
     mode = text("service_area_mode").lower()
-    cap = settings.delivery_max_miles
+    cap = max_radius()
     if radius > cap and mode != "zips":
+        unit = locale.unit_name()
+        who = ("Uber delivers" if settings.delivery_provider == "uber"
+               else "Your delivery staff deliver")
         raise KitchenFormError(
-            f"Uber delivers at most {cap:g} miles from a kitchen, so the delivery "
-            f"radius can be {cap:g} miles or less.")
+            f"{who} at most {cap:g} {unit} from a kitchen, so the delivery "
+            f"radius can be {cap:g} {unit} or less.")
 
     return KitchenForm(
         name=text("name")[:120],
@@ -95,9 +108,10 @@ def parse_form(form) -> KitchenForm:
         service_area_mode=mode if mode in AREA_MODES else "radius",
         radius_miles=radius,
         service_zips=parse_zips(text("service_zips")),
-        kitchen_whatsapp=text("kitchen_whatsapp") or None,
-        phone=text("kitchen_phone") or None,
-        timezone=text("timezone_name") or "America/New_York",
+        # A bare 10-digit number gets DST India's +91; Shero US keeps it as typed.
+        kitchen_whatsapp=locale.typed_phone(text("kitchen_whatsapp")) or None,
+        phone=locale.typed_phone(text("kitchen_phone")) or None,
+        timezone=text("timezone_name") or settings.default_timezone,
         operating_hours=parse_hours(form),
         slot_length_minutes=max(15, min(240, int(_number(text("slot_length_minutes")) or 60))),
         slot_capacity=max(1, int(_number(text("slot_capacity")) or 4)),
@@ -154,6 +168,7 @@ async def save(session: AsyncSession, kitchen: Outlet | None, data: KitchenForm)
                          address_line1=data.address_line1, city=data.city,
                          state=data.state, postal_code=data.postal_code,
                          latitude=latitude, longitude=longitude,
+                         country=settings.country_code,
                          # The first kitchen is the default one.
                          is_primary=not await _any_kitchen(session))
         session.add(kitchen)
@@ -165,7 +180,7 @@ async def save(session: AsyncSession, kitchen: Outlet | None, data: KitchenForm)
     kitchen.postal_code = data.postal_code
     kitchen.latitude, kitchen.longitude = latitude, longitude
     kitchen.service_area_mode = data.service_area_mode
-    kitchen.delivery_radius_km = kitchen_service.km(data.radius_miles)
+    kitchen.delivery_radius_km = locale.to_km(data.radius_miles)
     kitchen.service_zips = data.service_zips
     kitchen.kitchen_whatsapp = data.kitchen_whatsapp
     kitchen.phone = data.phone
@@ -275,7 +290,7 @@ class OpenState:
 def open_state(kitchen: Outlet, now: datetime) -> OpenState:
     """Opening hours read in the kitchen's own timezone."""
     try:
-        local = now.astimezone(ZoneInfo(kitchen.timezone or "America/New_York"))
+        local = now.astimezone(ZoneInfo(kitchen.timezone or settings.default_timezone))
     except ZoneInfoNotFoundError:
         local = now
     windows = (kitchen.operating_hours or {}).get(WEEKDAY_KEYS[local.weekday()]) or []

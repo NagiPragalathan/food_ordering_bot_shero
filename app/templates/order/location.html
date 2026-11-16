@@ -44,7 +44,7 @@
   <button id="choose" class="mt-4 hidden w-full rounded-xl bg-brand-500 py-3.5 text-sm font-semibold text-white hover:bg-brand-600">
     Choose delivery address
   </button>
-  <a href="/order/{{ token }}" class="mt-3 block text-center text-sm font-medium text-ink-700/70 underline">
+  <a href="{{ request.scope.get('root_path', '') }}/order/{{ token }}" class="mt-3 block text-center text-sm font-medium text-ink-700/70 underline">
     Change dishes instead
   </a>
 </main>
@@ -74,7 +74,7 @@
   function renderLines(lines, subtotal) {
     if (!lines.length) {
       $('lines').innerHTML = '<p class="py-2">Your cart is empty. ' +
-        '<a class="font-semibold text-brand-600 underline" href="/order/' + esc({{ token | tojson }}) +
+        '<a class="font-semibold text-brand-600 underline" href="' + esc({{ request.scope.get('root_path', '') | tojson }}) + '/order/' + esc({{ token | tojson }}) +
         '">Open the menu</a> to add dishes.</p>';
       return;
     }

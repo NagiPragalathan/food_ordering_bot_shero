@@ -16,6 +16,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import locale
 from app.core.logging import get_logger
 from app.db.models import Customer, CustomerAddress
 
@@ -136,7 +137,7 @@ def clean(data: dict) -> dict:
     if not street:
         raise AddressError("Enter your street address.")
     if not postal_code:
-        raise AddressError("Enter your ZIP code.")
+        raise AddressError(f"Enter your {locale.postal_label()}.")
 
     latitude = _coordinate(data.get("latitude"), 90)
     longitude = _coordinate(data.get("longitude"), 180)

@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from app.core import tenants
 from app.core.logging import get_logger
 from app.db.models import (
     Conversation,
@@ -175,6 +176,16 @@ async def generate_upcoming_slots() -> int:
     return created
 
 
+async def store_menu_photos() -> int:
+    """Copy dish photos still linked from the ERP to our own store, a batch
+    per run (services/erp_import.py), so the ordering page never depends on
+    another server."""
+    from app.services import erp_import
+
+    async with session_scope() as session:
+        return await erp_import.store_remote_photos(session)
+
+
 async def refresh_settings() -> int:
     """Pick up settings saved through the admin dashboard elsewhere.
 
@@ -212,7 +223,39 @@ async def _park_for_feedback(session, customer: Customer) -> None:
         conversation.step = str(ConversationStep.AWAIT_FEEDBACK)
 
 
-# Exposed for the scheduler and for manual invocation from a shell.
+async def everywhere(job) -> int:
+    """Run `job` once for each business set up here (Shero US, DST India),
+    each inside its own settings and database. One business failing does not
+    stop the other; the first failure is raised once both have run, so the
+    scheduler and /cron/tick still report it."""
+    total, failure = 0, None
+    for tenant in tenants.enabled():
+        with tenants.use(tenant):
+            try:
+                total += int(await job() or 0)
+            except Exception as exc:  # noqa: BLE001 - run the other business too
+                log.error("job_failed_for_business", job=getattr(job, "__name__", "job"),
+                          business=tenant.key, error=str(exc))
+                failure = failure or exc
+    if failure is not None:
+        raise failure
+    return total
+
+
+def in_business(tenant: tenants.Tenant, job):
+    """`job` as the scheduler registers it for one business: run inside that
+    business's settings and database (scheduler.py adds one per business)."""
+    async def run() -> int:
+        with tenants.use(tenant):
+            return await job()
+
+    run.__name__ = getattr(job, "__name__", "job")
+    return run
+
+
+# Exposed for the scheduler and for manual invocation from a shell. Each runs
+# for the business being served; the scheduler and /cron run them through
+# `everywhere`.
 ALL_JOBS = {
     "payment_reminders": send_payment_reminders,
     "payment_expiry": expire_payment_links,
@@ -221,5 +264,6 @@ ALL_JOBS = {
     "kitchen_alerts": send_kitchen_alerts,
     "nudges": send_nudges,
     "slot_generation": generate_upcoming_slots,
+    "menu_photos": store_menu_photos,
     "settings_refresh": refresh_settings,
 }

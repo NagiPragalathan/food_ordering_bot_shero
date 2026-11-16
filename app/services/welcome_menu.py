@@ -20,6 +20,13 @@ buttons either starts this bot's ordering or is left to a Gallabox flow:
 Only in keyword mode ("Reply to any message" off): with it on, the bot
 answers everything itself. Stored as one JSON setting, BOT_WELCOME_MENU,
 from the admin Bot replies page.
+
+Who sends the menu: this bot (Shero US), or the business's own Gallabox bot
+flow (DST India, whose flow already opens every chat with its Welcome Menu -
+Party Order, Food Subscription, Sweets & Snacks, Hungry Now? Order Food).
+When Gallabox sends it, the bot never sends a menu; it only recognises the
+options: an ordering option starts the bot, any other leaves the chat to the
+flow. A Gallabox menu may have more than three options (a list).
 """
 
 from __future__ import annotations
@@ -30,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tenants
 from app.core.config import settings
 from app.core.exceptions import ConfigurationError, IntegrationError
 from app.core.logging import get_logger
@@ -49,6 +57,13 @@ GOES_TO = {rt.BOTH: "Ordering bot: both messages",
 
 MAX_BUTTONS = 3                      # WhatsApp's limit for reply buttons
 LABEL_LIMIT = m.BUTTON_TITLE_LIMIT   # 20 characters
+# Who sends the menu (Menu.sent_by).
+BOT_SENDS, GALLABOX_SENDS = "bot", "gallabox"
+SENT_BY = {BOT_SENDS: "This bot sends it",
+           GALLABOX_SENDS: "Our Gallabox bot flow sends it (the bot only recognises the options)"}
+# A menu Gallabox sends can be a list: up to ten rows of 24 characters.
+MAX_OPTIONS = 10
+OPTION_LIMIT = 24
 TEXT_LIMIT = 1024
 QUIET_HOURS = 24                     # WhatsApp's own conversation window
 
@@ -73,12 +88,33 @@ class MenuButton:
 DEFAULT_BUTTONS = (MenuButton("Party Order", GALLABOX), MenuButton("Sweet & Snacks", GALLABOX),
                    MenuButton("Single Meal Order", rt.WHATSAPP))
 
+# DST India: its Gallabox flow's Welcome Menu (Shero SSC WhatsApp Template
+# Flow, Template 1). Hungry Now? Order Food goes straight into ordering in
+# WhatsApp; the other three are the flow's own forms.
+DST_TEXT = "Hi!\n\nWhat are you looking for today?"
+DST_BUTTONS = (MenuButton("Party Order", GALLABOX), MenuButton("Food Subscription", GALLABOX),
+               MenuButton("Sweets & Snacks", GALLABOX),
+               MenuButton("Hungry Now? Order Food", rt.WHATSAPP))
+
 
 @dataclass(frozen=True)
 class Menu:
     enabled: bool = False
     text: str = DEFAULT_TEXT
     buttons: tuple[MenuButton, ...] = field(default=DEFAULT_BUTTONS)
+    sent_by: str = BOT_SENDS
+
+    @property
+    def we_send(self) -> bool:
+        return self.sent_by != GALLABOX_SENDS
+
+    @property
+    def max_buttons(self) -> int:
+        return MAX_BUTTONS if self.we_send else MAX_OPTIONS
+
+    @property
+    def label_limit(self) -> int:
+        return LABEL_LIMIT if self.we_send else OPTION_LIMIT
 
     def button(self, said: str) -> MenuButton | None:
         """The button whose label is the whole message (typed or tapped)."""
@@ -91,6 +127,14 @@ def clean_label(raw: str) -> str:
     return " ".join((raw or "").split())
 
 
+def default() -> Menu:
+    """What nothing saved means: Shero US's menu, off; for DST India its
+    Gallabox flow's Welcome Menu, recognised (the flow sends it)."""
+    if tenants.current().is_default:
+        return Menu()
+    return Menu(enabled=True, text=DST_TEXT, buttons=DST_BUTTONS, sent_by=GALLABOX_SENDS)
+
+
 def parse(raw: str) -> Menu:
     """The stored JSON as a menu; the defaults for anything missing or unreadable."""
     try:
@@ -100,18 +144,27 @@ def parse(raw: str) -> Menu:
         data = {}
     if not isinstance(data, dict):
         data = {}
+    if not data:
+        return default()
+    fallback = default()
+    sent_by = str(data.get("sent_by") or BOT_SENDS)
+    sent_by = sent_by if sent_by in SENT_BY else BOT_SENDS
+    limit = MAX_BUTTONS if sent_by == BOT_SENDS else MAX_OPTIONS
     buttons = tuple(MenuButton(clean_label(str(b.get("label") or "")), str(b.get("goes_to") or ""))
                     for b in data.get("buttons") or [] if isinstance(b, dict))
-    buttons = tuple(b for b in buttons if b.label and b.goes_to in GOES_TO)[:MAX_BUTTONS]
+    buttons = tuple(b for b in buttons if b.label and b.goes_to in GOES_TO)[:limit]
     text = str(data.get("text") or "").strip()
     return Menu(enabled=bool(data.get("enabled")) and bool(buttons),
-                text=text or DEFAULT_TEXT, buttons=buttons or DEFAULT_BUTTONS)
+                text=text or fallback.text, buttons=buttons or fallback.buttons[:limit],
+                sent_by=sent_by)
 
 
 def dump(menu: Menu) -> str:
-    return json.dumps({"enabled": menu.enabled, "text": menu.text,
-                       "buttons": [{"label": b.label, "goes_to": b.goes_to} for b in menu.buttons]},
-                      ensure_ascii=False)
+    data = {"enabled": menu.enabled, "text": menu.text,
+            "buttons": [{"label": b.label, "goes_to": b.goes_to} for b in menu.buttons]}
+    if not menu.we_send:
+        data["sent_by"] = menu.sent_by
+    return json.dumps(data, ensure_ascii=False)
 
 
 def problems(menu: Menu) -> list[str]:
@@ -123,11 +176,14 @@ def problems(menu: Menu) -> list[str]:
         found.append(f"The message is longer than {TEXT_LIMIT} characters.")
     if not menu.buttons:
         found.append("Add at least one button.")
-    if len(menu.buttons) > MAX_BUTTONS:
-        found.append(f"WhatsApp allows at most {MAX_BUTTONS} buttons.")
+    if menu.sent_by not in SENT_BY:
+        found.append("Choose who sends the menu.")
+    if len(menu.buttons) > menu.max_buttons:
+        found.append(f"WhatsApp allows at most {MAX_BUTTONS} buttons." if menu.we_send
+                     else f"At most {MAX_OPTIONS} options.")
     for b in menu.buttons:
-        if len(b.label) > LABEL_LIMIT:
-            found.append(f"“{b.label}” is longer than {LABEL_LIMIT} characters.")
+        if len(b.label) > menu.label_limit:
+            found.append(f"“{b.label}” is longer than {menu.label_limit} characters.")
         if not rt.normalise(b.label):
             found.append(f"“{b.label}” needs at least one letter or number.")
         if b.goes_to not in GOES_TO:
@@ -183,8 +239,10 @@ async def _chat(session: AsyncSession, number: str) -> WelcomeMenuChat:
 
 async def send(session: AsyncSession, number: str, now: datetime | None = None) -> bool:
     """Send the menu and note it. A failed send is not noted, so the next
-    message tries again."""
+    message tries again. Never when the business's Gallabox flow sends it."""
     menu = load()
+    if not menu.we_send:
+        return False
     buttons = [m.Button(b.label, b.label) for b in menu.buttons]   # the id is the label:
     try:                                                           # Gallabox's keyword sees either
         await current_sender().send_buttons(number, menu.text, buttons)

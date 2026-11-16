@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import listing
 from app.admin.deps import redirect, render, require_admin
+from app.core import locale
 from app.core.logging import get_logger
 from app.db.models import AdminUser, Order, OrderStage, Outlet, PaymentStatus
 from app.db.session import get_session
@@ -82,7 +83,9 @@ async def kitchens_page(
         "find": find,
         "url_with": partial(listing.url_with, request),
         "maps_browser_key": settings.google_maps_browser_key,
-        "miles": kitchen_service.miles,
+        # Distances in the business's own unit (miles, or km for DST India);
+        # the template keeps calling it `miles`.
+        "miles": locale.from_km,
         # What each kitchen really covers: its radius, capped at DELIVERY_MAX_MILES.
         "reach": kitchen_service.reach_km,
         "check": await _address_check(session, q) if q.strip() else None,
@@ -217,10 +220,12 @@ def _form(request: Request, current_user: AdminUser, kitchen: Outlet | None):
         "kitchen": kitchen,
         # Public by design (referrer-restricted); see google_maps_browser_key.
         "maps_browser_key": settings.google_maps_browser_key,
-        "radius_miles": (kitchen_service.miles(kitchen.delivery_radius_km) if kitchen
+        # In the business's own unit: miles for Shero US, km for DST India.
+        "radius_miles": (locale.from_km(kitchen.delivery_radius_km) if kitchen
                          else kitchen_admin.DEFAULT_RADIUS_MILES),
-        # The slider stops at the cap (DELIVERY_MAX_MILES, 10 at most).
-        "max_radius_miles": settings.delivery_max_miles,
+        # The slider stops at the cap (Uber's 10 miles at most; DST India's
+        # own maximum distance).
+        "max_radius_miles": kitchen_admin.max_radius(),
     })
 
 
@@ -274,6 +279,6 @@ async def _address_check(session: AsyncSession, query: str) -> dict:
         "point": point,
         "result": result,
         "rows": [{"kitchen": c.kitchen, "serves": c.is_serviceable,
-                  "miles": kitchen_service.miles(c.distance_km), "reason": c.reason}
+                  "miles": locale.from_km(c.distance_km), "reason": c.reason}
                  for c in rows],
     }

@@ -189,7 +189,7 @@ async def _form(request: Request, session: AsyncSession, current_user: AdminUser
         "v": values,
         "error": error,
         "kitchens": kitchens,
-        "discount_types": promotion_admin.DISCOUNT_TYPES,
+        "discount_types": promotion_admin.discount_types(),
         "placements": promotion_admin.PLACEMENTS,
         "usage": None,
         "status": None,

@@ -9,21 +9,26 @@ message on the page the person came from.
 from __future__ import annotations
 
 import uuid
+from functools import partial
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.admin import listing
 from app.admin.deps import redirect, render, require_admin
 from app.core.logging import get_logger
 from app.db.models import AdminUser, Category, Cuisine, MenuItem
 from app.db.session import get_session
 from app.services import catalogue_sync, menu_admin, zoho_connect
+from app.services import menu as menu_service
 from app.services.menu_admin import MenuEditError
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/menu", tags=["admin"])
+
+PAGE_SIZE = 150
 
 
 @router.get("", name="admin_menu")
@@ -31,6 +36,7 @@ async def menu_index(
     request: Request,
     cuisine: str | None = None,
     q: str | None = None,
+    page: str | None = None,
     session: AsyncSession = Depends(get_session),
     current_user: AdminUser = Depends(require_admin),
 ):
@@ -56,7 +62,13 @@ async def menu_index(
         term = f"%{q.strip().lower()}%"
         query = query.where(func.lower(MenuItem.name).like(term))
 
-    query = query.order_by(Category.position, MenuItem.position).limit(600)
+    # One cuisine at a time, a page at a time: an ERP cuisine can hold well
+    # over a thousand dishes, each with its own edit form.
+    total = int(await session.scalar(
+        select(func.count()).select_from(query.order_by(None).subquery())) or 0)
+    page_of = listing.Page.of(page, PAGE_SIZE, total)
+    query = (query.order_by(Category.position, MenuItem.position)
+             .offset(page_of.offset).limit(page_of.size))
     items = list((await session.execute(query)).scalars())
 
     # Group by category so the page reads like the sheet does.
@@ -79,9 +91,13 @@ async def menu_index(
         "selected": selected,
         "categories": categories,
         "grouped": grouped,
-        "item_count": len(items),
+        "item_count": total,
+        "page": page_of,
+        "url_with": partial(listing.url_with, request),
         "query": q or "",
         "zoho_connected": zoho_connect.is_connected(),
+        # Dishes on the menu with no price yet: never sold until priced.
+        "needs_price": await menu_service.needs_price(session),
     })
 
 

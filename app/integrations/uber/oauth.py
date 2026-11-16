@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import httpx
 
+from app.core import tenants
 from app.core.config import settings
 from app.core.exceptions import ConfigurationError, IntegrationError
 from app.core.logging import get_logger
@@ -16,18 +17,23 @@ from app.integrations.base import TokenCache
 
 log = get_logger(__name__)
 
-_token_cache = TokenCache(leeway_seconds=300)
+# One per business: each has its own account and token.
+_token_caches = tenants.PerTenant(lambda: TokenCache(leeway_seconds=300))
+
+
+def _cache() -> TokenCache:
+    return _token_caches.get()
 
 
 async def get_access_token(*, force_refresh: bool = False) -> str:
     if not force_refresh:
-        cached = _token_cache.get()
+        cached = _cache().get()
         if cached:
             return cached
 
-    async with _token_cache.lock:
+    async with _cache().lock:
         if not force_refresh:
-            cached = _token_cache.get()
+            cached = _cache().get()
             if cached:
                 return cached
 
@@ -51,7 +57,7 @@ async def get_access_token(*, force_refresh: bool = False) -> str:
                 raise IntegrationError("uber", f"token network error: {exc}") from exc
 
         if response.status_code != 200:
-            _token_cache.invalidate()
+            _cache().invalidate()
             raise IntegrationError(
                 "uber", f"token request failed: {response.text[:300]}",
                 status_code=response.status_code,
@@ -62,10 +68,10 @@ async def get_access_token(*, force_refresh: bool = False) -> str:
         if not token:
             raise IntegrationError("uber", "token response had no access_token", payload=data)
 
-        _token_cache.set(token, int(data.get("expires_in", 2592000)))
+        _cache().set(token, int(data.get("expires_in", 2592000)))
         log.info("uber_token_refreshed", expires_in=data.get("expires_in"))
         return token
 
 
 def invalidate_token() -> None:
-    _token_cache.invalidate()
+    _cache().invalidate()

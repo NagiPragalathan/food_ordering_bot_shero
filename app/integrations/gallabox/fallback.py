@@ -29,17 +29,18 @@ import re
 
 from app.core.config import settings
 from app.integrations.gallabox import messages as m
-from app.integrations.gallabox.templates import TemplateSpec
+from app.integrations.gallabox.templates import TemplateSpec, business_body
 
 MAX_BUTTON_LABEL = 20
 
 
 def body_text(spec: TemplateSpec, values: tuple) -> str:
-    """The template body with {{1}}, {{2}}... replaced by the values."""
+    """The template body with {{1}}, {{2}}... replaced by the values, in the
+    current business's terms (its currency: ₹ for DST India)."""
     def value(match: re.Match) -> str:
         index = int(match.group(1)) - 1
         return str(values[index]) if 0 <= index < len(values) else ""
-    return re.sub(r"\{\{(\d+)\}\}", value, spec.sample_body)
+    return re.sub(r"\{\{(\d+)\}\}", value, business_body(spec.sample_body))
 
 
 def button_url(spec: TemplateSpec, button_value: str) -> str:

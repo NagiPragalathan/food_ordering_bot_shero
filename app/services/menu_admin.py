@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import locale
 from app.core.logging import get_logger
 from app.db.models import Category, Cuisine, MenuItem
 from app.services import media
@@ -53,12 +54,12 @@ def clean_name(raw: str | None, *, field: str = "Name", limit: int = NAME_MAX) -
 
 def parse_price(raw: str | None, *, field: str = "Price",
                 required: bool = True) -> Decimal | None:
-    """Accept what people actually type: "$16.53", " 16.53 ", "16".
+    """Accept what people actually type: "$16.53", "₹249", " 16.53 ", "16".
 
     Returns None for a blank optional field, so an unknown cost stays unknown
     rather than becoming a misleading 0.00 that would report a 100% margin.
     """
-    text = (raw or "").replace("$", "").replace(",", "").strip()
+    text = locale.amount_text(raw or "")
     if not text:
         if required:
             raise MenuEditError(f"{field} is required.")

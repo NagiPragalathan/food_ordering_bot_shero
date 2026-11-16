@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.models import AppSetting, LeadStage, NudgeBucket
 
 KEY = "NUDGE_RULES"
@@ -204,8 +205,12 @@ class NudgeSettings(BaseModel):
     # Messages only go between these hours, in this time zone.
     send_from: int = Field(default=9, ge=0, le=23)
     send_to: int = Field(default=21, ge=1, le=24)
-    timezone: str = "America/New_York"
-    zoho_sync: bool = True
+    # The business's own: America/New_York for Shero US, Asia/Kolkata for DST India.
+    timezone: str = Field(default_factory=lambda: settings.default_timezone)
+    # Zoho is Shero US's CRM. A business without it (DST India) starts with
+    # the sync off, and the run never asks Zoho while it is not connected
+    # (nudges/crm.in_use).
+    zoho_sync: bool = Field(default_factory=lambda: settings.zoho_required)
     rules: list[StageRule] = Field(default_factory=_default_rules)
     sequences: dict[str, Sequence] = Field(default_factory=_default_sequences)
     messages: list[Message] = Field(default_factory=list)

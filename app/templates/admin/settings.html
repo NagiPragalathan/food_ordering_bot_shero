@@ -75,6 +75,52 @@
   </form>
 </section>
 
+{% if razorpay %}
+{# Payments for a business on Razorpay (DST India). The keys live in .env,
+   like every service key; this card says whether they are there and what to
+   register in the Razorpay dashboard. #}
+<section class="mb-5 overflow-hidden rounded-xl border border-stone-200 bg-white" data-razorpay-card>
+  <header class="flex items-center justify-between border-b border-stone-200 bg-stone-50 px-5 py-3">
+    <div class="flex items-center gap-2">
+      <h2 class="text-sm font-semibold">Razorpay payments</h2>
+      {% if razorpay.keys_set %}
+        {{ ui.badge('keys set', 'good') }}
+        {% if razorpay.mode == 'test' %}{{ ui.badge('test mode', 'warn') }}{% else %}{{ ui.badge('live', 'good') }}{% endif %}
+      {% else %}{{ ui.badge('not connected', 'warn') }}{% endif %}
+    </div>
+    {% if razorpay.keys_set %}
+      <form method="post" action="{{ url_for('admin_settings_test', service='razorpay') }}">
+        <button class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs
+                       font-medium hover:bg-stone-100">Test connection</button>
+      </form>
+    {% endif %}
+  </header>
+  <div class="space-y-3 p-5 text-sm text-stone-600">
+    {% if not razorpay.keys_set %}
+      <p>
+        Add <code class="font-mono text-xs">{{ razorpay.env.RAZORPAY_KEY_ID }}</code> and
+        <code class="font-mono text-xs">{{ razorpay.env.RAZORPAY_KEY_SECRET }}</code> to
+        <code class="font-mono text-xs">.env</code> (Razorpay Dashboard &rarr; Account &amp; Settings &rarr; API Keys).
+        Until then Pay Now opens a test payment page and nothing is charged.
+      </p>
+    {% endif %}
+    <div>
+      <p class="mb-1.5 flex items-center gap-2 font-medium text-stone-700">
+        Webhook
+        {% if razorpay.webhook_secret_set %}{{ ui.badge('secret set', 'good') }}
+        {% else %}{{ ui.badge('secret not set', 'warn') }}{% endif %}
+      </p>
+      <p>In Razorpay Dashboard &rarr; Account &amp; Settings &rarr; Webhooks, add this URL with the event
+        <code class="font-mono text-xs">{{ razorpay.events }}</code>:</p>
+      <code class="mt-1.5 block break-all rounded bg-stone-100 px-2 py-1.5 font-mono text-xs text-stone-800">{{ razorpay.webhook_url }}</code>
+      <p class="mt-1.5 text-xs text-stone-500">Put the secret you choose there in
+        <code class="font-mono">{{ razorpay.env.RAZORPAY_WEBHOOK_SECRET }}</code> in <code class="font-mono">.env</code>.
+        Without it payments are not confirmed.</p>
+    </div>
+  </div>
+</section>
+{% endif %}
+
 {% include "admin/_order_alerts.html" %}
 
 <form method="post" action="{{ url_for('admin_settings_save') }}" class="space-y-5">

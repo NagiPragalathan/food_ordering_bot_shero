@@ -6,7 +6,18 @@ from sqlalchemy import Boolean, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.config import settings
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
+
+
+def _business_country() -> str:
+    """A new kitchen is in the business's own country: US, or IN for DST India."""
+    return settings.country_code.upper()[:2]
+
+
+def _business_timezone() -> str:
+    """Until its map pin says otherwise (services/kitchen_admin.timezone_for)."""
+    return settings.default_timezone
 
 
 class Outlet(Base, UUIDPrimaryKey, Timestamps):
@@ -27,7 +38,7 @@ class Outlet(Base, UUIDPrimaryKey, Timestamps):
     city: Mapped[str] = mapped_column(String(120), nullable=False)
     state: Mapped[str] = mapped_column(String(80), nullable=False)
     postal_code: Mapped[str] = mapped_column(String(20), nullable=False)
-    country: Mapped[str] = mapped_column(String(2), default="US", nullable=False)
+    country: Mapped[str] = mapped_column(String(2), default=_business_country, nullable=False)
 
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
@@ -59,7 +70,7 @@ class Outlet(Base, UUIDPrimaryKey, Timestamps):
     # {"mon": [["11:00","22:00"]], ...} - slots are only generated inside these
     # windows (spec step 13: "only slots within operating hours are returned").
     operating_hours: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
-    timezone: Mapped[str] = mapped_column(String(64), default="America/New_York",
+    timezone: Mapped[str] = mapped_column(String(64), default=_business_timezone,
                                           nullable=False)
 
     # How many orders one slot can absorb, used when auto-generating slots.

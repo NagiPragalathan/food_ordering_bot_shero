@@ -4,15 +4,20 @@ Everything the service needs comes from the environment (see `.env.example`).
 Nothing is hardcoded: credentials, base URLs and business rules are all here so
 a deployment can be re-pointed (test -> live Stripe, zoho.com -> zoho.in)
 without touching code.
+
+There is one settings object per business (app/core/tenants.py): Shero US
+reads the plain variables, DST India the DST_ ones. `settings` below is
+whichever business is being served, so code reads `settings.x` the same way
+for both.
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, computed_field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (BaseSettings, DotEnvSettingsSource, EnvSettingsSource,
+                               SettingsConfigDict)
 
 Environment = Literal["development", "staging", "production"]
 SourceMode = Literal["local", "remote"]
@@ -55,9 +60,35 @@ def is_unset(value: str | None) -> bool:
 
 
 class Settings(BaseSettings):
+    """Shero US's settings, and the shape of every business's (DstSettings)."""
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False
     )
+
+    # --- The business (app/core/tenants.py) ----------------------------------
+    business_name: str = "Shero US"
+    # Money, places and phone numbers in this business's own terms.
+    currency: str = "USD"
+    currency_symbol: str = "$"
+    country_code: str = "US"
+    # Put in front of a 10-digit number typed without its country code.
+    phone_country_code: str = "1"
+    # What the admin pages and customers read distances in. Stored as km.
+    distance_unit: Literal["mi", "km"] = "mi"
+    postal_code_label: str = "ZIP code"
+    postal_code_digits: int = Field(default=5, ge=3, le=10)
+    # A new kitchen's timezone until its map pin says otherwise.
+    default_timezone: str = "America/New_York"
+    # Who takes the payment, and who carries the food.
+    payment_provider: Literal["stripe", "razorpay"] = "stripe"
+    delivery_provider: Literal["uber", "own"] = "uber"
+    # WhatsApp template names are unique across a Gallabox account, so a second
+    # business's copy of the same message is named with a prefix ("dst_").
+    template_prefix: str = ""
+    # Order numbers: SHO-261116-K4T9P. Each business numbers its own orders, so
+    # the prefix tells the team (and Razorpay or Stripe) whose order it is.
+    order_number_prefix: str = Field(default="SHO", pattern=r"^[A-Z]{2,5}$")
 
     # --- Application ---------------------------------------------------------
     app_env: Environment = "development"
@@ -133,6 +164,13 @@ class Settings(BaseSettings):
     # Which Zoho org the bot is connected to, recorded by Connect Zoho. Record
     # ids belong to one org; connecting another drops the saved links.
     zoho_org_id: str = ""
+    # Zoho is this business's CRM, so the readiness check wants its keys.
+    # DST India's CRM is its own; Zoho there is optional.
+    zoho_required: bool = True
+    # Only a dish with a price above zero can be ordered. Off for Shero US,
+    # which has always sold every dish switched on; on for DST India, whose
+    # menu comes from the ERP, where a dish can have no Mrp.
+    price_required: bool = False
 
     # --- Uber Direct ---------------------------------------------------------
     uber_customer_id: str = ""
@@ -152,6 +190,23 @@ class Settings(BaseSettings):
     stripe_currency: str = "usd"
     payment_link_ttl_minutes: int = 30
     payment_reminder_minutes: int = 15
+
+    # --- Razorpay (payment_provider=razorpay) ---------------------------------
+    # Dashboard -> Account & Settings -> API Keys. rzp_test_... then rzp_live_...
+    # Left blank, checkout is mocked like Stripe's: a test page, no charge.
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    # Dashboard -> Webhooks: the secret set on our endpoint (event payment_link.paid).
+    razorpay_webhook_secret: str = ""
+    razorpay_base_url: str = "https://api.razorpay.com/v1"
+
+    # --- Own delivery staff (delivery_provider=own) ---------------------------
+    # The business's own riders carry the food, so the charge is its own: a
+    # flat fee, free from a dish total upwards (0 = never free), within a
+    # straight-line distance of the kitchen.
+    own_delivery_fee: float = Field(default=0.0, ge=0)
+    free_delivery_above: float = Field(default=0.0, ge=0)
+    own_delivery_max_km: float = Field(default=10.0, gt=0, le=100)
 
     # --- Optional customer messages ------------------------------------
     # Both are in the original spec but switched off at the client's
@@ -273,24 +328,206 @@ class Settings(BaseSettings):
             "GALLABOX_WEBHOOK_TOKEN": self.gallabox_webhook_token,
             # META_CATALOG_ID / META_SYSTEM_USER_TOKEN are optional: the menu
             # is served from this database, not the Meta catalogue.
-            "ZOHO_CLIENT_ID": self.zoho_client_id,
-            "ZOHO_CLIENT_SECRET": self.zoho_client_secret,
-            "ZOHO_REFRESH_TOKEN": self.zoho_refresh_token,
-            "UBER_CUSTOMER_ID": self.uber_customer_id,
-            "UBER_CLIENT_ID": self.uber_client_id,
-            "UBER_CLIENT_SECRET": self.uber_client_secret,
-            "STRIPE_SECRET_KEY": self.stripe_secret_key,
-            "STRIPE_WEBHOOK_SECRET": self.stripe_webhook_secret,
             "OPS_API_KEY": self.ops_api_key,
             "ADMIN_SESSION_SECRET": self.admin_session_secret,
             "SETTINGS_ENCRYPTION_KEY": self.settings_encryption_key,
         }
+        # Each business needs the keys of the services it actually uses.
+        if self.zoho_required:
+            required |= {"ZOHO_CLIENT_ID": self.zoho_client_id,
+                         "ZOHO_CLIENT_SECRET": self.zoho_client_secret,
+                         "ZOHO_REFRESH_TOKEN": self.zoho_refresh_token}
+        if self.delivery_provider == "uber":
+            required |= {"UBER_CUSTOMER_ID": self.uber_customer_id,
+                         "UBER_CLIENT_ID": self.uber_client_id,
+                         "UBER_CLIENT_SECRET": self.uber_client_secret}
+        if self.payment_provider == "stripe":
+            required |= {"STRIPE_SECRET_KEY": self.stripe_secret_key,
+                         "STRIPE_WEBHOOK_SECRET": self.stripe_webhook_secret}
+        else:
+            required |= {"RAZORPAY_KEY_ID": self.razorpay_key_id,
+                         "RAZORPAY_KEY_SECRET": self.razorpay_key_secret,
+                         "RAZORPAY_WEBHOOK_SECRET": self.razorpay_webhook_secret}
         return sorted(name for name, value in required.items() if is_unset(value))
 
 
-@lru_cache
+class _OwnDotEnv(DotEnvSettingsSource):
+    """The .env file, prefixed variables only.
+
+    pydantic-settings also hands over any .env line it did not match to a
+    field, by its bare name - so GALLABOX_CHANNEL_ID (Shero US's number) would
+    become DST India's channel. Only the matched, DST_-prefixed values are
+    kept here."""
+
+    def __call__(self):
+        return EnvSettingsSource.__call__(self)
+
+
+class DstSettings(Settings):
+    """DST India's settings: every DST_ variable in .env, India's defaults
+    below, and - for what both businesses share - Shero US's values.
+
+    Its own (never taken from Shero US): the database, the WhatsApp channel and
+    number, payments, delivery, Zoho, templates, money and address terms,
+    business rules and everything set on its admin pages. Shared unless a DST_
+    variable says otherwise: SHARED_FIELDS - the Gallabox account, admin
+    sign-in, hosting and Google Maps.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="DST_", env_file=".env", env_file_encoding="utf-8",
+        extra="ignore", case_sensitive=False,
+    )
+
+    business_name: str = "DST India"
+    currency: str = "INR"
+    currency_symbol: str = "₹"
+    country_code: str = "IN"
+    geocoder_country: str = "IN"
+    phone_country_code: str = "91"
+    distance_unit: Literal["mi", "km"] = "km"
+    postal_code_label: str = "PIN code"
+    postal_code_digits: int = Field(default=6, ge=3, le=10)
+    default_timezone: str = "Asia/Kolkata"
+    payment_provider: Literal["stripe", "razorpay"] = "razorpay"
+    delivery_provider: Literal["uber", "own"] = "own"
+    template_prefix: str = "dst_"
+    order_number_prefix: str = Field(default="DST", pattern=r"^[A-Z]{2,5}$")
+    stripe_currency: str = "inr"
+    zoho_data_center: str = "in"
+    zoho_required: bool = False
+    price_required: bool = True
+    # GST on restaurant food; confirm with the client.
+    tax_percent: float = Field(default=5.0, ge=0, le=100)
+    # The bot answers nobody on the DST number until it is switched on from
+    # DST India > Bot replies: the number already runs a Gallabox bot flow,
+    # and two bots answering one customer is worse than one.
+    bot_reply_mode: str = Field(default="allowlist",
+                                validation_alias="DST_ADMIN_PAGE_ONLY_BOT_REPLY_MODE")
+    bot_allowed_numbers: str = Field(default="",
+                                     validation_alias="DST_ADMIN_PAGE_ONLY_BOT_ALLOWED_NUMBERS")
+    bot_reply_trigger: str = Field(default="",
+                                   validation_alias="DST_ADMIN_PAGE_ONLY_BOT_REPLY_TRIGGER")
+    bot_trigger_keywords: str = Field(default="",
+                                      validation_alias="DST_ADMIN_PAGE_ONLY_BOT_TRIGGER_KEYWORDS")
+    bot_welcome_menu: str = Field(default="",
+                                  validation_alias="DST_ADMIN_PAGE_ONLY_BOT_WELCOME_MENU")
+    ask_customer_email: str = Field(default="",
+                                    validation_alias="DST_ADMIN_PAGE_ONLY_ASK_CUSTOMER_EMAIL")
+    order_alert_numbers: str = Field(default="",
+                                     validation_alias="DST_ADMIN_PAGE_ONLY_ORDER_ALERT_NUMBERS")
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
+                                   dotenv_settings, file_secret_settings):
+        return (init_settings, env_settings, _OwnDotEnv(settings_cls), file_secret_settings)
+
+
+# What a second business takes from Shero US unless its own DST_ variable is
+# set: one Gallabox account, one admin sign-in, one server.
+SHARED_FIELDS: tuple[str, ...] = (
+    "app_env", "log_level", "enable_scheduler", "vercel", "cron_secret",
+    "blob_read_write_token", "media_dir",
+    "gallabox_api_key", "gallabox_api_secret", "gallabox_account_id",
+    "gallabox_base_url", "gallabox_webhook_token",
+    "ops_api_key", "admin_session_secret", "admin_session_hours",
+    "settings_encryption_key", "admin_bootstrap_email", "admin_bootstrap_password",
+    "meta_graph_version", "google_maps_api_key", "google_maps_browser_key",
+    "distance_mode", "order_mode", "outlet_source", "slot_source",
+    "payment_link_ttl_minutes", "payment_reminder_minutes",
+    "send_payment_reminder", "send_delivery_updates",
+    "slot_hold_minutes", "slot_min_lead_hours", "kitchen_alert_hour",
+    "feedback_delay_minutes",
+)
+
+SETTINGS_CLASSES: dict[str, type[Settings]] = {"us": Settings, "dst": DstSettings}
+
+
+def tenant_database_url(shared_url: str, key: str) -> str:
+    """A second business's database when none is given: for SQLite, a file
+    beside Shero's (data/shero.db -> data/shero_dst.db). Any other database
+    has to be created, so there is no guess: DST_DATABASE_URL must be set."""
+    url = (shared_url or "").strip()
+    if not url.startswith("sqlite") or ":memory:" in url:
+        return ""
+    base, _, query = url.partition("?")
+    stem, dot, ext = base.rpartition(".")
+    if not dot or "/" in ext:
+        return f"{base}_{key}" + (f"?{query}" if query else "")
+    return f"{stem}_{key}.{ext}" + (f"?{query}" if query else "")
+
+
+def under_prefix(url: str, prefix: str) -> str:
+    """`url` moved under `prefix` on the same site:
+    https://x.com/pay + /dst -> https://x.com/dst/pay."""
+    url = (url or "").rstrip("/")
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        return f"{prefix}{url}"
+    host, slash, path = rest.partition("/")
+    return f"{scheme}://{host}{prefix}" + (f"/{path}" if slash else "")
+
+
+def build_settings(tenant) -> Settings:
+    """A fresh settings object for `tenant`, read from the environment."""
+    own = SETTINGS_CLASSES.get(tenant.key, Settings)()
+    if tenant.is_default:
+        return own
+    shared = Settings()
+    for name in SHARED_FIELDS:
+        if name not in own.model_fields_set:
+            setattr(own, name, getattr(shared, name))
+    # Its pages and links live under its own prefix on the same site.
+    for name in ("public_base_url", "pay_redirect_base_url"):
+        if name not in own.model_fields_set:
+            setattr(own, name, under_prefix(getattr(shared, name), tenant.url_prefix))
+    # Unset or a blank line (DST_DATABASE_URL= as .env.example has it): the
+    # automatic file beside Shero US's SQLite database.
+    if "database_url" not in own.model_fields_set or not own.database_url.strip():
+        own.database_url = tenant_database_url(shared.database_url, tenant.key)
+    return own
+
+
+_instances: dict[str, Settings] = {}
+
+
+def settings_for(tenant) -> Settings:
+    """The live settings of `tenant` (admin-page overrides applied on top)."""
+    instance = _instances.get(tenant.key)
+    if instance is None:
+        instance = _instances[tenant.key] = build_settings(tenant)
+    return instance
+
+
+def current_settings() -> Settings:
+    """The live settings of the business being served right now."""
+    from app.core import tenants
+
+    return settings_for(tenants.current())
+
+
 def get_settings() -> Settings:
-    return Settings()
+    return current_settings()
 
 
-settings = get_settings()
+class _CurrentSettings:
+    """`settings`, as every module imports it: whichever business is being
+    served (app/core/tenants.py). Reading, setting and monkeypatching an
+    attribute all go to that business's own Settings object."""
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str):
+        return getattr(current_settings(), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        setattr(current_settings(), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(current_settings(), name)
+
+    def __repr__(self) -> str:
+        return f"<settings of {current_settings().business_name}>"
+
+
+settings = _CurrentSettings()
