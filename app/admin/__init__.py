@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter
 
-from app.admin.routes import (auth, bot_replies, customers, dashboard, deliveries, imports,
-                               kitchens, loyalty, menu, nudges, order_alerts, orders,
+from app.admin.routes import (auth, bot_replies, customers, dashboard, deliveries, feedback,
+                               imports, kitchens, loyalty, menu, nudges, order_alerts, orders,
                                payouts, promotions, settings)
 
 router = APIRouter(prefix="/admin")
@@ -22,5 +22,6 @@ router.include_router(bot_replies.router)
 router.include_router(settings.router)
 router.include_router(order_alerts.router)
 router.include_router(nudges.router)
+router.include_router(feedback.router)
 
 __all__ = ["router"]

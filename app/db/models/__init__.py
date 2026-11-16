@@ -21,6 +21,7 @@ from app.db.models.loyalty import LoyaltyAccount, LoyaltyEntry
 from app.db.models.nudge import NudgeBucket, NudgeLead, NudgeSend
 from app.db.models.order import Order
 from app.db.models.outlet import Outlet
+from app.db.models.page_comment import CommentReviewer, PageComment
 from app.db.models.payout import PartnerPayout
 from app.db.models.promotion import DiscountType, Placement, Promotion
 from app.db.models.setting import AdminUser, AppSetting
@@ -32,6 +33,7 @@ __all__ = [
     "AppSetting",
     "Base",
     "Category",
+    "CommentReviewer",
     "Conversation",
     "ConversationStep",
     "Cuisine",
@@ -51,6 +53,7 @@ __all__ = [
     "Order",
     "OrderStage",
     "Outlet",
+    "PageComment",
     "PartnerPayout",
     "PaymentStatus",
     "Placement",

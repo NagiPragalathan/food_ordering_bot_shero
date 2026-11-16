@@ -16,7 +16,7 @@ from app.core import tenants
 from app.core.config import settings
 from app.db.models import AdminUser
 from app.db.session import get_primary_session
-from app.services import allowlist, reply_triggers
+from app.services import allowlist, page_comments, reply_triggers
 
 # Shared with the public ordering pages - see app/templating.py.
 TEMPLATE_DIR = templating.TEMPLATE_DIR
@@ -44,6 +44,9 @@ async def require_admin(
     user = await get_user(session, payload.get("id", ""))
     if user is None or not user.is_active:
         raise NotAuthenticated
+    # Who sees the comment toggle (the Feedback page's reviewers).
+    await page_comments.refresh_reviewers(session)
+    request.state.admin_user = user
     return user
 
 
@@ -65,6 +68,7 @@ def render(request: Request, template: str, context: dict[str, Any] | None = Non
         "tenant_tabs": tenant_tabs(request),
         **(context or {}),
     }
+    payload["page_comments"] = _comment_mode(request, template, payload.get("current_user"))
     response = templates.TemplateResponse(
         request=request, name=template, context=payload, status_code=status_code
     )
@@ -72,6 +76,19 @@ def render(request: Request, template: str, context: dict[str, Any] | None = Non
     if request.cookies.get(FLASH_COOKIE):
         response.delete_cookie(FLASH_COOKIE)
     return response
+
+
+def _comment_mode(request: Request, template: str, user) -> dict[str, Any]:
+    """What the page's comment mode needs (static/admin/page-comments.js):
+    whether this admin may comment, and what draws the page."""
+    user = user or getattr(request.state, "admin_user", None)
+    email = getattr(user, "email", "") or ""
+    return {
+        "can_comment": page_comments.can_comment(email),
+        "me": {"email": email, "name": getattr(user, "name", None) or email},
+        "business": tenants.current().key,
+        **page_comments.source_of(request, template),
+    }
 
 
 def tenant_tabs(request: Request) -> list[dict[str, Any]]:
