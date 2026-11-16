@@ -45,11 +45,42 @@
     </div>
   </header>
 
-  {# One button: the data centre (com, in, eu, ...) is read from Zoho's reply,
-     and the client id and secret come from .env. #}
+  {# One button: the data centre (com, in, eu, ...) is read from Zoho's reply.
+     Shero US's client id and secret come from .env; a business with its own
+     Zoho CRM (DST India) enters its client here, stored encrypted. #}
   <form method="post" action="{{ url_for('admin_zoho_connect') }}" class="p-5">
-    {% if zoho.client_ready %}
-      <div class="flex flex-wrap items-center gap-2">
+    {% if zoho.client_fields %}
+      <div data-zoho-client>
+        <p class="text-sm text-stone-600">
+          {{ tenant.name }} connects its <strong>own</strong> Zoho CRM: its new leads and every
+          ordering step go there, kept apart from the other business's CRM.
+        </p>
+        <ol class="mt-3 list-decimal space-y-1 pl-5 text-xs text-stone-600">
+          <li>In the Zoho API Console of that CRM's domain (api-console.zoho.in for zoho.in,
+            api-console.zoho.com for zoho.com) add a client: <em>Server-based Applications</em>.</li>
+          <li>Set its <em>Authorized Redirect URI</em> to exactly:
+            <code class="mt-1 block break-all rounded-lg bg-stone-100 px-3 py-2 font-mono text-[11px] text-stone-800"
+                  data-zoho-redirect>{{ zoho.redirect_uri }}</code></li>
+          <li>Paste its Client ID and Client Secret below, pick the domain and press Connect Zoho.</li>
+        </ol>
+        <div class="mt-4 grid gap-3 sm:grid-cols-2">
+          <label class="block text-xs font-medium text-stone-600">Client ID
+            <input name="zoho_client_id" value="{{ zoho.client_id }}" autocomplete="off" spellcheck="false"
+                   placeholder="1000.XXXXXXXXXXXXXXXX"
+                   class="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 font-mono text-sm outline-none
+                          focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          </label>
+          <label class="block text-xs font-medium text-stone-600">Client Secret
+            <input name="zoho_client_secret" type="password" autocomplete="new-password" spellcheck="false"
+                   placeholder="{% if zoho.secret_set %}saved - leave blank to keep it{% else %}from the API Console{% endif %}"
+                   class="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 font-mono text-sm outline-none
+                          focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          </label>
+        </div>
+      </div>
+    {% endif %}
+    {% if zoho.client_ready or zoho.client_fields %}
+      <div class="flex flex-wrap items-center gap-2{% if zoho.client_fields %} mt-4{% endif %}">
         <select name="zoho_data_center" aria-label="Zoho domain"
                 class="rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none
                        focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
@@ -67,8 +98,8 @@
       </p>
     {% else %}
       <p class="text-sm text-stone-600">
-        Add <code class="font-mono text-xs">ZOHO_CLIENT_ID</code> and
-        <code class="font-mono text-xs">ZOHO_CLIENT_SECRET</code> to <code class="font-mono text-xs">.env</code>
+        Add <code class="font-mono text-xs">{{ zoho.env_prefix }}ZOHO_CLIENT_ID</code> and
+        <code class="font-mono text-xs">{{ zoho.env_prefix }}ZOHO_CLIENT_SECRET</code> to <code class="font-mono text-xs">.env</code>
         to enable Connect Zoho.
       </p>
     {% endif %}

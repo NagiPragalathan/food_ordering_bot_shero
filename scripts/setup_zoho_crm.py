@@ -2,6 +2,9 @@
 
     python -m scripts.setup_zoho_crm           # dry run: list what is missing
     python -m scripts.setup_zoho_crm --apply   # create it
+    python -m scripts.setup_zoho_crm --tenant dst [--apply]
+        the same on DST India's own Zoho CRM (connected on DST India >
+        Settings), never Shero US's
 
 On a fresh CRM this creates the Orders and Order Items modules, every field
 in schema.py (on those two, on Leads and Contacts, and on Zoho's own Products
@@ -17,6 +20,7 @@ import argparse
 import asyncio
 import sys
 
+from app.core import tenants
 from app.core.config import settings
 from app.core.exceptions import IntegrationError
 from app.db.session import SessionFactory
@@ -103,7 +107,7 @@ async def run(apply: bool) -> int:
     async with SessionFactory() as session:
         await apply_overrides(session)      # the refresh token lives in the DB
 
-    print(f"Zoho data centre: {settings.zoho_data_center}")
+    print(f"{tenants.current().name}: Zoho data centre {settings.zoho_data_center}")
 
     # The bot's own modules, by live name: {live name: (labels, metadata or None)}.
     own = {_module(name): (labels, await zoho_client.get_module(_module(name)))
@@ -179,9 +183,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prepare a Zoho CRM for the bot: modules, fields, options.")
     parser.add_argument("--apply", action="store_true", help="create what is missing")
+    parser.add_argument("--tenant", choices=sorted(tenants.BY_KEY), default=tenants.DEFAULT.key,
+                        help="whose Zoho CRM: us (Shero US, the default) or dst (DST India)")
     args = parser.parse_args()
     try:
-        sys.exit(asyncio.run(run(args.apply)))
+        with tenants.use(tenants.BY_KEY[args.tenant]):
+            code = asyncio.run(run(args.apply))
+        sys.exit(code)
     except IntegrationError as exc:
         print(f"Zoho refused: {exc.message}")
         sys.exit(2)

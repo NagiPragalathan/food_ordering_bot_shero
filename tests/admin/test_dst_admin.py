@@ -127,3 +127,62 @@ def test_a_dashboard_without_a_number_says_which_variable_to_set(admin, monkeypa
     monkeypatch.setattr(settings_for(tenants.DST), "whatsapp_business_number", "")
     page = admin.get("/dst/admin/").text
     assert "WhatsApp number not set" in page and "DST_WHATSAPP_BUSINESS_NUMBER" in page
+
+
+# --- DST India's own Zoho CRM ---------------------------------------------------
+@pytest.fixture
+def own_zoho(monkeypatch):
+    """Both businesses' Zoho settings as they are, put back after the test
+    (saving applies values to the live settings)."""
+    from cryptography.fernet import Fernet
+
+    from app.core.config import settings_for
+    from app.services import settings_store
+
+    key = Fernet.generate_key().decode()
+    for tenant in (tenants.US, tenants.DST):
+        own = settings_for(tenant)
+        for name in ("zoho_client_id", "zoho_client_secret", "zoho_refresh_token",
+                     "zoho_data_center"):
+            monkeypatch.setattr(own, name, getattr(own, name))
+        monkeypatch.setattr(own, "settings_encryption_key", key)
+    monkeypatch.setattr(settings_for(tenants.US), "zoho_client_id", "1000.USCLIENT")
+    monkeypatch.setattr(settings_for(tenants.US), "zoho_client_secret", "us-secret")
+    monkeypatch.setattr(settings_store, "_applied", settings_store.tenants.PerTenant(set))
+    return settings_for(tenants.US), settings_for(tenants.DST)
+
+
+def test_dst_settings_offer_its_own_zoho_with_a_domain(admin, own_zoho):
+    page = admin.get("/dst/admin/settings").text
+    card = page.split("data-zoho-client", 1)[1].split("</form>", 1)[0]
+    assert 'name="zoho_client_id"' in card and 'name="zoho_client_secret"' in card
+    assert "/dst/admin/settings/zoho/callback" in card            # to register on Zoho
+    assert '<option value="in" selected>zoho.in</option>' in card  # DST India: zoho.in
+    assert '<option value="com" >zoho.com</option>' in card or '<option value="com">zoho.com</option>' in card
+    assert "Connect Zoho" in card
+    # Shero US's card is the one button it always was: its client is in .env.
+    us = admin.get("/admin/settings").text
+    assert "data-zoho-client" not in us and "Connect Zoho" in us
+
+
+def test_connecting_dst_zoho_saves_its_client_and_opens_zoho_in(admin, own_zoho):
+    us, dst = own_zoho
+    sent = admin.post("/dst/admin/settings/zoho/connect", data={
+        "zoho_data_center": "in", "zoho_client_id": "1000.DSTCLIENT",
+        "zoho_client_secret": "dst-secret"})
+    assert sent.status_code == 303
+    to = sent.headers["location"]
+    assert to.startswith("https://accounts.zoho.in/oauth/v2/auth?")
+    assert "client_id=1000.DSTCLIENT" in to
+    assert "redirect_uri=http%3A%2F%2Ftestserver%2Fdst%2Fadmin%2Fsettings%2Fzoho%2Fcallback" in to \
+        or "%2Fdst%2Fadmin%2Fsettings%2Fzoho%2Fcallback" in to
+    # Saved for DST India only; Shero US keeps its own client.
+    assert (dst.zoho_client_id, dst.zoho_client_secret) == ("1000.DSTCLIENT", "dst-secret")
+    assert (us.zoho_client_id, us.zoho_client_secret) == ("1000.USCLIENT", "us-secret")
+
+
+def test_dst_zoho_needs_its_client_first(admin, own_zoho):
+    us, dst = own_zoho
+    dst.zoho_client_id = dst.zoho_client_secret = ""
+    sent = admin.post("/dst/admin/settings/zoho/connect", data={"zoho_data_center": "in"})
+    assert sent.status_code == 303 and sent.headers["location"].endswith("/dst/admin/settings")

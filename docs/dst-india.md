@@ -16,7 +16,7 @@ and separate business on the same server:
 | Money, distance, address | $, miles, ZIP code, +1 | ₹, km, PIN code, +91, Asia/Kolkata |
 | WhatsApp templates | `payment_link`, … | `dst_payment_link`, … (same messages, in ₹) |
 | Order numbers | `SHO-261116-K4T9P` | `DST-261116-K4T9P` |
-| CRM | Zoho | DST CRM (access pending); Zoho optional |
+| CRM | Zoho | **its own Zoho CRM**, connected on DST India → Settings (zoho.in, zoho.com, …) |
 
 Every page Shero US has, DST India has, with the same names: Dashboard, Menu,
 Orders, Offers, Loyalty, Nudges, Kitchens, Payouts, Customers, Bot replies,
@@ -104,15 +104,26 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
    kept switched off and never sold. Prices can also be changed one by one on
    the Menu page.
 
-6. **Kitchens.** DST India → Kitchens: each kitchen's address and map pin,
+6. **Zoho CRM (its own).** DST India's leads and ordering steps go to its
+   own Zoho CRM, never Shero US's. In the Zoho API Console of that CRM's
+   domain (api-console.zoho.in for zoho.in) add a *Server-based Applications*
+   client with the Authorized Redirect URI
+   `https://<domain>/dst/admin/settings/zoho/callback` (DST India → Settings
+   shows it exactly). On that card paste the Client ID and Client Secret
+   (stored encrypted in DST India's database), pick the domain and press
+   **Connect Zoho**. Then create the bot's fields and modules in that CRM:
+   `python -m scripts.setup_zoho_crm --tenant dst` lists what is missing,
+   `--apply` creates it.
+
+7. **Kitchens.** DST India → Kitchens: each kitchen's address and map pin,
    delivery range in km (or a PIN code list), hours, and the WhatsApp number
    that gets its order alerts.
 
-7. **Delivery and GST.** DST India → Settings: the delivery charge, the dish
+8. **Delivery and GST.** DST India → Settings: the delivery charge, the dish
    total above which delivery is free, the furthest distance in km, and the
    tax percent (5% GST by default; confirm it).
 
-8. **Switch the bot on.** DST India answers **nobody** until switched on,
+9. **Switch the bot on.** DST India answers **nobody** until switched on,
    because the DST INDIA number already runs a Gallabox bot flow. On
    DST India → Bot replies:
    - add test numbers first (test mode), then choose everyone;
@@ -137,9 +148,8 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
 ## Still to provide
 
 - Razorpay keys and webhook secret (live, or test first).
-- The DST CRM: access or an API, to send stages to it. Until then the bot
-  keeps the funnel stage on each customer and maps it to the DST CRM's
-  names (`app/services/dst_crm.py`).
+- DST India's Zoho CRM: a client from its API Console, connected on the
+  Settings page (above).
 - India kitchens, ₹ prices, the delivery charge and free-delivery amount,
   and confirmation of 5% GST.
 - Approval of the `dst_` ordering templates (submitted from the script above).

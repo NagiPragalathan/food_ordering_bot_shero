@@ -70,19 +70,36 @@ async def settings_page(
         "secrets_enabled": not is_unset(settings.settings_encryption_key),
         "missing_credentials": settings.missing_credentials(),
         # Zoho is connected by OAuth rather than by pasting a refresh token.
-        "zoho": {
-            # The client id and secret live in .env; the card is one button.
-            "client_ready": not (is_unset(settings.zoho_client_id)
-                                 or is_unset(settings.zoho_client_secret)),
-            "connected": not is_unset(settings.zoho_refresh_token),
-            "centres": zoho_connect.DATA_CENTRES,
-            "data_centre": settings.zoho_data_center or "com",
-        },
+        "zoho": zoho_card(),
         # The Order alerts card (saved by admin/routes/order_alerts.py).
         "alert_entries": order_alerts.entries(),
         # DST India pays through Razorpay; Shero US's page has no such card.
         "razorpay": razorpay_card() if payment_gateway.uses_razorpay() else None,
     })
+
+
+def zoho_card() -> dict:
+    """What the Zoho CRM card shows.
+
+    Shero US's Zoho client (id and secret) lives in .env and the card is one
+    button. A business with its own, separate Zoho CRM (DST India) enters its
+    client on the card - stored encrypted in its own database - picks its
+    domain (zoho.in, zoho.com, ...) and connects; the leads and the ordering
+    flow then go to that CRM, never to Shero US's."""
+    own_client = not tenants.current().is_default
+    return {
+        "client_ready": not (is_unset(settings.zoho_client_id)
+                             or is_unset(settings.zoho_client_secret)),
+        "connected": not is_unset(settings.zoho_refresh_token),
+        "centres": zoho_connect.DATA_CENTRES,
+        "data_centre": settings.zoho_data_center or "com",
+        "client_fields": own_client,
+        "client_id": "" if is_unset(settings.zoho_client_id) else settings.zoho_client_id.strip(),
+        "secret_set": not is_unset(settings.zoho_client_secret),
+        # Registered on the Zoho client as its Authorized Redirect URI.
+        "redirect_uri": zoho_connect.redirect_uri(),
+        "env_prefix": tenants.current().env_prefix,
+    }
 
 
 def razorpay_card() -> dict:
@@ -140,18 +157,37 @@ async def save_settings(
 async def zoho_start(
     request: Request,
     zoho_data_center: str = Form(default="com"),
+    zoho_client_id: str = Form(default=""),
+    zoho_client_secret: str = Form(default=""),
+    session: AsyncSession = Depends(get_session),
     current_user: AdminUser = Depends(require_admin),
 ):
     """Hand the admin to Zoho's consent screen, on the chosen domain.
 
     The callback prefers the data centre Zoho reports, and falls back to the
-    one chosen here (carried in a cookie with the state).
+    one chosen here (carried in a cookie with the state). A business with its
+    own Zoho CRM (DST India) sends its client id and secret with the button;
+    they are saved first, encrypted, in that business's own settings. A blank
+    secret keeps the one saved before.
     """
     url = str(request.url_for("admin_settings"))
     centre = zoho_data_center.strip().lower()
     if centre not in dict(zoho_connect.DATA_CENTRES):
         return redirect(url, flash=("error", f"Unknown Zoho domain '{centre}'."))
+    entered = {key: value.strip() for key, value in (
+        ("ZOHO_CLIENT_ID", zoho_client_id), ("ZOHO_CLIENT_SECRET", zoho_client_secret))
+        if value.strip()}
+    if entered:
+        try:
+            await save_many(session, entered, updated_by=current_user.email)
+        except SecretsUnavailable:
+            return redirect(url, flash=(
+                "error", "Set SETTINGS_ENCRYPTION_KEY before storing the client secret."))
+        log.info("zoho_client_saved", keys=sorted(entered), by=current_user.email)
     if is_unset(settings.zoho_client_id) or is_unset(settings.zoho_client_secret):
+        if not tenants.current().is_default:
+            return redirect(url, flash=(
+                "error", "Enter the Zoho Client ID and Client Secret, then press Connect Zoho."))
         return redirect(url, flash=(
             "error", "Add ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET to .env first."))
 
