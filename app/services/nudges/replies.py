@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.models import ConversationStep, Customer, NudgeBucket, NudgeLead, NudgeSend
+from app.services import dst_crm
 from app.services.customers import get_customer
 from app.services.nudges import config, crm
 from app.services.nudges.runner import IDLE_STEPS, aware, stage_entered
@@ -86,6 +87,7 @@ async def handle(ctx) -> bool:
     label = LABELS[which]
     send.reply, send.replied_at = label, now
     await crm.message_replied(send)            # its Nudge Messages record, if filed
+    await dst_crm.record_nudge(customer, send, bucket=str(which), reply=label)  # DST India's CRM
     lead.last_reply, lead.last_reply_at = label, now
     cfg = await config.load(session)
     lines = [f"Tapped {label} on {send.template}."]

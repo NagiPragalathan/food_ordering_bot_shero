@@ -115,6 +115,20 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
    `python -m scripts.setup_zoho_crm --tenant dst` lists what is missing,
    `--apply` creates it.
 
+   **DST's own CRM (Lead Pipeline & Tracker, dst.shero.website).** Every
+   ordering customer's progress also goes to DST's own CRM: an "Order Now"
+   lead moved along its pipeline (welcome → requirementCapture →
+   orderConfirmed → deliveryStatus; nudges add rnr1/rnr2/rnrFinal and
+   lostFeedback), and on payment the contact and the order with its dishes.
+   `services/dst_crm.py` writes each event to the `crm_outbox` table in the
+   same transaction as the change; the `dst_crm_outbox` job posts them every
+   minute, in order per customer, retrying while the CRM is down. Set
+   `DST_CRM_API_URL=https://dst.shero.website` and `DST_CRM_API_TOKEN` (the
+   CRM server's `ORDERING_BOT_TOKEN`). DST India → Settings shows what is
+   waiting, sent and refused, with Check connection and Send now. The CRM
+   side is `deploy/dst-crm-endpoint/` (its README is the handover for the
+   CRM's developer).
+
 7. **Kitchens.** DST India → Kitchens: each kitchen's address and map pin,
    delivery range in km (or a PIN code list), hours, and the WhatsApp number
    that gets its order alerts.

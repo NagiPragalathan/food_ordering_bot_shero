@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from app.core.logging import get_logger
 from app.db.models import ConversationStep
+from app.services import dst_crm
 from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
 from app.services.orders import get_latest_for_customer
@@ -28,6 +29,7 @@ async def handle_feedback(ctx: FlowContext) -> None:
         order.feedback_rating = rating
         order.feedback_received_at = datetime.now(timezone.utc)
         await ctx.session.flush()
+        await dst_crm.record_feedback(ctx.customer, order, rating)   # DST India's CRM only
         log.info("feedback_recorded", order_number=order.order_number, rating=rating)
     else:
         log.warning("feedback_without_order", customer_id=str(ctx.customer.id))

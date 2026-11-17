@@ -220,7 +220,9 @@ async def convert_and_record_order(customer: Customer, order: Order,
     with its Order Items."""
     record_stage(customer, LeadStage.CONVERTED)
     customer.is_converted = True
-    await dst_crm.record_lead_stage(customer, LeadStage.CONVERTED)
+    # DST India: the paid order, its dishes and the contact go to its own CRM.
+    await dst_crm.record_paid_order(customer, order,
+                                    kitchen=ctx.outlet.name if ctx.outlet else None)
     if not zoho_in_use():
         return
 
@@ -239,7 +241,7 @@ async def push_order_stage(order: Order, stage: OrderStage, *,
                            delivered_at: datetime | None = None) -> None:
     """Mirror an order stage change into Zoho's Order Status (spec 17-18)."""
     if dst_crm.in_use():
-        await dst_crm.record_order_stage(await _customer_of(order), stage)
+        await dst_crm.record_order_stage(await _customer_of(order), order, stage)
     if not zoho_in_use():
         return
     if not order.zoho_order_id and order.zoho_note:

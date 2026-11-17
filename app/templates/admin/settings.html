@@ -152,6 +152,57 @@
 </section>
 {% endif %}
 
+{% if dst_crm %}
+{# DST India's own CRM (its Lead Pipeline & Tracker): every step of an
+   ordering customer goes there through an outbox (services/dst_crm.py). #}
+{% set crm = dst_crm.state %}
+<section id="dst-crm" class="mb-5 overflow-hidden rounded-xl border border-stone-200 bg-white" data-dst-crm-card>
+  <header class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 bg-stone-50 px-5 py-3">
+    <div class="flex items-center gap-2">
+      <h2 class="text-sm font-semibold">DST CRM &middot; Lead Pipeline &amp; Tracker</h2>
+      {% if crm.connected %}{{ ui.badge('connected', 'good') }}{% else %}{{ ui.badge('not connected', 'warn') }}{% endif %}
+    </div>
+    {% if crm.connected %}
+      <div class="flex gap-2">
+        <form method="post" action="{{ url_for('admin_dst_crm', action='check') }}">
+          <button class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-stone-100">Check connection</button>
+        </form>
+        <form method="post" action="{{ url_for('admin_dst_crm', action='send') }}">
+          <button class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-stone-100">Send now</button>
+        </form>
+      </div>
+    {% endif %}
+  </header>
+  <div class="space-y-3 p-5 text-sm text-stone-600">
+    <p>Every Order Now customer has a lead in the CRM's <strong>Order Now</strong> vertical: each step of
+      their order moves it along the pipeline (Welcome &rarr; Requirement Capture &rarr; Order Confirmed
+      &rarr; Delivery Status), nudges add RNR follow-ups, and a paid order adds the contact and the
+      order with its dishes.</p>
+    {% if crm.connected %}
+      <dl class="grid grid-cols-3 gap-3 text-center" data-dst-crm-counts>
+        <div class="rounded-lg bg-stone-50 p-3"><dt class="text-xs text-stone-500">Waiting</dt><dd class="text-lg font-semibold text-stone-900">{{ crm.pending }}</dd></div>
+        <div class="rounded-lg bg-stone-50 p-3"><dt class="text-xs text-stone-500">Sent</dt><dd class="text-lg font-semibold text-stone-900">{{ crm.sent }}</dd></div>
+        <div class="rounded-lg bg-stone-50 p-3"><dt class="text-xs text-stone-500">Refused</dt><dd class="text-lg font-semibold {% if crm.failed %}text-red-700{% else %}text-stone-900{% endif %}">{{ crm.failed }}</dd></div>
+      </dl>
+      <p class="text-xs text-stone-500">To <code class="font-mono">{{ crm.url }}</code>{% if crm.last_sent_at %} &middot; last sent {{ crm.last_sent_at.strftime('%d %b, %H:%M') }} UTC{% endif %}.
+        Sent every minute, in order; the CRM being down only delays them.</p>
+      {% if crm.last_error %}
+        <p class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-dst-crm-error>Last problem: {{ crm.last_error }}</p>
+      {% endif %}
+      {% if crm.failed %}
+        <form method="post" action="{{ url_for('admin_dst_crm', action='retry') }}">
+          <button class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-stone-100">Send the refused ones again</button>
+        </form>
+      {% endif %}
+    {% else %}
+      <p>Add <code class="font-mono text-xs">{{ dst_crm.env.CRM_API_URL }}</code> (the CRM's address) and
+        <code class="font-mono text-xs">{{ dst_crm.env.CRM_API_TOKEN }}</code> (its ORDERING_BOT_TOKEN) to
+        <code class="font-mono text-xs">.env</code>. Until then nothing is sent to the CRM.</p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
 {% include "admin/_order_alerts.html" %}
 
 <form method="post" action="{{ url_for('admin_settings_save') }}" class="space-y-5">

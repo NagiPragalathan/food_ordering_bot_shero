@@ -37,12 +37,15 @@ def start_scheduler() -> AsyncIOScheduler:
 
     scheduler = AsyncIOScheduler(timezone="UTC")
 
-    def add(job, trigger, *, id: str, **options) -> None:
+    def add(job, trigger, *, id: str, only: set[str] | None = None, **options) -> None:
         """One scheduler job per business. Shero US keeps the job's own id,
         exactly as before DST India existed; another business gets
         `<key>_<id>` (dst_nudges). Separate jobs, so a slow or failing DST
-        India run never delays, skips or fails a Shero US one."""
+        India run never delays, skips or fails a Shero US one. `only`: the
+        businesses (keys) a job is for, when it is not for all of them."""
         for tenant in tenants.enabled():
+            if only is not None and tenant.key not in only:
+                continue
             job_id = id if tenant.is_default else f"{tenant.key}_{id}"
             scheduler.add_job(jobs.in_business(tenant, job), trigger, id=job_id, **options)
 
@@ -86,6 +89,13 @@ def start_scheduler() -> AsyncIOScheduler:
         jobs.store_menu_photos, IntervalTrigger(minutes=5),
         id="menu_photos", max_instances=1, coalesce=True,
         misfire_grace_time=300,
+    )
+    # DST India's own CRM: what happened to its customers, posted in order.
+    # DST India only: Shero US's CRM is Zoho, and its jobs stay as they were.
+    add(
+        jobs.send_crm_events, IntervalTrigger(minutes=1),
+        id="crm_outbox", only={"dst"}, max_instances=1, coalesce=True,
+        misfire_grace_time=120,
     )
     # Slots only need topping up occasionally; 03:00 UTC is outside service
     # hours for the US east-coast outlets in the spec.

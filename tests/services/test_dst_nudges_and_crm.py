@@ -164,19 +164,25 @@ def zoho_untouched(monkeypatch):
 
 
 @pytest.fixture
-def dst_stages(monkeypatch):
-    pushed = []
+def dst_crm_on(monkeypatch):
+    """DST India's CRM connected (its address and key set)."""
+    own = settings_for(tenants.DST)
+    monkeypatch.setattr(own, "crm_api_url", "https://crm.example.test")
+    monkeypatch.setattr(own, "crm_api_token", "test-token")
 
-    async def push(customer, stage, *, ours=""):
-        pushed.append((stage, ours))
-        return False
 
-    monkeypatch.setattr(dst_crm, "push_stage", push)
-    return pushed
+async def queued(session) -> list[tuple[str, str | None]]:
+    """What is waiting for the DST CRM: (event, pipeline stage), in order."""
+    from sqlalchemy import select
+
+    from app.db.models import CrmOutbox
+
+    rows = (await session.execute(select(CrmOutbox).order_by(CrmOutbox.queued_at))).scalars()
+    return [(r.event, (r.payload.get("stage") or {}).get("pipeline")) for r in rows]
 
 
 async def test_dst_stages_go_to_its_crm_and_nothing_to_zoho(session, customer, dst,
-                                                          zoho_untouched, dst_stages):
+                                                          zoho_untouched, dst_crm_on):
     assert await crm_sync.advance_stage(customer, LeadStage.CART_CREATED) is True
     assert customer.lead_stage == LeadStage.CART_CREATED and customer.zoho_lead_id is None
     await crm_sync.push_details(customer, name="Asha")
@@ -189,9 +195,9 @@ async def test_dst_stages_go_to_its_crm_and_nothing_to_zoho(session, customer, d
 
     assert customer.lead_stage == LeadStage.CONVERTED and customer.is_converted
     assert order.zoho_order_id is None and order.zoho_note is None
-    assert dst_stages == [("Requirement Capture", "Cart Created"),
-                          ("Order Confirmed", "Converted"),
-                          ("Delivery Status", "Out for Delivery")]
+    assert await queued(session) == [("lead.stage", "requirementCapture"),
+                                     ("order.paid", "orderConfirmed"),
+                                     ("order.status", "deliveryStatus")]
     assert zoho_untouched == []          # quiet: no "zoho_..._failed" errors
 
 
@@ -202,7 +208,7 @@ async def test_push_to_zoho_says_it_is_not_connected(session, customer, dst, zoh
 
 
 async def test_us_still_goes_to_zoho_and_not_to_the_dst_crm(session, customer, monkeypatch,
-                                                           dst_stages):
+                                                           dst_crm_on):
     from app.integrations.zoho import crm as zoho_crm
 
     async def none(module, number):
@@ -218,29 +224,34 @@ async def test_us_still_goes_to_zoho_and_not_to_the_dst_crm(session, customer, m
     monkeypatch.setattr(zoho_crm, "create_lead", create)
     monkeypatch.setattr(zoho_crm, "update_record", update)
     assert await crm_sync.advance_stage(customer, LeadStage.CART_CREATED) is True
-    assert customer.zoho_lead_id == "L1" and dst_stages == []
+    assert customer.zoho_lead_id == "L1" and await queued(session) == []
 
 
 # --- the DST CRM's stages ------------------------------------------------------------------
 def test_the_funnel_maps_onto_the_dst_crm():
-    assert dst_crm.stage_for(LeadStage.NEW_ENQUIRY) == "Welcome"
+    assert dst_crm.stage_for(LeadStage.NEW_ENQUIRY) == "welcome"
     for stage in (LeadStage.DETAILS_CAPTURED, LeadStage.CART_CREATED, LeadStage.SLOT_SELECTED,
                   LeadStage.PAYMENT_LINK_SENT, LeadStage.PAYMENT_ABANDONED):
-        assert dst_crm.stage_for(stage) == "Requirement Capture"
-    assert dst_crm.stage_for(LeadStage.CONVERTED) == "Order Confirmed"
+        assert dst_crm.stage_for(stage) == "requirementCapture"
+    assert dst_crm.stage_for(LeadStage.CONVERTED) == "orderConfirmed"
     assert dst_crm.stage_for(LeadStage.NOT_SERVICEABLE) is None
-    assert dst_crm.stage_for_order(OrderStage.OUT_FOR_DELIVERY) == "Delivery Status"
+    assert dst_crm.stage_for_order(OrderStage.OUT_FOR_DELIVERY) == "deliveryStatus"
     assert dst_crm.stage_for_order(OrderStage.CANCELLED) is None
     assert set(dst_crm.FOR_LEAD_STAGE.values()) | set(dst_crm.FOR_ORDER_STAGE.values()) \
         <= set(dst_crm.STAGES)
-    assert len(dst_crm.STAGES) == 13
+    # The 13 stages exactly as the CRM keys them (its pipeline_stages table).
+    assert list(dst_crm.STAGES) == [
+        "welcome", "requirementCapture", "rnr1", "rnr2", "rnrFinal", "quotationSent",
+        "quotationFollowup", "quotationExpiring", "revisedQuotation", "orderConfirmed",
+        "deliveryStatus", "lostFeedback", "winback"]
 
 
-async def test_the_dst_crm_seam_only_logs_until_access_is_given(customer, dst):
-    assert await dst_crm.push_stage(customer, "Welcome") is False
-    assert await dst_crm.record_lead_stage(customer, LeadStage.NEW_ENQUIRY) == "Welcome"
+async def test_nothing_is_queued_until_the_dst_crm_is_connected(session, customer, dst):
+    assert await dst_crm.record_lead_stage(customer, LeadStage.NEW_ENQUIRY) == "welcome"
+    assert await queued(session) == []
 
 
-async def test_the_dst_crm_is_dst_india_s_only(customer):
+async def test_the_dst_crm_is_dst_india_s_only(session, customer, dst_crm_on):
     assert dst_crm.in_use() is False
     assert await dst_crm.record_lead_stage(customer, LeadStage.NEW_ENQUIRY) is None
+    assert await queued(session) == []

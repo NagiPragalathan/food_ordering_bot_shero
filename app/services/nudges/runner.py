@@ -31,6 +31,7 @@ from app.core.logging import get_logger
 from app.db.models import (Conversation, ConversationStep, Customer, LeadStage, NudgeBucket,
                            NudgeLead, NudgeSend)
 from app.integrations.gallabox.sender import current_sender
+from app.services import dst_crm
 from app.services.nudges import config, crm, messages
 from app.services.nudges.config import BUCKETS, NudgeSettings
 
@@ -238,6 +239,7 @@ class Run:
         except (IntegrationError, ConfigurationError, ValueError) as exc:
             send.status, send.error = "failed", str(exc)[:500]
             self.session.add(send)
+            await dst_crm.record_nudge(customer, send, bucket=lead.bucket)   # DST India's CRM only
             if self.file_messages:
                 await crm.file_message(customer, send)
             self.counts["failed"] += 1
@@ -251,6 +253,8 @@ class Run:
             return False
         send.status, send.provider_message_id = "sent", provider_id(result)
         self.session.add(send)
+        await dst_crm.record_nudge(customer, send, bucket=lead.bucket,       # DST India's CRM only
+                                   summary=messages.preview(message))
         if self.file_messages:
             await crm.file_message(customer, send)
         self.counts["sent"] += 1

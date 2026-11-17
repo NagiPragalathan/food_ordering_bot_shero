@@ -26,7 +26,7 @@ from app.core.logging import get_logger
 from app.db.models import AdminUser
 from app.db.session import get_session
 from app.integrations.zoho import oauth as zoho_oauth
-from app.services import connection_tests, dispatch, order_alerts, zoho_connect
+from app.services import connection_tests, dispatch, dst_crm, order_alerts, zoho_connect
 from app.services.settings_store import (
     EDITABLE_KEYS,
     setting_groups,
@@ -75,7 +75,48 @@ async def settings_page(
         "alert_entries": order_alerts.entries(),
         # DST India pays through Razorpay; Shero US's page has no such card.
         "razorpay": razorpay_card() if payment_gateway.uses_razorpay() else None,
+        # DST India's own CRM (Lead Pipeline & Tracker); Shero US has Zoho only.
+        "dst_crm": await dst_crm_card(session) if dst_crm.in_use() else None,
     })
+
+
+async def dst_crm_card(session: AsyncSession) -> dict:
+    """What the DST CRM card shows: connected or not, and the outbox."""
+    state = await dst_crm.status(session)
+    prefix = tenants.current().env_prefix
+    return {
+        "state": state,
+        "env": {name: f"{prefix}{name}" for name in ("CRM_API_URL", "CRM_API_TOKEN")},
+    }
+
+
+@router.post("/dst-crm/{action}", name="admin_dst_crm")
+async def dst_crm_action(
+    request: Request,
+    action: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: AdminUser = Depends(require_admin),
+):
+    """Check the DST CRM connection, send what is waiting now, or put the
+    refused events back in the queue."""
+    url = str(request.url_for("admin_settings")) + "#dst-crm"
+    if not dst_crm.in_use():
+        return redirect(url, flash=("error", "This business has no DST CRM."))
+    if action == "check":
+        result = await dst_crm.health()
+        log.info("dst_crm_check", ok=result.get("ok"), by=current_user.email)
+        if not result.get("ok"):
+            return redirect(url, flash=("error", f"DST CRM: {result.get('error')}"))
+        return redirect(url, flash=("success", "DST CRM connected: Order Now leads, contacts and "
+                                               f"orders go to its pipeline ({len(result.get('pipelineStages') or [])} stages)."))
+    if action == "send":
+        counts = await dst_crm.flush(session)
+        return redirect(url, flash=("success", f"DST CRM: {counts['sent']} sent, {counts['retry']} "
+                                               f"to retry, {counts['failed']} refused."))
+    if action == "retry":
+        count = await dst_crm.retry_failed(session)
+        return redirect(url, flash=("success", f"DST CRM: {count} refused event(s) queued again."))
+    return redirect(url, flash=("error", f"Unknown action '{action}'."))
 
 
 def zoho_card() -> dict:

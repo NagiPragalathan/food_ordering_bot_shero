@@ -208,6 +208,13 @@ class Settings(BaseSettings):
     free_delivery_above: float = Field(default=0.0, ge=0)
     own_delivery_max_km: float = Field(default=10.0, gt=0, le=100)
 
+    # --- DST India's own CRM (its Lead Pipeline & Tracker) ---------------------
+    # The CRM's ordering-bot endpoint (services/dst_crm.py): its address, e.g.
+    # https://dst.shero.website, and the shared key (ORDERING_BOT_TOKEN on the
+    # CRM's server). Empty: nothing is sent. DST_CRM_API_URL / _TOKEN.
+    crm_api_url: str = ""
+    crm_api_token: str = ""
+
     # --- Optional customer messages ------------------------------------
     # Both are in the original spec but switched off at the client's
     # request. The templates stay approved on the WABA either way, so

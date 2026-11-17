@@ -186,6 +186,18 @@ async def store_menu_photos() -> int:
         return await erp_import.store_remote_photos(session)
 
 
+async def send_crm_events() -> int:
+    """DST India: post what is waiting in the outbox to its own CRM
+    (services/dst_crm.py). Nothing for a business without that CRM."""
+    from app.services import dst_crm
+
+    if not dst_crm.connected():
+        return 0
+    async with session_scope() as session:
+        counts = await dst_crm.flush(session)
+    return counts["sent"]
+
+
 async def refresh_settings() -> int:
     """Pick up settings saved through the admin dashboard elsewhere.
 
@@ -265,5 +277,6 @@ ALL_JOBS = {
     "nudges": send_nudges,
     "slot_generation": generate_upcoming_slots,
     "menu_photos": store_menu_photos,
+    "crm_outbox": send_crm_events,
     "settings_refresh": refresh_settings,
 }

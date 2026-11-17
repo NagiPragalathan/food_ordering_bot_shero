@@ -7,6 +7,7 @@ Imported as a package so Alembic's autogenerate sees every table via
 from app.db.base import Base
 from app.db.models.address import CustomerAddress
 from app.db.models.conversation import Conversation, InboundMessage
+from app.db.models.crm_outbox import CrmOutbox
 from app.db.models.customer import Customer
 from app.db.models.enums import (
     DELIVERY_DETAIL_SEQUENCE,
@@ -36,6 +37,7 @@ __all__ = [
     "CommentReviewer",
     "Conversation",
     "ConversationStep",
+    "CrmOutbox",
     "Cuisine",
     "Customer",
     "CustomerAddress",

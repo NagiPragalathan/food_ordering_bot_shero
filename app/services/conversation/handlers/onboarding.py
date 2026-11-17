@@ -10,7 +10,7 @@ from app.integrations.gallabox.messages import Button
 from app.services.conversation import prompts as p
 from app.services.conversation.context import FlowContext
 from app.services.conversation.validators import clean_email, clean_name
-from app.services import reply_triggers
+from app.services import dst_crm, reply_triggers
 from app.services.crm_sync import ensure_record, push_details
 
 log = get_logger(__name__)
@@ -23,6 +23,7 @@ async def start(ctx: FlowContext) -> None:
     skip straight to the main menu.
     """
     await ensure_record(ctx.customer)
+    await dst_crm.record_new_enquiry(ctx.customer)     # DST India's own CRM, once
 
     if ctx.customer.has_details:
         await show_main_menu(ctx, returning=True)
