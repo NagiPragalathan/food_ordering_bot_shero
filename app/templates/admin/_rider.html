@@ -29,7 +29,7 @@
         {% if o.stage != 'Delivered' %}{{ cancel_form(o, back, 'Cancel booking') }}{% endif %}
       </div>
     </div>
-  {% elif shiprocket and o.payment_status == 'paid' and o.stage in ('Paid & Slot Booked', 'Sent to Kitchen') %}
+  {% elif shiprocket and o.payment_status == 'paid' and o.stage == 'Sent to Kitchen' %}
     {% if c.error %}
       <div class="mt-2 max-w-[14rem] text-left text-[11px] text-red-700" title="{{ c.error }}">Shiprocket: {{ c.error | truncate(110) }}</div>
     {% elif c.cancelled %}
@@ -38,16 +38,12 @@
     <form method="post" class="mt-2" action="{{ url_for('admin_order_ready', order_number=o.order_number) }}"
           onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Booking a rider…';">
       <input type="hidden" name="back" value="{{ back }}">
+      {# A kitchen without a pickup location gets one from its own record (ensure_pickup). #}
       <button class="whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
-              title="The food is prepared: book a Shiprocket rider to collect it">
+              title="The food is prepared: book a Shiprocket rider to collect it{{ '' if has_pickup else '. The first booking adds this kitchen to Shiprocket as its pickup.' }}">
         {{ 'Try again: Mark ready' if c.error else 'Mark ready' }}
       </button>
     </form>
-    {# A kitchen without a pickup location gets one from its own record (ensure_pickup). #}
-    {% if not has_pickup and not c.error %}
-      <div class="mt-1 max-w-[14rem] text-left text-[11px] text-stone-500">
-        First booking for this kitchen: its address goes to Shiprocket as its pickup.</div>
-    {% endif %}
     {% if c.order_id %}<div class="mt-1 text-[11px]">{{ cancel_form(o, back, 'Cancel Shiprocket order') }}</div>{% endif %}
   {% endif %}
 {% endmacro %}

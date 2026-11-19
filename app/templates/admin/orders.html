@@ -146,7 +146,8 @@
             {% if row.order.loyalty_earned %}<div class="mt-1 text-xs text-emerald-700">Earned {{ row.order.loyalty_earned }} points</div>{% endif %}
             {# The food is prepared: Mark ready books a Shiprocket rider. #}
             {{ rd.rider(row.order, shiprocket, back, row.outlet and row.outlet.shiprocket_pickup) }}
-            {% if row.next_label %}
+            {# One button per step: while it waits for its rider, Mark ready is the step. #}
+            {% if row.next_label and not awaits_rider(row.order) %}
             <form method="post" class="mt-2"
                   action="{{ url_for('admin_order_advance', order_number=row.order.order_number) }}">
               <button class="whitespace-nowrap rounded-lg bg-brand-600 px-3 py-1.5 text-xs

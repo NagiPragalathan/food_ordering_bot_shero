@@ -41,8 +41,9 @@ from app.services.slots import outlet_tz
 log = get_logger(__name__)
 
 PROVIDER = "shiprocket"
-# The stages an order can be marked ready in: paid, with (or on its way to) the kitchen.
-READY_STAGES = (OrderStage.PAID_SLOT_BOOKED, OrderStage.SENT_TO_KITCHEN)
+# The stage an order can be marked ready in: paid and with the kitchen. Before
+# that its one step is Send to kitchen; after the rider, Out for delivery.
+READY_STAGES = (OrderStage.SENT_TO_KITCHEN,)
 # One food order's box, in cm (Shiprocket asks for every shipment's size).
 BOX_CM = (25, 25, 10)
 # Shiprocket wants a state's name; a kitchen may have been saved with its code.
@@ -78,6 +79,13 @@ def can_mark_ready(order: Order) -> bool:
     return (order.payment_status == PaymentStatus.PAID
             and order.stage in {str(s) for s in READY_STAGES}
             and not booked(order))
+
+
+def awaits_rider(order: Order) -> bool:
+    """The order's next step is Mark ready (Shiprocket connected, with the
+    kitchen, no rider yet): the pages show that one button, not Out for
+    delivery beside it."""
+    return enabled() and can_mark_ready(order)
 
 
 def can_cancel(order: Order) -> bool:

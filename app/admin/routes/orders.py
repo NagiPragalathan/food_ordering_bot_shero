@@ -111,6 +111,7 @@ async def orders_index(
         "selected_kitchen": str(kitchen_id) if kitchen_id else "",
         # Mark ready books a Shiprocket rider (own delivery with Shiprocket connected).
         "shiprocket": shiprocket_booking.enabled(),
+        "awaits_rider": shiprocket_booking.awaits_rider,
         "back": str(request.url),
     })
 

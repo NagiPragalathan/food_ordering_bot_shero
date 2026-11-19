@@ -394,7 +394,7 @@ async def test_a_kitchen_without_a_pickup_still_shows_mark_ready_and_says_what_i
     for page in (client.get("/dst/admin/orders"), client.get("/dst/admin/deliveries")):
         assert page.status_code == 200
         assert "Mark ready" in page.text
-        assert "its address goes to Shiprocket as its pickup" in page.text
+        assert "adds this kitchen to Shiprocket as its pickup" in page.text   # the button's hover text
 
 
 # --- a kitchen's pickup location, made from its own record ------------------------------------
@@ -455,3 +455,29 @@ def test_long_kitchen_addresses_are_split_into_shiprocket_s_two_lines():
         "No:2 Ground Floor third Street Extension, Ramani Nagar, Krishna Nagar West, Tambaram, Chennai")
     assert len(line1) <= 80 and line1.endswith("Krishna Nagar West")
     assert line2 == "Tambaram, Chennai"
+
+
+# --- one button per step -----------------------------------------------------------------------
+async def test_each_step_shows_one_button(session, customer, kitchen, connected, monkeypatch):
+    FakeShiprocket(monkeypatch)
+    order = await _order(session, customer, kitchen)            # paid, with the kitchen
+    client = _admin(session)
+    ready, advance = f"/orders/{order.order_number}/ready", f"/orders/{order.order_number}/advance"
+    for url in ("/dst/admin/orders", "/dst/admin/deliveries"):
+        page = client.get(url).text
+        assert ready in page and advance not in page            # Mark ready only
+
+    await shiprocket_booking.mark_ready(session, order)          # the rider is booked
+    for url in ("/dst/admin/orders", "/dst/admin/deliveries"):
+        page = client.get(url).text
+        assert "Shiprocket rider" in page and "Out for delivery" in page
+        assert advance in page and ready not in page             # Out for delivery only
+
+
+async def test_before_the_kitchen_has_it_the_step_is_send_to_kitchen(session, customer, kitchen,
+                                                                     connected, monkeypatch):
+    FakeShiprocket(monkeypatch)
+    order = await _order(session, customer, kitchen, stage=OrderStage.PAID_SLOT_BOOKED)
+    assert not shiprocket_booking.can_mark_ready(order)
+    page = _admin(session).get("/dst/admin/orders").text
+    assert "Send to kitchen" in page and f"/orders/{order.order_number}/ready" not in page

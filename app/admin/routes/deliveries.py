@@ -72,6 +72,7 @@ async def queue_page(
             "has_kitchen": bool(kitchens),
             # Mark ready books a Shiprocket rider when Shiprocket is connected.
             "shiprocket": shiprocket_booking.enabled(),
+            "awaits_rider": shiprocket_booking.awaits_rider,
             # Each kitchen's Shiprocket pickup location: Mark ready needs one.
             "pickups": {str(k.id): k.shiprocket_pickup for k in kitchens},
             "back": str(request.url),
