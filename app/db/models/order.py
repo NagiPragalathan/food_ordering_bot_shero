@@ -141,6 +141,11 @@ class Order(Base, UUIDPrimaryKey, Timestamps):
     # customer was charged from the quote at checkout.
     uber_fee: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     uber_quote_raw: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # Own delivery: when staff pressed Mark ready (the food is prepared), and
+    # the rider booked then on Shiprocket - its ids, courier, tracking number
+    # and link, status, any error (services/shiprocket_booking.py).
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    courier: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     # --- Feedback (spec step 19) ---------------------------------------------
     feedback_rating: Mapped[str | None] = mapped_column(String(20))

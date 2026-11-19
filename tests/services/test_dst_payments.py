@@ -175,8 +175,9 @@ async def test_the_paid_webhook_confirms_the_order_once(session, customer, outle
 
     again = await _post_webhook(session, _paid_event())      # Razorpay retries
     assert again.status_code == 200 and again.json()["paid"] is False
-    # One confirmation to the customer, however often Razorpay calls.
-    assert len(quiet) == 1
+    # One confirmation to the customer, then "being prepared" (DST India),
+    # however often Razorpay calls.
+    assert [name for name, _ in quiet] == ["payment_confirmed_v4", "order_preparing"]
 
 
 async def test_an_order_is_found_by_its_notes_when_the_link_is_an_older_one(

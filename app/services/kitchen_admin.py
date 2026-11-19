@@ -55,6 +55,10 @@ class KitchenForm:
     slot_length_minutes: int
     slot_capacity: int
     is_active: bool
+    # Own delivery: its pickup location's name on Shiprocket (Mark ready).
+    shiprocket_pickup: str | None = None
+    # Whether the form had that field (only the own-delivery one does).
+    shiprocket_posted: bool = False
 
 
 def max_radius() -> float:
@@ -116,6 +120,8 @@ def parse_form(form) -> KitchenForm:
         slot_length_minutes=max(15, min(240, int(_number(text("slot_length_minutes")) or 60))),
         slot_capacity=max(1, int(_number(text("slot_capacity")) or 4)),
         is_active=bool(form.get("is_active")),
+        shiprocket_pickup=text("shiprocket_pickup")[:36] or None,
+        shiprocket_posted="shiprocket_pickup" in form,
     )
 
 
@@ -190,6 +196,9 @@ async def save(session: AsyncSession, kitchen: Outlet | None, data: KitchenForm)
     kitchen.slot_length_minutes = data.slot_length_minutes
     kitchen.slot_capacity = data.slot_capacity
     kitchen.is_active = data.is_active
+    # Only the own-delivery form has the field; Shero US's form leaves it be.
+    if data.shiprocket_posted:
+        kitchen.shiprocket_pickup = data.shiprocket_pickup
     await session.flush()
     return kitchen
 

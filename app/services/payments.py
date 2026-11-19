@@ -64,6 +64,22 @@ async def send_payment_confirmation(customer: Customer, order: Order,
         return False
 
 
+async def send_preparing_message(customer: Customer, order: Order,
+                                 outlet_name: str) -> bool:
+    """"Your order is being prepared", right after the confirmation
+    (SEND_PREPARING_MESSAGE: DST India). As ever, the same words go as an
+    ordinary message until the template is approved."""
+    if not settings.send_preparing_message:
+        return False
+    try:
+        await current_sender().send_template(
+            customer.whatsapp_number, tpl.ORDER_PREPARING, order.order_number, outlet_name)
+        return True
+    except IntegrationError as exc:
+        log.error("preparing_message_failed", order_number=order.order_number, error=str(exc))
+        return False
+
+
 def amount_text(order: Order) -> str:
     """The amount for a template's "$..." slot: "42.50", or with a coupon
     "42.50 (you saved $7.50 with SHERO10)" - one line, as Meta requires. The
@@ -268,6 +284,8 @@ async def handle_payment_success(session: AsyncSession, order: Order,
     # 2. Confirmation to the customer. The money is taken by now, so a
     # WhatsApp failure must not stop the CRM record and the kitchen alert.
     await send_payment_confirmation(customer, order, outlet_name)
+    # DST India: "being prepared" follows straight away; the kitchen is told now too.
+    await send_preparing_message(customer, order, outlet_name)
 
     # The team's WhatsApp alert (Settings > Order alerts). Never blocks the rest.
     try:

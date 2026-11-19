@@ -15,6 +15,8 @@ works out the discount itself at quote and again at confirm.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,10 +40,16 @@ from app.templating import templates
 
 log = get_logger(__name__)
 # The page's date picker: this many days from the earliest bookable time
-# (SLOT_MIN_LEAD_HOURS after now), and at most this many slots in all.
+# (slots.earliest_bookable), and at most this many slots in all.
 WEB_DAYS_AHEAD = 7
 SLOT_GONE = ("That delivery time is no longer available - it may now be less than "
              "24 hours away. Please check delivery again and pick another time.")
+# Orders for now (DST India): a time can only have passed, not come too close.
+SLOT_GONE_NOW = ("That delivery time is no longer available. Please check delivery "
+                 "again and pick another time.")
+# "Now" chosen, but the kitchen can no longer deliver now.
+NOW_GONE = ("Sorry, we can't deliver right now - the kitchen is closing or fully "
+            "booked for now. Please check delivery again and pick a later time.")
 WEB_MAX_SLOTS = 300
 
 router = APIRouter(prefix="/order", tags=["ordering"])
@@ -375,15 +383,22 @@ async def check_address(request: Request, token: str,
         "serviceable": True,
         "distance_km": check.distance_km,
         "slots": [_slot_json(s, tz) for s in available],
-        # "Orders need 24 hours' notice", with the first moment that allows.
-        "lead_hours": settings.slot_min_lead_hours,
+        # Orders for now (DST India): "Now, about 45 min" or a later time.
+        "instant": slots.instant(),
+        "lead_minutes": settings.instant_lead_minutes if slots.instant() else None,
+        # Otherwise "Orders need 24 hours' notice", with the first moment that allows.
+        "lead_hours": None if slots.instant() else settings.slot_min_lead_hours,
         "earliest": _when(slots.earliest_bookable(), tz),
     }
 
 
 def _slot_json(option: slots.SlotOption, tz) -> dict:
-    """One slot for the page's date picker: its day, and its time on that day."""
+    """One slot for the page's date picker: its day, and its time on that day
+    ("Now" for the window an order for now goes in)."""
     start, end = option.starts_at.astimezone(tz), option.ends_at.astimezone(tz)
+    if option.now:
+        # Its day is today's, even when the window began before midnight.
+        start = datetime.now(timezone.utc).astimezone(tz)
     return {
         "id": option.slot_id,
         "label": option.label,
@@ -391,7 +406,8 @@ def _slot_json(option: slots.SlotOption, tz) -> dict:
         "weekday": start.strftime("%a"),
         "day": start.strftime("%d").lstrip("0"),
         "month": start.strftime("%b"),
-        "time": f"{_clock(start)} - {_clock(end)}",
+        "time": "Now" if option.now else f"{_clock(start)} - {_clock(end)}",
+        "now": option.now,
         "remaining": option.remaining,
     }
 
@@ -439,18 +455,41 @@ async def _refuse(customer: Customer, address, check: ServiceCheck) -> dict:
             "out_of_area": out_of_area.details(check, where, notified=notified)}
 
 
-async def _kitchen_slot(session: AsyncSession, kitchen, slot_id) -> DeliverySlot | None:
+def _wants_now(body: dict) -> bool:
+    """The customer chose "Now" (only where orders are taken for now)."""
+    return bool(body.get("now")) and slots.instant()
+
+
+def _slot_gone(body: dict) -> str:
+    if _wants_now(body):
+        return NOW_GONE
+    return SLOT_GONE_NOW if slots.instant() else SLOT_GONE
+
+
+def _slot_label(slot: DeliverySlot, kitchen, body: dict) -> str:
+    """How the order's delivery time is shown from here on."""
+    tz = slots.outlet_tz(kitchen)
+    return slots.now_label(tz) if _wants_now(body) else slot.label(tz)
+
+
+async def _kitchen_slot(session: AsyncSession, kitchen, slot_id, *,
+                        now: bool = False) -> DeliverySlot | None:
     """The chosen slot, if it is still one the customer may book: this
     kitchen's (a slot listed for a different address, and so maybe another
-    kitchen, is refused), and still at least SLOT_MIN_LEAD_HOURS away - a page
-    left open would otherwise let a slot that has since come too close through."""
+    kitchen, is refused), and still bookable - a page left open would
+    otherwise let a slot that has since come too close through.
+
+    "Now" (`now`, orders for now only) is looked up afresh rather than taken
+    from the page: the window now goes in moves on as time passes."""
+    if now and slots.instant():
+        return await slots.now_slot(session, kitchen)
     try:
         slot = await slots.get_slot(session, str(slot_id or ""))
     except ValueError:
         return None
     if slot is None or slot.outlet_id != kitchen.id:
         return None
-    if slots.as_utc(slot.starts_at) < slots.earliest_bookable():
+    if not slots.is_bookable(slot.starts_at, slot.ends_at):
         return None
     return slot
 
@@ -485,9 +524,9 @@ async def quote(request: Request, token: str,
     if kitchen is None:
         return {"ok": False, "error": "No kitchen is configured yet."}
 
-    slot = await _kitchen_slot(session, kitchen, body.get("slot_id"))
+    slot = await _kitchen_slot(session, kitchen, body.get("slot_id"), now=_wants_now(body))
     if slot is None:
-        return {"ok": False, "error": SLOT_GONE}
+        return {"ok": False, "error": _slot_gone(body)}
 
     promotion, notice = await promotions.stored_promotion(
         session, conversation, customer=customer, outlet=kitchen)
@@ -532,7 +571,7 @@ async def quote(request: Request, token: str,
         "saving": float(priced.total_without_coupon - priced.total),
         "total": float(priced.total),
         "currency": priced.currency,
-        "slot_label": slot.label(slots.outlet_tz(kitchen)),
+        "slot_label": _slot_label(slot, kitchen, body),
         "coupon": _coupon_view(priced),
         "coupon_notice": notice,
         "offers": await promotions.offers_for(session, customer, outlet=kitchen,
@@ -568,9 +607,9 @@ async def confirm(request: Request, token: str,
     if kitchen is None:
         return {"ok": False, "error": "No kitchen is configured yet."}
 
-    slot = await _kitchen_slot(session, kitchen, body.get("slot_id"))
+    slot = await _kitchen_slot(session, kitchen, body.get("slot_id"), now=_wants_now(body))
     if slot is None:
-        return {"ok": False, "error": SLOT_GONE}
+        return {"ok": False, "error": _slot_gone(body)}
 
     # Copy the chosen address onto the customer so WhatsApp and the CRM
     # agree. The contact number is their WhatsApp number, never page input.
@@ -614,7 +653,7 @@ async def confirm(request: Request, token: str,
             session, customer=customer, outlet=kitchen, priced=priced,
             slot_id=slot.id, slot_starts_at=slots.as_utc(slot.starts_at),
             slot_ends_at=slots.as_utc(slot.ends_at),
-            slot_label=slot.label(slots.outlet_tz(kitchen)),
+            slot_label=_slot_label(slot, kitchen, body),
         )
         draft = order
         await slots.hold_slot(session, slot_id=slot.id, order_id=order.id)

@@ -66,6 +66,8 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
          "Free delivery when the dishes come to at least this much (0 = never)", False),
         ("OWN_DELIVERY_MAX_KM",
          "Maximum delivery distance: km from the kitchen, straight line", False),
+        ("INSTANT_LEAD_MINUTES",
+         "Order now: minutes from ordering to the door (cooking and riding)", False),
         ("PUBLIC_BASE_URL", "Public API URL", False),
         ("PAY_REDIRECT_BASE_URL", "Pay redirect URL", False),
     ],
@@ -86,12 +88,17 @@ OTHER_EDITABLE: list[tuple[str, str, bool]] = [
 # Shown only to the business that delivers that way (DELIVERY_PROVIDER).
 UBER_ONLY = {"UBER_DISPATCH_HOURS_BEFORE", "DELIVERY_MAX_MILES"}
 OWN_DELIVERY_ONLY = {"OWN_DELIVERY_FEE", "FREE_DELIVERY_ABOVE", "OWN_DELIVERY_MAX_KM"}
+# Shown only to a business that takes orders for now (INSTANT_ORDERS).
+INSTANT_ONLY = {"INSTANT_LEAD_MINUTES"}
 
 
 def setting_groups() -> dict[str, list[tuple[str, str, bool]]]:
     """SETTING_GROUPS as the current business's Settings page shows them:
-    the Uber fields for Uber delivery, the own-delivery ones for its own staff."""
-    hidden = OWN_DELIVERY_ONLY if settings.delivery_provider == "uber" else UBER_ONLY
+    the Uber fields for Uber delivery, the own-delivery ones for its own staff,
+    and the "order now" time only where orders are taken for now."""
+    hidden = set(OWN_DELIVERY_ONLY if settings.delivery_provider == "uber" else UBER_ONLY)
+    if not settings.instant_orders:
+        hidden |= INSTANT_ONLY
     return {title: [f for f in fields if f[0] not in hidden]
             for title, fields in SETTING_GROUPS.items()}
 
@@ -121,7 +128,11 @@ NUMBER_RANGES: dict[str, tuple[float, float]] = {
     "OWN_DELIVERY_MAX_KM": (1, 100),
     "OWN_DELIVERY_FEE": (0, 100000),
     "FREE_DELIVERY_ABOVE": (0, 1000000),
+    # Long enough to cook and ride; four hours is no longer "now".
+    "INSTANT_LEAD_MINUTES": (10, 240),
 }
+# Saved into whole-number settings.
+WHOLE_NUMBERS = {"INSTANT_LEAD_MINUTES"}
 
 
 class SettingValueError(ValueError):
@@ -140,6 +151,8 @@ def check_value(key: str, value: str) -> None:
         raise SettingValueError(f"{label} must be a number.") from None
     if not low <= number <= high:
         raise SettingValueError(f"{label} must be between {low:g} and {high:g}.")
+    if key in WHOLE_NUMBERS and not number.is_integer():
+        raise SettingValueError(f"{label} must be a whole number.")
 
 
 class SecretsUnavailable(RuntimeError):

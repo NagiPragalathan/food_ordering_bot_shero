@@ -81,7 +81,7 @@ async def create_draft_order(
     if slot_id:
         slot = await slots.get_slot(session, slot_id)
         if (slot is None or slot.outlet_id != outlet.id or not slot.is_available
-                or slots.as_utc(slot.starts_at) < slots.earliest_bookable()):
+                or not slots.is_bookable(slot.starts_at, slot.ends_at)):
             raise NoSlotsAvailableError("kitchen slot unavailable", customer_message=(
                 "That kitchen's delivery slot is no longer available. Please choose another slot."))
 

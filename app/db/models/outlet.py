@@ -83,6 +83,9 @@ class Outlet(Base, UUIDPrimaryKey, Timestamps):
     # The Zoho Vendor this kitchen is, once synced (found again by Outlet Code
     # = code if this is lost). See services/catalogue_sync.py.
     zoho_vendor_id: Mapped[str | None] = mapped_column(String(40), index=True)
+    # Own delivery: this kitchen's pickup location on Shiprocket, by the name
+    # it has there (Settings > Pickup Addresses), where Mark ready's rider collects.
+    shiprocket_pickup: Mapped[str | None] = mapped_column(String(36))
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Outlet {self.code} {self.name}>"

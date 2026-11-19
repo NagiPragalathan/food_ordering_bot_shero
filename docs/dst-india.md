@@ -134,10 +134,19 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
    that gets its order alerts.
 
 8. **Delivery and GST.** DST India → Settings: the delivery charge, the dish
-   total above which delivery is free, the furthest distance in km, and the
-   tax percent (5% GST by default; confirm it).
+   total above which delivery is free, the furthest distance in km, how long
+   an order for now takes from ordering to the door (**Order now**, 45
+   minutes by default), and the tax percent (5% GST by default; confirm it).
 
-9. **Switch the bot on.** DST India answers **nobody** until switched on,
+9. **Shiprocket riders (Mark ready).** In Shiprocket → Settings → API
+   Users, add an API user for the bot (its own email; don't reuse or reset
+   one another system uses) and put it on the server as
+   `DST_SHIPROCKET_EMAIL` and `DST_SHIPROCKET_PASSWORD`. On each kitchen
+   (DST India → Kitchens) fill in **Shiprocket pickup location**: its name
+   exactly as in Shiprocket → Settings → Pickup Addresses. The account's one
+   tracking webhook belongs to the website, so the bot does not use it.
+
+10. **Switch the bot on.** DST India answers **nobody** until switched on,
    because the DST INDIA number already runs a Gallabox bot flow. On
    DST India → Bot replies:
    - add test numbers first (test mode), then choose everyone;
@@ -149,9 +158,30 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
 
 ## Day to day
 
+- **Delivery times**: as on any food delivery app, customers order for
+  **Now** (the default; delivered in about 45 minutes, the **Order now** time
+  on Settings) or pick a later time today or in the next week, inside the
+  kitchen's hours. "Now" is offered while the kitchen can deliver: open, not
+  closing, and that hour not fully booked (its slot capacity). The kitchen
+  is told the moment the customer pays, and the order shows as, for example,
+  "Thu 19 Nov, next 45 min". Shero US is unchanged: a day's notice.
 - **Orders** and **Delivery queue**: paid orders by slot, with address, map
   link and phone. *Send to kitchen → Out for delivery → Mark delivered* moves
   each on and messages the customer.
+- **Messages after paying**: the payment confirmation ("Payment received!
+  Your order is confirmed…"), then straight away "Your order #… is being
+  prepared at <kitchen>" (`dst_order_preparing`; plain text until Meta
+  approves it). The kitchen gets its alert at the same moment.
+- **Mark ready** (with Shiprocket connected): when the food is prepared,
+  press it on the order (Delivery queue or Orders). The bot creates the
+  order on Shiprocket as a Hyperlocal (Quick) drop from the kitchen's pickup
+  location to the customer's map pin, prepaid, and books the cheapest rider
+  Shiprocket offers. The order then shows the courier, AWB, a **Track** link
+  and **Check rider** (asks Shiprocket where the rider is). If Shiprocket
+  refuses (no rider nearby, a wrong pickup name), the reason shows and
+  **Try again** reuses the same Shiprocket order. Out for delivery and
+  Delivered stay manual. The rider is paid from the Shiprocket wallet; the
+  customer still pays the flat delivery charge set on Settings.
 - **Payments**: Razorpay payment links (30 minutes, then the slot is
   released). Refunds from the order go back through Razorpay.
 - **Nudges, Offers, Loyalty, Payouts**: the same pages as Shero US, with

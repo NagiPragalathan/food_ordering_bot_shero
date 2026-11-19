@@ -94,8 +94,8 @@ def test_managed_templates_add_the_welcome_opener_and_order_summary():
     """ALL_TEMPLATES is the spec's ten; MANAGED is what we create on the WABA."""
     assert set(tpl.MANAGED_TEMPLATES) - set(tpl.ALL_TEMPLATES) == {
         tpl.WELCOME, tpl.ORDER_SUMMARY, tpl.MENU_LINK, tpl.WELCOME_BACK, tpl.WELCOME_NEW,
-        tpl.OUT_OF_AREA, tpl.ORDER_ALERT, tpl.KITCHEN_ORDER}
-    assert len(tpl.BY_NAME) == len(tpl.MANAGED_TEMPLATES) == 18
+        tpl.OUT_OF_AREA, tpl.ORDER_ALERT, tpl.KITCHEN_ORDER, tpl.ORDER_PREPARING}
+    assert len(tpl.BY_NAME) == len(tpl.MANAGED_TEMPLATES) == 19
 
 
 def test_template_names_match_the_spec():
@@ -111,7 +111,8 @@ def test_template_names_match_the_spec():
     assert set(tpl.BY_NAME) == expected | {"shero_welcome_message", "order_summary_v2",
                                            "menu_link_v2", "shero_welcome_back",
                                            "shero_welcome_ready", "shero_out_of_area",
-                                           "shero_new_order_alert", "shero_kitchen_order"}
+                                           "shero_new_order_alert", "shero_kitchen_order",
+                                           "order_preparing"}
 
 
 def test_declared_params_match_the_placeholders_in_the_body():

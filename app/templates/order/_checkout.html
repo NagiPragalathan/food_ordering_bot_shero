@@ -7,6 +7,8 @@ window.SheroCheckout = function (ui, opts) {
   const onPlaced = (opts && opts.onPlaced) || function () {};
   let addressId = null;
   let slotId = null;
+  let slotNow = false;      // "Now" chosen (orders for now): the server finds its window afresh
+  let leadMinutes = 0;
   let book = null;          // set by attach(): the book needs checkDelivery first
   let loyaltyPoints = 0;
   let loyaltyDiscount = '0.00';
@@ -34,6 +36,8 @@ window.SheroCheckout = function (ui, opts) {
       addressId = id;
       loyaltyPoints = 0;
       slotId = null;
+      slotNow = false;
+      leadMinutes = data.lead_minutes || 0;
       showDays(data);
       $('slots-wrap').classList.remove('hidden');
       $('slots-wrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -64,10 +68,19 @@ window.SheroCheckout = function (ui, opts) {
 
     const box = $('slots');
     box.className = '';
+    // Orders for now: say how soon, or that "Now" is not on offer just now.
+    const canNow = data.instant && data.slots.some(s => s.now);
+    const note = data.instant
+      ? (canNow
+          ? 'Order now and it reaches you in about <b>' + esc(String(data.lead_minutes)) + ' minutes</b>, or pick a later time.'
+          : 'We can&rsquo;t deliver right away just now. Pick a time below.')
+      : (data.lead_hours
+          ? 'Orders need <b>' + esc(String(Math.round(data.lead_hours))) + ' hours&rsquo; notice</b>. ' +
+            'Earliest delivery: <b>' + esc(data.earliest) + '</b>.'
+          : '');
     box.innerHTML =
-      (data.lead_hours ? '<p class="mb-3 flex items-start gap-2 rounded-xl bg-mist-100 px-3 py-2 text-xs text-ink-700/80">' +
-        '<span>🕒</span><span>Orders need <b>' + esc(String(Math.round(data.lead_hours))) + ' hours&rsquo; notice</b>. ' +
-        'Earliest delivery: <b>' + esc(data.earliest) + '</b>.</span></p>' : '') +
+      (note ? '<p class="mb-3 flex items-start gap-2 rounded-xl bg-mist-100 px-3 py-2 text-xs text-ink-700/80">' +
+        '<span>🕒</span><span>' + note + '</span></p>' : '') +
       '<h4 class="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-700/60">Choose a day</h4>' +
       '<div id="day-strip" class="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2" role="listbox" aria-label="Delivery day"></div>' +
       '<h4 id="times-title" class="mb-2 mt-3 text-xs font-semibold uppercase tracking-wide text-ink-700/60">Choose a time</h4>' +
@@ -95,6 +108,7 @@ window.SheroCheckout = function (ui, opts) {
   const dayClass = 'w-[4.5rem] shrink-0 rounded-2xl border px-2 py-2 text-center transition ';
   function pickDay(day) {
     slotId = null;
+    slotNow = false;
     $('sheet-foot').innerHTML = '<button disabled class="w-full rounded-xl bg-mist-200 py-3 text-sm font-semibold ' +
       'text-ink-700/50">Choose a time</button>';
     Array.from($('day-strip').children).forEach(b => {
@@ -110,23 +124,37 @@ window.SheroCheckout = function (ui, opts) {
 
     const grid = $('time-grid');
     grid.innerHTML = '';
+    let nowButton = null;
     day.slots.forEach(s => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = slotClass;
-      b.innerHTML = esc(s.time) + (s.remaining === 1
-        ? '<span class="mt-0.5 block text-[10px] font-semibold text-amber-700">Last one</span>' : '');
+      // "Now" spans the row, above the later times.
+      const base = s.now ? slotClass + ' col-span-2' : slotClass;
+      const picked = s.now ? pickedClass + ' col-span-2' : pickedClass;
+      b.className = base;
+      b.dataset.base = base;
+      b.innerHTML = s.now
+        ? '<span class="block text-[13px] font-bold">Now</span>' +
+          '<span class="mt-0.5 block text-[11px]">Delivered in about ' + esc(String(leadMinutes)) + ' min</span>'
+        : esc(s.time) + (s.remaining === 1
+          ? '<span class="mt-0.5 block text-[10px] font-semibold text-amber-700">Last one</span>' : '');
       b.addEventListener('click', () => {
         slotId = s.id;
-        Array.from(grid.children).forEach(x => { x.className = slotClass; });
-        b.className = pickedClass;
+        slotNow = !!s.now;
+        Array.from(grid.children).forEach(x => { x.className = x.dataset.base; });
+        b.className = picked;
+        const when = s.now ? 'Now (about ' + leadMinutes + ' min)'
+                           : day.weekday + ' ' + day.day + ' ' + day.month + ', ' + s.time.split(' - ')[0];
         $('sheet-foot').innerHTML =
           '<button id="go-summary" class="w-full rounded-xl bg-brand-500 py-3 text-sm font-semibold text-white">' +
-          'See the total · ' + esc(day.weekday + ' ' + day.day + ' ' + day.month + ', ' + s.time.split(' - ')[0]) + '</button>';
+          'See the total · ' + esc(when) + '</button>';
         $('go-summary').addEventListener('click', () => showSummary($('go-summary')));
       });
       grid.appendChild(b);
+      if (s.now) nowButton = b;
     });
+    // As on any delivery app, "Now" is chosen unless the customer picks a time.
+    if (nowButton) nowButton.click();
   }
 
   // No kitchen delivers to this address: a clear panel in the sheet, where
@@ -192,11 +220,11 @@ window.SheroCheckout = function (ui, opts) {
     const sequence = ++quoteSequence;
     const done = busy(button, keep ? 'Updating…' : 'Working out your total…');
     try {
-      let data = await api('/quote', { slot_id: slotId, address_id: addressId, loyalty_points: loyaltyPoints });
+      let data = await api('/quote', { slot_id: slotId, now: slotNow, address_id: addressId, loyalty_points: loyaltyPoints });
       if (!data.ok && loyaltyPoints > 0) {
         toast(data.error);
         loyaltyPoints = 0;
-        data = await api('/quote', { slot_id: slotId, address_id: addressId, loyalty_points: 0 });
+        data = await api('/quote', { slot_id: slotId, now: slotNow, address_id: addressId, loyalty_points: 0 });
       }
       if (sequence !== quoteSequence) return null;
       if (!data.ok) { toast(data.error); return null; }
@@ -439,7 +467,7 @@ window.SheroCheckout = function (ui, opts) {
   async function placeOrder() {
     const done = busy($('place'), 'Placing your order…');
     try {
-      const data = await api('/confirm', { slot_id: slotId, address_id: addressId,
+      const data = await api('/confirm', { slot_id: slotId, now: slotNow, address_id: addressId,
                                            coupon_code: appliedCode, loyalty_points: loyaltyPoints,
                                            loyalty_discount: loyaltyDiscount, expected_total: expectedTotal });
       if (!data.ok) {

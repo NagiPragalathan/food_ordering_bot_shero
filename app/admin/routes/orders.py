@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
@@ -22,7 +23,7 @@ from app.db.models import (
 from app.db.session import get_session
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.client import gallabox
-from app.services import crm_sync, kitchen_alerts, payouts
+from app.services import crm_sync, kitchen_alerts, payouts, shiprocket_booking
 from app.services import orders as order_service
 
 log = get_logger(__name__)
@@ -108,6 +109,9 @@ async def orders_index(
         "query": q or "",
         "kitchens": list((await session.execute(select(Outlet).order_by(Outlet.name))).scalars()),
         "selected_kitchen": str(kitchen_id) if kitchen_id else "",
+        # Mark ready books a Shiprocket rider (own delivery with Shiprocket connected).
+        "shiprocket": shiprocket_booking.enabled(),
+        "back": str(request.url),
     })
 
 
@@ -185,6 +189,45 @@ async def notify_kitchen(request: Request, order_number: str,
     return redirect(str(request.url_for("admin_orders")), flash=(
         ("success", "Kitchen alert accepted by WhatsApp provider.") if sent else
         ("warning", "Kitchen alert could not be sent. Check payment status, kitchen WhatsApp number and Gallabox setup.")))
+
+
+def _back(request: Request, form) -> str:
+    """Where a button sends the admin back to: the page it was pressed on
+    (the Delivery queue or the Orders page), never another site."""
+    back = str(form.get("back") or "")
+    target = urlsplit(back)
+    if (back and not back.startswith("//") and target.scheme in ("", "http", "https")
+            and target.netloc in ("", request.url.netloc)):
+        return back
+    return str(request.url_for("admin_orders"))
+
+
+@router.post("/{order_number}/ready", name="admin_order_ready")
+async def mark_ready(request: Request, order_number: str,
+                     session: AsyncSession = Depends(get_session),
+                     current_user: AdminUser = Depends(require_admin)):
+    """The food is prepared: book a Shiprocket rider (shiprocket_booking)."""
+    back = _back(request, await request.form())
+    order = await order_service.get_by_number(session, order_number.upper())
+    if order is None:
+        return redirect(back, flash=("error", f"Order {order_number} not found."))
+    result = await shiprocket_booking.mark_ready(session, order)
+    log.info("admin_order_marked_ready", order_number=order.order_number, ok=result.ok,
+             by=current_user.email)
+    return redirect(back, flash=("success" if result.ok else "error", result.message))
+
+
+@router.post("/{order_number}/rider", name="admin_order_rider")
+async def check_rider(request: Request, order_number: str,
+                      session: AsyncSession = Depends(get_session),
+                      current_user: AdminUser = Depends(require_admin)):
+    """Where the Shiprocket rider is (its tracking), kept on the order."""
+    back = _back(request, await request.form())
+    order = await order_service.get_by_number(session, order_number.upper())
+    if order is None:
+        return redirect(back, flash=("error", f"Order {order_number} not found."))
+    result = await shiprocket_booking.check_rider(session, order)
+    return redirect(back, flash=("success" if result.ok else "warning", result.message))
 
 
 def _is_known(order: Order) -> bool:

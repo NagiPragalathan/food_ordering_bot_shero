@@ -8,6 +8,11 @@ A slot is *held* the moment the customer picks it and only becomes *booked*
 when Stripe confirms payment. Holds expire with the payment link, which is
 what frees the window again for somebody else.
 
+Orders for now (INSTANT_ORDERS, DST India): the window under way when the
+food would arrive - INSTANT_LEAD_MINUTES after ordering - is offered as "Now",
+along with every later window. Otherwise (Shero US) the earliest window
+starts SLOT_MIN_LEAD_HOURS (24) after ordering.
+
 Concurrency: reservation uses a single conditional UPDATE
 (`reserved_count < capacity`) so two customers paying simultaneously can never
 oversell the same window. A read-then-write in Python would race.
@@ -36,15 +41,65 @@ WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 DEFAULT_DAYS_AHEAD = 3
 
 
+def instant() -> bool:
+    """Whether this business takes orders for now (DST India)."""
+    return bool(settings.instant_orders)
+
+
+def lead_time() -> timedelta:
+    """From ordering to the earliest delivery: INSTANT_LEAD_MINUTES for orders
+    for now, else SLOT_MIN_LEAD_HOURS (24 by default - cooked to order)."""
+    if instant():
+        return timedelta(minutes=settings.instant_lead_minutes)
+    return timedelta(hours=settings.slot_min_lead_hours)
+
+
 def earliest_bookable(now: datetime | None = None) -> datetime:
-    """The first moment a delivery slot may start: SLOT_MIN_LEAD_HOURS after
-    now (24 by default - the food is cooked to order)."""
-    return (now or datetime.now(timezone.utc)) + timedelta(hours=settings.slot_min_lead_hours)
+    """The first moment food ordered `now` can be delivered. For orders for
+    now, that moment may fall inside a window (it is then "Now"); otherwise
+    no window may start before it."""
+    return (now or datetime.now(timezone.utc)) + lead_time()
+
+
+def is_bookable(starts_at: datetime, ends_at: datetime, now: datetime | None = None) -> bool:
+    """Whether a window may still be booked: for orders for now, while it has
+    not ended by the time the food could arrive; otherwise only when it
+    starts at least the lead time away."""
+    earliest = earliest_bookable(now)
+    if instant():
+        return as_utc(ends_at) > earliest
+    return as_utc(starts_at) >= earliest
+
+
+def is_now(starts_at: datetime, ends_at: datetime, now: datetime | None = None) -> bool:
+    """The window under way when food ordered now would arrive: "Now"."""
+    if not instant():
+        return False
+    earliest = earliest_bookable(now)
+    return as_utc(starts_at) <= earliest < as_utc(ends_at)
+
+
+def now_label(tz, now: datetime | None = None) -> str:
+    """An order for now, wherever its delivery time is shown (summary,
+    payment message, kitchen and team alerts, Orders page): its day, and how
+    long it takes. E.g. 'Thu 19 Nov, next 45 min'.
+
+    It reads right inside the approved messages' fixed words ("for the ___
+    delivery slot", "keep your ___ delivery slot", "for delivery at ___"), and
+    stays true when the customer pays a few minutes later: the kitchen is
+    told the moment they pay."""
+    local = (now or datetime.now(timezone.utc)).astimezone(tz)
+    return f"{local.strftime('%a %d %b')}, next {settings.instant_lead_minutes} min"
+
+
+def now_title() -> str:
+    """The short form, for a WhatsApp list row (24 characters at most)."""
+    return f"Now (about {settings.instant_lead_minutes} min)"
 
 
 def _lead_days() -> int:
     """Whole days the lead time spans, so generation reaches far enough."""
-    return math.ceil(settings.slot_min_lead_hours / 24)
+    return math.ceil(lead_time() / timedelta(days=1))
 
 
 def as_utc(value: datetime) -> datetime:
@@ -65,6 +120,8 @@ class SlotOption:
     starts_at: datetime
     ends_at: datetime
     remaining: int
+    # The window under way when food ordered now would arrive (orders for now).
+    now: bool = False
 
 
 # --- public API --------------------------------------------------------------
@@ -88,7 +145,8 @@ async def list_available_slots(
     # still leaves `days_ahead` days of choice rather than eating one.
     await ensure_slots(session, outlet, days_ahead=days_ahead + _lead_days())
 
-    earliest = earliest_bookable()
+    now = datetime.now(timezone.utc)
+    earliest = earliest_bookable(now)
     horizon = earliest + timedelta(days=days_ahead)
 
     result = await session.execute(
@@ -96,7 +154,9 @@ async def list_available_slots(
         .where(
             DeliverySlot.outlet_id == outlet.id,
             DeliverySlot.is_active.is_(True),
-            DeliverySlot.starts_at >= earliest,
+            # Orders for now: the window the food would arrive in, and later
+            # ones. Otherwise: windows starting the lead time away.
+            (DeliverySlot.ends_at > earliest) if instant() else (DeliverySlot.starts_at >= earliest),
             DeliverySlot.starts_at <= horizon,
             DeliverySlot.reserved_count < DeliverySlot.capacity,
         )
@@ -104,16 +164,44 @@ async def list_available_slots(
         .limit(limit)
     )
     tz = _outlet_tz(outlet)
-    return [
-        SlotOption(
+    options = []
+    for slot in result.scalars():
+        current = is_now(slot.starts_at, slot.ends_at, now)
+        options.append(SlotOption(
             slot_id=str(slot.id),
-            label=slot.label(tz),
+            label=now_label(tz, now) if current else slot.label(tz),
             starts_at=as_utc(slot.starts_at),
             ends_at=as_utc(slot.ends_at),
             remaining=slot.remaining,
+            now=current,
+        ))
+    return options
+
+
+async def now_slot(session: AsyncSession, outlet: Outlet) -> DeliverySlot | None:
+    """The window an order for now goes in: the one under way when the food
+    would arrive, with room left. None when the kitchen cannot deliver now
+    (closed, closing, or that window is full) or orders are not taken for now.
+
+    Looked up again at each step, so "Now" chosen a few minutes ago still
+    means now, even after the window the page first showed has passed."""
+    if not instant() or settings.slot_source == "remote":
+        return None
+    await ensure_slots(session, outlet, days_ahead=_lead_days())
+    earliest = earliest_bookable()
+    result = await session.execute(
+        select(DeliverySlot)
+        .where(
+            DeliverySlot.outlet_id == outlet.id,
+            DeliverySlot.is_active.is_(True),
+            DeliverySlot.starts_at <= earliest,
+            DeliverySlot.ends_at > earliest,
+            DeliverySlot.reserved_count < DeliverySlot.capacity,
         )
-        for slot in result.scalars()
-    ]
+        .order_by(DeliverySlot.starts_at)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def hold_slot(
@@ -270,7 +358,12 @@ async def ensure_slots(session: AsyncSession, outlet: Outlet, *,
     tz = _outlet_tz(outlet)
     today = datetime.now(tz).date()
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    # Orders for now book the window already under way, so one that started
+    # up to its own length ago is still made.
+    back = timedelta(hours=1)
+    if instant():
+        back = max(back, timedelta(minutes=outlet.slot_length_minutes or 60))
+    cutoff = datetime.now(timezone.utc) - back
     existing_result = await session.execute(
         select(DeliverySlot.starts_at).where(
             DeliverySlot.outlet_id == outlet.id,
@@ -421,14 +514,13 @@ async def _list_slots_remote(outlet: Outlet, *, days_ahead: int,
     rows = (payload or {}).get("slots", []) if isinstance(payload, dict) else (payload or [])
 
     options: list[SlotOption] = []
-    earliest = earliest_bookable()
     for row in rows:
         if len(options) >= limit:
             break
         starts = _parse_iso(row.get("starts_at"))
         ends = _parse_iso(row.get("ends_at"))
         # The lead time holds whatever the backend offers.
-        if not starts or not ends or as_utc(starts) < earliest:
+        if not starts or not ends or not is_bookable(starts, ends):
             continue
         options.append(SlotOption(
             slot_id=str(row.get("id")),

@@ -30,7 +30,7 @@ from app.services.conversation.validators import (
     is_skip,
 )
 from app.services.crm_sync import push_details
-from app.services.slots import list_available_slots
+from app.services.slots import list_available_slots, now_title
 
 log = get_logger(__name__)
 
@@ -167,7 +167,10 @@ async def show_slots(ctx: FlowContext) -> None:
         for s in slots
     ])
 
-    rows = [ListRow(id=f"{p.SLOT_PREFIX}{s.slot_id}", title=s.label) for s in slots]
+    # "Now" fits a list row's 24 characters; its day goes underneath.
+    rows = [ListRow(id=f"{p.SLOT_PREFIX}{s.slot_id}", title=now_title(), description=s.label)
+            if s.now else ListRow(id=f"{p.SLOT_PREFIX}{s.slot_id}", title=s.label)
+            for s in slots]
     await ctx.reply_list(
         p.SLOT_PROMPT,
         [ListSection(title="Available slots", rows=rows)],

@@ -208,6 +208,16 @@ class Settings(BaseSettings):
     free_delivery_above: float = Field(default=0.0, ge=0)
     own_delivery_max_km: float = Field(default=10.0, gt=0, le=100)
 
+    # --- Shiprocket (riders for own delivery, booked from "Mark ready") ---------
+    # An API user from Shiprocket > Settings > API Users (its email and the
+    # password set there). Empty: no Mark ready button, the own riders deliver.
+    # DST_SHIPROCKET_EMAIL / DST_SHIPROCKET_PASSWORD (services/shiprocket_booking.py).
+    shiprocket_email: str = ""
+    shiprocket_password: str = ""
+    shiprocket_base_url: str = "https://apiv2.shiprocket.in/v1/external"
+    # The parcel Shiprocket is told about: one food order, in kg.
+    shiprocket_weight_kg: float = Field(default=1.0, gt=0, le=20)
+
     # --- DST India's own CRM (its Lead Pipeline & Tracker) ---------------------
     # The CRM's ordering-bot endpoint (services/dst_crm.py): its address, e.g.
     # https://dst.shero.website, and the shared key (ORDERING_BOT_TOKEN on the
@@ -223,6 +233,9 @@ class Settings(BaseSettings):
     # still expires, and an order still moves through the kitchen stages.
     send_payment_reminder: bool = False
     send_delivery_updates: bool = False
+    # "Your order is being prepared", right after the payment confirmation.
+    # DST India's (on by default there); Shero US's kitchens cook a day ahead.
+    send_preparing_message: bool = False
 
     # --- Who the bot answers ---------------------------------------------
     # Set ONLY on the admin Bot replies page (stored in the database), never
@@ -291,6 +304,13 @@ class Settings(BaseSettings):
     # The earliest delivery slot offered starts this long after ordering:
     # home-style food is cooked to order, so the kitchen needs the day.
     slot_min_lead_hours: float = Field(default=24.0, ge=0)
+    # Orders for now, as on any food delivery app: the delivery window under
+    # way when the food would arrive is offered as "Now", along with every
+    # later window, and the lead time is instant_lead_minutes (cooking and
+    # riding) instead of SLOT_MIN_LEAD_HOURS. DST India's own riders; Shero
+    # US books Uber ahead, so it stays on its day's notice.
+    instant_orders: bool = False
+    instant_lead_minutes: int = Field(default=45, ge=10, le=240)
     # The kitchen's new-order alert goes out at this hour (kitchen local
     # time) on the delivery day - never later than the Uber booking.
     kitchen_alert_hour: float = Field(default=7.0, ge=0, lt=24)
@@ -410,6 +430,11 @@ class DstSettings(Settings):
     zoho_required: bool = False
     price_required: bool = True
     straight_to_menu: bool = True
+    # Customers order for now (delivered in about instant_lead_minutes) or a
+    # later time, like any food delivery app; not a day ahead as in the US.
+    instant_orders: bool = True
+    # "Your order is being prepared" right after paying.
+    send_preparing_message: bool = True
     # GST on restaurant food; confirm with the client.
     tax_percent: float = Field(default=5.0, ge=0, le=100)
     # The bot answers nobody on the DST number until it is switched on from

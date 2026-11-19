@@ -135,6 +135,18 @@ REFUND_PROCESSED = TemplateSpec(
     ),
 )
 
+# DST India (SEND_PREPARING_MESSAGE): right after the payment confirmation.
+ORDER_PREPARING = TemplateSpec(
+    name="order_preparing",
+    category="UTILITY",
+    trigger="Right after payment (SEND_PREPARING_MESSAGE, DST India)",
+    params=("order_number", "outlet_name"),
+    sample_body=(
+        "Your order #{{1}} is being prepared at {{2}}. We will message you when it "
+        "is on its way."
+    ),
+)
+
 ORDER_OUT_FOR_DELIVERY = TemplateSpec(
     name="order_out_for_delivery",
     category="UTILITY",
@@ -353,7 +365,7 @@ ALL_TEMPLATES: tuple[TemplateSpec, ...] = (
 # spec lists.
 MANAGED_TEMPLATES: tuple[TemplateSpec, ...] = ALL_TEMPLATES + (
     WELCOME, ORDER_SUMMARY, MENU_LINK, WELCOME_BACK, WELCOME_NEW, OUT_OF_AREA, ORDER_ALERT,
-    KITCHEN_ORDER)
+    KITCHEN_ORDER, ORDER_PREPARING)
 
 BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in MANAGED_TEMPLATES}
 

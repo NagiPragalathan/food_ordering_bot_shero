@@ -234,6 +234,15 @@
                value="{{ k.phone if k and k.phone else '' }}" class="{{ input_cls }}">
         <p class="mt-1 text-[11px] text-stone-500">{{ 'Uber gives this to the courier.' if by_uber else 'Your delivery staff call this number.' }} Empty: the WhatsApp number.</p>
       </div>
+      {% if not by_uber %}
+      <div class="sm:col-span-2">
+        <label class="{{ label_cls }}" for="f-sr">Shiprocket pickup location</label>
+        <input id="f-sr" name="shiprocket_pickup" maxlength="36" placeholder="{{ 'Anna Nagar Kitchen' if india else 'Main kitchen' }}"
+               value="{{ k.shiprocket_pickup if k and k.shiprocket_pickup else '' }}" class="{{ input_cls }}">
+        <p class="mt-1 text-[11px] text-stone-500">Where the Shiprocket rider collects when an order is marked ready: this kitchen's
+          name exactly as in Shiprocket &gt; Settings &gt; Pickup Addresses. Empty: Mark ready cannot book a rider for this kitchen.</p>
+      </div>
+      {% endif %}
     </div>
     {% endcall %}
 
@@ -264,8 +273,8 @@
           {% endif %}
         </select>
         <p class="mt-1 text-[11px] text-stone-500">
-          Set from the kitchen's pin when you save, so slots, opening hours and the 24-hour
-          notice use the kitchen's local time.
+          Set from the kitchen's pin when you save, so slots, opening hours and the order
+          notice time use the kitchen's local time.
         </p>
       </div>
 
