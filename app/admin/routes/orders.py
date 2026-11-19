@@ -230,6 +230,21 @@ async def check_rider(request: Request, order_number: str,
     return redirect(back, flash=("success" if result.ok else "warning", result.message))
 
 
+@router.post("/{order_number}/rider/cancel", name="admin_order_rider_cancel")
+async def cancel_rider(request: Request, order_number: str,
+                       session: AsyncSession = Depends(get_session),
+                       current_user: AdminUser = Depends(require_admin)):
+    """Cancel the order's Shiprocket booking (and its rider)."""
+    back = _back(request, await request.form())
+    order = await order_service.get_by_number(session, order_number.upper())
+    if order is None:
+        return redirect(back, flash=("error", f"Order {order_number} not found."))
+    result = await shiprocket_booking.cancel_booking(session, order)
+    log.info("admin_order_rider_cancelled", order_number=order.order_number, ok=result.ok,
+             by=current_user.email)
+    return redirect(back, flash=("success" if result.ok else "error", result.message))
+
+
 def _is_known(order: Order) -> bool:
     """Guard against a stage value that is not in the enum."""
     return order.stage in {str(s) for s in OrderStage}

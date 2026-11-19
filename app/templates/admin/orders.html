@@ -145,7 +145,7 @@
             {% if row.order.loyalty_points %}<div class="mt-1 text-xs text-stone-500">{{ row.order.loyalty_points }} points / {{ row.order.loyalty_state }}</div>{% endif %}
             {% if row.order.loyalty_earned %}<div class="mt-1 text-xs text-emerald-700">Earned {{ row.order.loyalty_earned }} points</div>{% endif %}
             {# The food is prepared: Mark ready books a Shiprocket rider. #}
-            {{ rd.rider(row.order, shiprocket, back) }}
+            {{ rd.rider(row.order, shiprocket, back, row.outlet and row.outlet.shiprocket_pickup) }}
             {% if row.next_label %}
             <form method="post" class="mt-2"
                   action="{{ url_for('admin_order_advance', order_number=row.order.order_number) }}">

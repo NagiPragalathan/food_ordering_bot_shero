@@ -176,12 +176,18 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
   press it on the order (Delivery queue or Orders). The bot creates the
   order on Shiprocket as a Hyperlocal (Quick) drop from the kitchen's pickup
   location to the customer's map pin, prepaid, and books the cheapest rider
-  Shiprocket offers. The order then shows the courier, AWB, a **Track** link
+  Shiprocket offers (Shiprocket Quick; ₹65 for a 2.7 km drop in Chennai
+  when tested). The order then shows the courier, AWB, fee, a **Track** link
   and **Check rider** (asks Shiprocket where the rider is). If Shiprocket
   refuses (no rider nearby, a wrong pickup name), the reason shows and
-  **Try again** reuses the same Shiprocket order. Out for delivery and
+  **Try again** reuses the same Shiprocket order. **Cancel booking** cancels
+  the Shiprocket order and releases its rider; Mark ready can then book
+  again (as `<order number>-2` on Shiprocket). Cancelling the order itself
+  cancels its Shiprocket booking too. A kitchen with no Shiprocket pickup
+  location shows what to fill in instead of Mark ready. Out for delivery and
   Delivered stay manual. The rider is paid from the Shiprocket wallet; the
-  customer still pays the flat delivery charge set on Settings.
+  customer still pays the flat delivery charge set on Settings. Shiprocket
+  has no test mode: every booking is real.
 - **Payments**: Razorpay payment links (30 minutes, then the slot is
   released). Refunds from the order go back through Razorpay.
 - **Nudges, Offers, Loyalty, Payouts**: the same pages as Shero US, with

@@ -26,7 +26,7 @@ from app.db.models import Customer, Order, OrderStage, Outlet, PaymentStatus
 from app.db.session import get_session
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.client import gallabox
-from app.services import crm_sync
+from app.services import crm_sync, shiprocket_booking
 from app.services import orders as order_service
 from app.services import payments
 
@@ -141,6 +141,12 @@ async def cancel_order(
 
     order_service.set_stage(order, OrderStage.CANCELLED)
     await session.flush()
+
+    # A Shiprocket rider booked from Mark ready is released (DST India).
+    if shiprocket_booking.can_cancel(order):
+        released = await shiprocket_booking.cancel_booking(session, order)
+        log.info("cancel_shiprocket_released", order_number=order_number, ok=released.ok,
+                 message=released.message)
 
     await gallabox.send_template(
         customer.whatsapp_number, tpl.ORDER_CANCELLED, order.order_number

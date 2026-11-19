@@ -110,7 +110,7 @@
             </td>
             <td class="px-4 py-3 text-right">
               {# The food is prepared: Mark ready books a Shiprocket rider. #}
-              <div class="flex flex-col items-end">{{ rd.rider(o, shiprocket, back) }}</div>
+              <div class="flex flex-col items-end">{{ rd.rider(o, shiprocket, back, pickups.get(o.outlet_id | string)) }}</div>
               {% set step = next_step.get(o.stage) %}
               {% if step and row.status in ('To deliver', 'Out for delivery', 'Missed') %}
                 <form method="post" class="mt-2" action="{{ url_for('admin_order_advance', order_number=o.order_number) }}">

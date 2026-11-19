@@ -60,7 +60,7 @@ def _no_network(monkeypatch):
     for tenant in tenants.ALL:
         own = settings_for(tenant)
         for key in (*SERVICE_KEYS, "razorpay_key_id", "razorpay_key_secret",
-                    "razorpay_webhook_secret"):
+                    "razorpay_webhook_secret", "shiprocket_email", "shiprocket_password"):
             monkeypatch.setattr(own, key, "")
 
     def refuse(self, request, *args, **kwargs):

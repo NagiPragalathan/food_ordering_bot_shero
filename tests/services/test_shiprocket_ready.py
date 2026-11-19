@@ -65,14 +65,22 @@ class FakeShiprocket:
     """Stands in for the API calls; records what was asked."""
 
     def __init__(self, monkeypatch, *, rates=None, assign=None):
-        self.created, self.assigned = [], []
+        self.created, self.assigned, self.cancelled = [], [], []
+        self.refuse_cancel: str | None = None
         self.rates = [{"id": 7, "name": "Borzo", "rate": 58.0}] if rates is None else rates
         self.assign = assign or {"awb_assign_status": 1, "response": {"data": {
             "awb_code": "SRQ123", "courier_name": "Borzo"}}}
 
         async def create_order(payload):
             self.created.append(payload)
-            return {"order_id": 9001, "shipment_id": 7001, "status": "NEW"}
+            n = len(self.created)
+            return {"order_id": 9000 + n, "shipment_id": 7000 + n, "status": "NEW"}
+
+        async def cancel_order(order_id):
+            if self.refuse_cancel:
+                raise sr.ShiprocketError(self.refuse_cancel)
+            self.cancelled.append(str(order_id))
+            return {"status_code": 200, "message": "Order cancelled successfully."}
 
         async def hyperlocal_rates(**kw):
             return self.rates
@@ -82,7 +90,7 @@ class FakeShiprocket:
             return self.assign
 
         for name, fn in (("create_order", create_order), ("hyperlocal_rates", hyperlocal_rates),
-                         ("assign_rider", assign_rider)):
+                         ("assign_rider", assign_rider), ("cancel_order", cancel_order)):
             monkeypatch.setattr(sr, name, fn)
 
 
@@ -145,6 +153,77 @@ async def test_a_refused_rider_can_be_tried_again_on_the_same_shipment(session, 
     assert order.courier["assigned"] and order.courier["status"] == "Assigning a rider"
 
 
+async def test_shiprocket_quick_has_no_courier_id_and_its_price_is_kept(session, customer, kitchen,
+                                                                       connected, monkeypatch):
+    # What the live account answers for a hyperlocal drop (checked 19 Nov 2026).
+    fake = FakeShiprocket(monkeypatch, rates=sr.couriers(
+        {"status": True, "data": [{"courier_name": "Shiprocket Quick", "rates": 65, "etd_hours": 1}]}))
+    order = await _order(session, customer, kitchen)
+    result = await shiprocket_booking.mark_ready(session, order)
+    assert result.ok
+    assert fake.assigned == [("7001", None)]                 # Shiprocket assigns its Quick rider
+    assert order.courier["fee"] == 65.0 and order.courier["courier_name"] == "Borzo"
+
+
+async def test_cancel_booking_releases_the_rider_and_mark_ready_books_afresh(session, customer, kitchen,
+                                                                           connected, monkeypatch):
+    fake = FakeShiprocket(monkeypatch)
+    order = await _order(session, customer, kitchen)
+    await shiprocket_booking.mark_ready(session, order)
+    assert shiprocket_booking.can_cancel(order)
+
+    result = await shiprocket_booking.cancel_booking(session, order)
+    assert result.ok and "cancelled" in result.message and "rider released" in result.message
+    assert fake.cancelled == ["9001"]
+    info = order.courier
+    assert not info["assigned"] and info["shipment_id"] is None and info["awb"] is None
+    assert info["status"] == "Cancelled on Shiprocket"
+    assert info["cancelled"][0]["order_id"] == "9001" and info["cancelled"][0]["awb"] == "SRQ123"
+    assert shiprocket_booking.can_mark_ready(order) and not shiprocket_booking.can_cancel(order)
+
+    # Booked again: a new Shiprocket order, under a new id (the old one stays cancelled there).
+    again = await shiprocket_booking.mark_ready(session, order)
+    assert again.ok and len(fake.created) == 2
+    assert [p["order_id"] for p in fake.created] == ["DST-261119-AAAAA", "DST-261119-AAAAA-2"]
+    assert order.courier["order_id"] == "9002" and order.courier["assigned"]
+
+
+async def test_a_refused_cancel_keeps_the_booking(session, customer, kitchen, connected, monkeypatch):
+    fake = FakeShiprocket(monkeypatch)
+    order = await _order(session, customer, kitchen)
+    await shiprocket_booking.mark_ready(session, order)
+    fake.refuse_cancel = "Shipment already picked up"
+    result = await shiprocket_booking.cancel_booking(session, order)
+    assert not result.ok and "already picked up" in result.message
+    assert order.courier["assigned"] and order.courier["awb"] == "SRQ123"
+
+
+async def test_nothing_to_cancel_is_said_plainly(session, customer, kitchen, connected, monkeypatch):
+    fake = FakeShiprocket(monkeypatch)
+    order = await _order(session, customer, kitchen)
+    result = await shiprocket_booking.cancel_booking(session, order)
+    assert not result.ok and "no Shiprocket booking" in result.message and fake.cancelled == []
+
+
+async def test_cancelling_the_order_releases_its_shiprocket_rider(session, customer, kitchen, connected,
+                                                                  monkeypatch):
+    from app.api.routes import ops
+
+    fake = FakeShiprocket(monkeypatch)
+    order = await _order(session, customer, kitchen)
+    await shiprocket_booking.mark_ready(session, order)
+
+    async def nothing(*a, **kw):
+        return False
+
+    monkeypatch.setattr(ops.gallabox, "send_template", nothing)
+    monkeypatch.setattr(ops.payments, "refund_order", nothing)
+    monkeypatch.setattr(ops.crm_sync, "push_order_stage", nothing)
+    await ops.cancel_order(order.order_number, None, session)
+    assert order.stage == OrderStage.CANCELLED
+    assert fake.cancelled == ["9001"] and not order.courier["assigned"]
+
+
 async def test_no_rider_offered_is_said_plainly(session, customer, kitchen, connected, monkeypatch):
     FakeShiprocket(monkeypatch, rates=[])
     order = await _order(session, customer, kitchen)
@@ -166,7 +245,10 @@ async def test_mark_ready_refuses_what_it_cannot_book(session, customer, kitchen
     assert not result.ok and fake.created == [] and not order.courier
 
 
-async def test_without_shiprocket_or_for_shero_us_there_is_no_mark_ready(session, customer, kitchen):
+async def test_without_shiprocket_or_for_shero_us_there_is_no_mark_ready(session, customer, kitchen,
+                                                                         monkeypatch):
+    # Whatever a local .env holds: DST India without an API user.
+    monkeypatch.setattr(settings_for(tenants.DST), "shiprocket_email", "")
     order = await _order(session, customer, kitchen)
     assert not shiprocket_booking.enabled()                  # Shero US: Uber
     with tenants.use(tenants.DST):
@@ -281,6 +363,28 @@ async def test_mark_ready_on_the_orders_page_books_and_returns(session, customer
     queue = client.get("/dst/admin/deliveries")
     assert queue.status_code == 200
     assert "Shiprocket rider" in queue.text and "SRQ123" in queue.text and "Check rider" in queue.text
+    assert "Cancel booking" in queue.text and "₹58" in queue.text
+
+    cancelled = client.post(f"/dst/admin/orders/{order.order_number}/rider/cancel",
+                            data={"back": "http://testserver/dst/admin/deliveries"}, follow_redirects=False)
+    assert cancelled.status_code in (302, 303)
+    assert cancelled.headers["location"] == "http://testserver/dst/admin/deliveries"
+    assert not order.courier["assigned"]
+    queue = client.get("/dst/admin/deliveries")
+    assert "Last Shiprocket booking cancelled" in queue.text and "Mark ready" in queue.text
+
+
+async def test_a_kitchen_without_a_pickup_shows_what_to_do_not_mark_ready(session, customer, kitchen,
+                                                                         connected, monkeypatch):
+    FakeShiprocket(monkeypatch)
+    kitchen.shiprocket_pickup = None
+    await _order(session, customer, kitchen)
+    client = _admin(session)
+    for page in (client.get("/dst/admin/orders"), client.get("/dst/admin/deliveries")):
+        assert page.status_code == 200
+        assert "set this kitchen&#39;s Shiprocket pickup location" in page.text or \
+            "set this kitchen's Shiprocket pickup location" in page.text
+        assert ">\n          Mark ready" not in page.text and "Booking a rider" not in page.text
 
 
 async def test_mark_ready_never_sends_the_admin_to_another_site(session, customer, kitchen, connected,

@@ -8,6 +8,10 @@ offers. What came back (Shiprocket's ids, the courier, its tracking number
 and link, the status, any error) is kept on the order's `courier`, so a
 second press never books twice and a failed one can simply be pressed again.
 
+Cancel booking cancels the Shiprocket order (and its rider); the order can
+then be marked ready again, which creates a new Shiprocket order. Cancelling
+the order itself (ops API) cancels its Shiprocket booking too.
+
 Out for delivery and Delivered stay with the staff, as before. Without a
 Shiprocket API user (DST_SHIPROCKET_EMAIL / _PASSWORD) nothing here runs and
 the business's own riders deliver.
@@ -71,6 +75,18 @@ def can_mark_ready(order: Order) -> bool:
             and not booked(order))
 
 
+def can_cancel(order: Order) -> bool:
+    """There is a Shiprocket order to cancel, and the food is not delivered."""
+    return bool(details(order).get("order_id")) and order.stage != str(OrderStage.DELIVERED)
+
+
+def shiprocket_ref(order: Order) -> str:
+    """The order's id on Shiprocket: its number, then -2, -3 ... after a
+    cancelled booking (Shiprocket keeps the cancelled one under the number)."""
+    tries = len(details(order).get("cancelled") or [])
+    return order.order_number if not tries else f"{order.order_number}-{tries + 1}"
+
+
 def _save(order: Order, **changes) -> None:
     # A new dict, so the JSON column is seen to change.
     data = details(order)
@@ -87,7 +103,7 @@ def _money(value) -> float:
 
 
 def order_payload(order: Order, outlet: Outlet, customer: Customer | None, *,
-                  now: datetime | None = None) -> dict:
+                  now: datetime | None = None, ref: str | None = None) -> dict:
     """The order as Shiprocket's Create Custom Order takes it, for a
     Hyperlocal (HL) prepaid drop at the customer's map pin."""
     now = now or datetime.now(timezone.utc)
@@ -111,7 +127,7 @@ def order_payload(order: Order, outlet: Outlet, customer: Customer | None, *,
     state = (outlet.state or "").strip()
     length, breadth, height = BOX_CM
     return {
-        "order_id": order.order_number,
+        "order_id": ref or order.order_number,
         "order_date": now.astimezone(outlet_tz(outlet)).strftime("%Y-%m-%d %H:%M"),
         "pickup_location": outlet.shiprocket_pickup,
         "billing_customer_name": first[:60],
@@ -165,7 +181,8 @@ async def mark_ready(session: AsyncSession, order: Order) -> Result:
     try:
         info = details(order)
         if not info.get("shipment_id"):
-            created = await shiprocket.create_order(order_payload(order, outlet, customer, now=now))
+            created = await shiprocket.create_order(
+                order_payload(order, outlet, customer, now=now, ref=shiprocket_ref(order)))
             if not created.get("shipment_id"):
                 raise ShiprocketError("no shipment came back: "
                                       + str(created.get("message") or created)[:200])
@@ -176,6 +193,7 @@ async def mark_ready(session: AsyncSession, order: Order) -> Result:
         shipment_id = details(order)["shipment_id"]
 
         # The cheapest rider Shiprocket offers; without an answer, its default one.
+        # Shiprocket Quick comes without a courier id: Shiprocket then assigns it.
         options = None
         try:
             options = await shiprocket.hyperlocal_rates(
@@ -187,10 +205,10 @@ async def mark_ready(session: AsyncSession, order: Order) -> Result:
             log.warning("shiprocket_rates_failed", order_number=number, error=exc.message)
         if options == []:
             raise ShiprocketError("no rider is available for this drop right now")
-        choice = next((o for o in options or [] if o["id"]), None)
+        choice = (options or [None])[0]
 
         assigned = shiprocket.assignment(
-            await shiprocket.assign_rider(shipment_id, choice["id"] if choice else None))
+            await shiprocket.assign_rider(shipment_id, (choice or {}).get("id")))
         if assigned["error"]:
             raise ShiprocketError(assigned["error"])
     except ShiprocketError as exc:
@@ -211,6 +229,38 @@ async def mark_ready(session: AsyncSession, order: Order) -> Result:
     who = details(order).get("courier_name")
     return Result(True, f"{number} is ready: a rider is booked on Shiprocket"
                         + (f" ({who}, AWB {awb})." if awb else ". Shiprocket is assigning one now."))
+
+
+async def cancel_booking(session: AsyncSession, order: Order) -> Result:
+    """Cancel the order's Shiprocket order and its rider. What was booked is
+    kept under `cancelled`; Mark ready can then book afresh."""
+    number = order.order_number
+    info = details(order)
+    if not info.get("order_id"):
+        if info.get("shipment_id"):
+            return Result(False, f"{number}: cancel it on Shiprocket's dashboard "
+                                 f"(shipment {info['shipment_id']}).")
+        return Result(False, f"{number} has no Shiprocket booking to cancel.")
+    if order.stage == str(OrderStage.DELIVERED):
+        return Result(False, f"{number} is delivered: there is nothing to cancel.")
+    try:
+        answer = await shiprocket.cancel_order(info["order_id"])
+    except ShiprocketError as exc:
+        log.error("shiprocket_cancel_failed", order_number=number, error=exc.message)
+        return Result(False, f"Shiprocket could not cancel {number}: {exc.message}")
+    now = datetime.now(timezone.utc).isoformat()
+    history = list(info.get("cancelled") or [])
+    history.append({k: info.get(k) for k in ("order_id", "shipment_id", "awb", "courier_name", "fee")}
+                   | {"at": now})
+    _save(order, cancelled=history, assigned=False, order_id=None, shipment_id=None, awb=None,
+          courier_name=None, fee=None, tracking_url=None, rider=None, eta=None, error=None,
+          status="Cancelled on Shiprocket", cancelled_at=now)
+    await session.flush()
+    log.info("shiprocket_booking_cancelled", order_number=number, order_id=history[-1]["order_id"],
+             answer=str(answer.get("message") or "")[:120])
+    return Result(True, f"{number}: the Shiprocket booking is cancelled"
+                        + (" and its rider released." if history[-1].get("awb") else ".")
+                        + " Mark ready books again.")
 
 
 async def check_rider(session: AsyncSession, order: Order) -> Result:

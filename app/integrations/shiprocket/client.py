@@ -2,7 +2,9 @@
 
 Booked from Mark ready (services/shiprocket_booking.py): an order is created
 with shipping_method HL and the drop's map pin, then a rider is assigned to
-its shipment (Generate AWB). https://apidocs.shiprocket.in, Hyperlocal.
+its shipment (Generate AWB). Cancel booking cancels the Shiprocket order.
+https://apidocs.shiprocket.in, Hyperlocal. Shiprocket has no test mode:
+every call is on the live account.
 
 The API signs in with an API user (Shiprocket > Settings > API Users): its
 email and password give a token that lasts 10 days. It is kept per business
@@ -152,6 +154,13 @@ async def assign_rider(shipment_id: int | str, courier_id: int | None = None) ->
     return data if isinstance(data, dict) else {}
 
 
+async def cancel_order(order_id: int | str) -> dict:
+    """POST orders/cancel: cancel a Shiprocket order, with its shipment and
+    any rider assigned to it. Answers {"status_code": 200, "message": ...}."""
+    data = await request("POST", "orders/cancel", json={"ids": [int(order_id)]})
+    return data if isinstance(data, dict) else {}
+
+
 async def track_shipment(shipment_id: int | str) -> dict:
     data = await request("GET", f"courier/track/shipment/{shipment_id}")
     if isinstance(data, list):
@@ -163,7 +172,8 @@ async def track_shipment(shipment_id: int | str) -> dict:
 def couriers(data) -> list[dict]:
     """The couriers a serviceability answer offers, cheapest first, as
     {id, name, rate}. The Hyperlocal answer is data: [...]; the standard one
-    data.available_courier_companies."""
+    data.available_courier_companies. Shiprocket Quick (hyperlocal) comes
+    without an id: its rider is then assigned without naming a courier."""
     raw = data.get("data") if isinstance(data, dict) else None
     if isinstance(raw, dict):
         raw = raw.get("available_courier_companies") or []
