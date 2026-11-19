@@ -130,3 +130,74 @@ async def test_a_google_outage_is_none_not_a_crash(monkeypatch):
     monkeypatch.setattr(geocoder.httpx, "AsyncClient", broken)
     assert await geocoder.reverse_geocode(40.5, -74.4) is None
     assert await geocoder.geocode_address("12 Maple St") is None
+
+
+# --- India: the address at the pin, with its area ------------------------------------
+def _in(formatted, lat, lng, types, components, location_type="ROOFTOP"):
+    return {"formatted_address": formatted, "types": types,
+            "geometry": {"location": {"lat": lat, "lng": lng}, "location_type": location_type},
+            "address_components": components}
+
+
+AYANAVARAM = [
+    {"long_name": "Ayanavaram", "short_name": "Ayanavaram", "types": ["sublocality"]},
+    {"long_name": "Chennai", "short_name": "Chennai", "types": ["locality"]},
+    {"long_name": "Tamil Nadu", "short_name": "TN", "types": ["administrative_area_level_1"]},
+    {"long_name": "India", "short_name": "IN", "types": ["country"]},
+    {"long_name": "600023", "short_name": "600023", "types": ["postal_code"]},
+]
+PIN = (13.0990, 80.2335)
+
+
+async def test_an_indian_pin_fills_door_street_area_and_city(google):
+    answers, _ = google
+    answers.append({"status": "OK", "results": [
+        _in("108/49, Vasantha nagar, Chinna Chembarambakkam, Ayanavaram, Chennai, Tamil Nadu 600023, India",
+            13.09909, 80.23352, ["street_address", "subpremise"],
+            [{"long_name": "108/49", "short_name": "108/49", "types": ["subpremise"]}] + AYANAVARAM)]})
+    point = await geocoder.reverse_geocode(*PIN)
+    # No road name in Google's answer: the old street line was empty here.
+    assert point.address_line == "108/49, Vasantha nagar, Chinna Chembarambakkam, Ayanavaram, Chennai"
+    assert point.postal_code == "600023"
+
+
+async def test_a_house_far_from_the_pin_is_not_taken_the_road_at_the_pin_is(google):
+    answers, calls = google
+    far_house = _in("14/78, Clemens Road, Purasaiwakkam, Chennai, Tamil Nadu 600007, India",
+                    13.0870, 80.2520, ["street_address"],
+                    [{"long_name": "14/78", "short_name": "14/78", "types": ["street_number"]},
+                     {"long_name": "Clemens Road", "short_name": "Clemens Rd", "types": ["route"]}]
+                    + AYANAVARAM[1:4] + [{"long_name": "600007", "short_name": "600007",
+                                          "types": ["postal_code"]}])
+    road = _in("Konnur High Rd, Ayanavaram, Chennai, Tamil Nadu, India", 13.0991, 80.2338, ["route"],
+               [{"long_name": "Konnur High Road", "short_name": "Konnur High Rd", "types": ["route"]}]
+               + AYANAVARAM[:4], location_type="GEOMETRIC_CENTER")
+    plus = _in("36XM+J9 Chennai, Tamil Nadu, India", *PIN, ["plus_code"], AYANAVARAM[1:4])
+    answers.extend([{"status": "OK", "results": [far_house]},
+                    {"status": "OK", "results": [plus, road]}])
+    point = await geocoder.reverse_geocode(*PIN)
+    assert "Clemens" not in point.address_line                 # ~2 km away: another house
+    assert point.address_line == "Konnur High Rd, Ayanavaram, Chennai"
+    assert len(calls) == 2
+
+
+async def test_a_bracket_left_open_in_googles_data_is_closed(google):
+    answers, _ = google
+    answers.append({"status": "OK", "results": [
+        _in("50(1, EVK Sampath Salai, Vepery, Chennai, Tamil Nadu 600007, India", 13.0838, 80.2622,
+            ["street_address"],
+            [{"long_name": "50(1", "short_name": "50(1", "types": ["street_number"]},
+             {"long_name": "EVK Sampath Salai", "short_name": "EVK Sampath Salai", "types": ["route"]},
+             {"long_name": "Tamil Nadu", "short_name": "TN", "types": ["administrative_area_level_1"]},
+             {"long_name": "India", "short_name": "IN", "types": ["country"]},
+             {"long_name": "600007", "short_name": "600007", "types": ["postal_code"]}])]})
+    point = await geocoder.reverse_geocode(13.0838, 80.2622)
+    assert point.address_line == "50(1), EVK Sampath Salai, Vepery, Chennai"
+    assert point.street == "50(1) EVK Sampath Salai"
+
+
+async def test_a_us_pin_still_fills_only_number_and_street(google):
+    answers, _ = google
+    answers.append(MAPLE)
+    point = await geocoder.reverse_geocode(40.52015, -74.41023)
+    assert point.address_line == point.street == "12 Maple Street"

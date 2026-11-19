@@ -144,9 +144,9 @@ window.SheroAddressBook = function (deps) {
       '</div>' +
       '<p id="map-hint" class="mb-3 min-h-[1rem] text-[11px] text-ink-700/60">' + HINT + '</p>' +
 
-      input('f-address', 'Street address', editing.address_line1) +
+      input('f-address', {{ ('Address (door no., street, area)' if tenant_settings.country_code | upper == 'IN' else 'Street address') | tojson }}, editing.address_line1) +
       '<div class="grid grid-cols-2 gap-2">' +
-        input('f-apartment', 'Apartment / unit', editing.apartment_unit) +
+        input('f-apartment', {{ ('Flat / floor / landmark' if tenant_settings.country_code | upper == 'IN' else 'Apartment / unit') | tojson }}, editing.apartment_unit) +
         input('f-zip', POSTAL, editing.postal_code, 'inputmode="numeric"') +
       '</div>' +
       input('f-instructions', 'Driver instructions', editing.delivery_instructions) +
@@ -315,20 +315,32 @@ window.SheroAddressBook = function (deps) {
   const HINT = 'Move the map so the pin sits on your door, search the address, ' +
                'or tap “Use my current location”. We fill in the street for you.';
 
+  // Each lookup is numbered: only the newest may fill the form, so a slow
+  // answer for where the pin WAS never lands after the one for where it is.
+  let lookup = 0;
+
+  // Both fields always come from the same spot: a street from one place
+  // beside a PIN code from another reads as a real address and is not one.
+  function fillFields(street, postal) {
+    if ($('f-address')) $('f-address').value = street || '';
+    if ($('f-zip')) $('f-zip').value = postal || '';
+  }
+
   async function fillFrom(pin) {
+    const mine = ++lookup;
     const hint = $('map-hint');
     if (hint) hint.innerHTML = '<span class="inline-flex items-center gap-1.5 text-brand-700">' +
-                               SPINNER + 'Finding the street for this spot…</span>';
+                               SPINNER + 'Finding the address at the pin…</span>';
     try {
       const data = await api('/locate?lat=' + pin.lat + '&lng=' + pin.lng);
-      if (!data.ok) { toast(data.error); return; }
-      if (data.address_line1 && $('f-address')) $('f-address').value = data.address_line1;
-      if (data.postal_code && $('f-zip')) $('f-zip').value = data.postal_code;
+      if (mine !== lookup) return;                  // the pin has moved on since
+      if (!data.ok) { fillFields('', ''); toast(data.error); return; }
+      fillFields(data.address_line1, data.postal_code);
     } catch (err) {
       // Not fatal: the pin is still saved, and the street can be typed.
       console.warn('locate failed', err);
     } finally {
-      if ($('map-hint')) $('map-hint').textContent = HINT;
+      if (mine === lookup && $('map-hint')) $('map-hint').textContent = HINT;
     }
   }
 
@@ -336,12 +348,13 @@ window.SheroAddressBook = function (deps) {
     const q = ($('f-search').value || '').trim();
     if (q.length < 3) { toast('Type at least a street and town.'); return; }
     const done = busy($('f-search-go'), 'Searching');
+    const mine = ++lookup;                          // a pin lookup still under way is stale now
     try {
       const data = await api('/search?q=' + encodeURIComponent(q));
+      if (mine !== lookup) return;
       if (!data.ok) { toast(data.error); return; }
       pin.lat = data.lat; pin.lng = data.lng;
-      if (data.address_line1) $('f-address').value = data.address_line1;
-      if (data.postal_code) $('f-zip').value = data.postal_code;
+      fillFields(data.address_line1, data.postal_code);
       skipFill = true;                              // the search result is the answer
       if (map) map.setView(data.lat, data.lng, 18);
     } catch (err) {

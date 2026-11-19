@@ -15,7 +15,9 @@ the street before saving.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+import re
+from dataclasses import dataclass, replace
 
 import httpx
 
@@ -44,6 +46,11 @@ class GeoPoint:
     street: str = ""
     # The state's short form ("MD") where the source gives one; Google does.
     state_code: str = ""
+    # The line the ordering page fills in. In India the whole address short of
+    # state, PIN and country ("108/49, Vasantha nagar, Ayanavaram, Chennai"):
+    # many Indian addresses have no road name, and a rider needs the area.
+    # Elsewhere the street (number and road), as before.
+    address_line: str = ""
 
 
 _cache: dict[str, GeoPoint | None] = {}
@@ -182,27 +189,83 @@ async def reverse_geocode(latitude: float, longitude: float) -> GeoPoint | None:
     return point
 
 
+# A house Google places further than this from the pin is another house: the
+# road or area at the pin is the better answer (sparse house data, as in India,
+# otherwise jumps to the nearest numbered house a kilometre away).
+NEAR_ADDRESS_M = 60
+NEAR_ROAD_M = 150
+
+
 async def _google_reverse(latitude: float, longitude: float) -> GeoPoint | None:
     # result_type narrows the answer to a real street address: without it
     # Google may lead with a road or a neighbourhood, which has no house number.
     params = {"latlng": f"{latitude},{longitude}", "key": settings.google_maps_api_key,
               "result_type": "street_address|premise|subpremise"}
+    at = (latitude, longitude)
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(GOOGLE_GEOCODE_URL, params=params)
         response.raise_for_status()
-        point = _google_point(response.json(), at=(latitude, longitude))
+        houses = response.json()
+        point = _google_point(houses, at=at, within_m=NEAR_ADDRESS_M)
         if point is None:
-            # Open ground or a park: take the nearest anything instead.
+            # Open ground, a park, or no numbered house near the pin: the
+            # nearest road or place instead (never a plus code).
             params.pop("result_type")
             response = await client.get(GOOGLE_GEOCODE_URL, params=params)
             response.raise_for_status()
-            point = _google_point(response.json(), at=(latitude, longitude))
+            anything = response.json()
+            point = (_google_point(anything, at=at, within_m=NEAR_ROAD_M)
+                     or _google_point(anything, at=at))
+        if point is not None and not point.postal_code:
+            # The road or place may carry no PIN; a nearby house does.
+            point = replace(point, postal_code=_any_postal_code(houses))
     return point
 
 
-def _google_point(payload: dict, *, at: tuple[float, float] | None = None
-                  ) -> GeoPoint | None:
-    """First Geocoding API result as a GeoPoint with its street line.
+def _metres(a: tuple[float, float], b: tuple[float, float]) -> float:
+    p = math.pi / 180
+    h = (math.sin((b[0] - a[0]) * p / 2) ** 2
+         + math.cos(a[0] * p) * math.cos(b[0] * p) * math.sin((b[1] - a[1]) * p / 2) ** 2)
+    return 12742000 * math.asin(math.sqrt(min(1.0, h)))
+
+
+def _any_postal_code(payload: dict) -> str:
+    for result in payload.get("results") or []:
+        for comp in result.get("address_components", []):
+            if "postal_code" in comp.get("types", []):
+                return comp.get("long_name", "")
+    return ""
+
+
+PLUS_CODE_RE = re.compile(r"^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}\s*", re.I)
+
+
+def _tidy(text: str) -> str:
+    """One address part, cleaned: a bracket Google's data left open ("50(1")
+    is closed, spaces are single."""
+    text = " ".join(text.split())
+    if text.count("(") > text.count(")"):
+        text += ")"
+    return text
+
+
+def _address_line(formatted: str, *, postal: str, state: str, country: str) -> str:
+    """The address short of state, PIN and country: "108/49, Vasantha nagar,
+    Chinna Chembarambakkam, Ayanavaram, Chennai"."""
+    drop = {x.lower() for x in (state, country, "india") if x}
+    keep = []
+    for part in (formatted or "").split(","):
+        part = PLUS_CODE_RE.sub("", part.strip())
+        if not part or part.lower() in drop or (postal and postal in part):
+            continue
+        keep.append(_tidy(part))
+    return ", ".join(keep)
+
+
+def _google_point(payload: dict, *, at: tuple[float, float] | None = None,
+                  within_m: float | None = None) -> GeoPoint | None:
+    """The first Geocoding API result (within `within_m` of `at`, when given;
+    never a bare plus code) as a GeoPoint with its street line.
 
     `at` keeps the customer's own pin as the point: the door they dropped it
     on is a better place to send a driver than Google's address centroid.
@@ -213,7 +276,14 @@ def _google_point(payload: dict, *, at: tuple[float, float] | None = None
                         message=payload.get("error_message"))
         return None
 
-    result = payload["results"][0]
+    candidates = [r for r in payload["results"] if "plus_code" not in r.get("types", [])]
+    if within_m is not None and at is not None:
+        candidates = [r for r in candidates if _metres(at, (
+            float(r["geometry"]["location"]["lat"]), float(r["geometry"]["location"]["lng"])))
+            <= within_m]
+    if not candidates:
+        return None
+    result = candidates[0]
     components = {
         comp_type: comp.get("long_name", "")
         for comp in result.get("address_components", [])
@@ -224,20 +294,26 @@ def _google_point(payload: dict, *, at: tuple[float, float] | None = None
         for comp in result.get("address_components", [])
         for comp_type in comp.get("types", [])
     }
-    street = " ".join(part for part in (components.get("street_number", ""),
+    street = " ".join(part for part in (_tidy(components.get("street_number", "")),
                                         components.get("route", "")) if part)
     location = result["geometry"]["location"]
     latitude, longitude = at or (float(location["lat"]), float(location["lng"]))
+    postal = components.get("postal_code", "")
+    india = short.get("country", "").upper() == "IN"
     return GeoPoint(
         latitude=latitude,
         longitude=longitude,
         formatted_address=result.get("formatted_address", ""),
-        postal_code=components.get("postal_code", ""),
+        postal_code=postal,
         city=components.get("locality", "") or components.get("sublocality", ""),
         state=components.get("administrative_area_level_1", ""),
         state_code=short.get("administrative_area_level_1", ""),
         source="google",
         street=street,
+        address_line=(_address_line(result.get("formatted_address", ""), postal=postal,
+                                    state=components.get("administrative_area_level_1", ""),
+                                    country=components.get("country", ""))
+                      if india else street),
     )
 
 
@@ -256,17 +332,23 @@ async def _nominatim_reverse(latitude: float, longitude: float) -> GeoPoint | No
 
 def _nominatim_point(result: dict, latitude: float, longitude: float) -> GeoPoint:
     address = result.get("address", {})
-    street = " ".join(part for part in (address.get("house_number", ""),
+    street = " ".join(part for part in (_tidy(address.get("house_number", "")),
                                         address.get("road", "")) if part)
+    postal = address.get("postcode", "")
+    india = str(address.get("country_code", "")).upper() == "IN"
     return GeoPoint(
         latitude=latitude,
         longitude=longitude,
         formatted_address=result.get("display_name", ""),
-        postal_code=address.get("postcode", ""),
+        postal_code=postal,
         city=address.get("city") or address.get("town") or address.get("village", ""),
         state=address.get("state", ""),
         source="nominatim",
         street=street,
+        address_line=(_address_line(result.get("display_name", ""), postal=postal,
+                                    state=address.get("state", ""),
+                                    country=address.get("country", ""))
+                      if india else street),
     )
 
 

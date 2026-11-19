@@ -89,7 +89,7 @@ async def locate(token: str, lat: float, lng: float,
     if point is None:
         return {"ok": False,
                 "error": "We could not find a street there. Please type the address."}
-    return {"ok": True, "address_line1": point.street,
+    return {"ok": True, "address_line1": point.address_line or point.street,
             "postal_code": point.postal_code, "city": point.city,
             "formatted": point.formatted_address}
 
@@ -107,7 +107,7 @@ async def search(token: str, q: str = "",
         return {"ok": False, "error": "We could not find that address. "
                                       "Try adding the town, or move the map."}
     return {"ok": True, "lat": point.latitude, "lng": point.longitude,
-            "address_line1": point.street, "postal_code": point.postal_code,
+            "address_line1": point.address_line or point.street, "postal_code": point.postal_code,
             "formatted": point.formatted_address}
 
 
