@@ -97,6 +97,10 @@ def setting_groups() -> dict[str, list[tuple[str, str, bool]]]:
     the Uber fields for Uber delivery, the own-delivery ones for its own staff,
     and the "order now" time only where orders are taken for now."""
     hidden = set(OWN_DELIVERY_ONLY if settings.delivery_provider == "uber" else UBER_ONLY)
+    if (settings.delivery_provider == "own" and settings.shiprocket_email.strip()
+            and settings.shiprocket_password):
+        # Shiprocket connected: the customer pays its live rider price, not a flat one.
+        hidden.add("OWN_DELIVERY_FEE")
     if not settings.instant_orders:
         hidden |= INSTANT_ONLY
     return {title: [f for f in fields if f[0] not in hidden]

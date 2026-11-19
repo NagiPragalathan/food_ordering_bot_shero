@@ -121,6 +121,8 @@ async def create_draft_order(
         stage_timestamps={str(OrderStage.PENDING_PAYMENT): _now_iso()},
         uber_quote_id=priced.uber_quote_id,
         uber_quote_raw=priced.uber_quote_raw,
+        # The Shiprocket rider price the customer was charged (DST India).
+        courier={"quote": priced.rider_quote} if priced.rider_quote else {},
     )
     from app.services import loyalty
     async with session.begin_nested():

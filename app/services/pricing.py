@@ -1,10 +1,12 @@
 """Order pricing (spec step 14 and the "Pricing shown to the customer" table).
 
     Dish price (MRP)                  -> the menu in this database
-    Delivery charge + extra fees      -> Uber Direct quote (Shero US), or the
-                                         business's own fee when its own staff
-                                         deliver (DST India: own_delivery_fee,
-                                         free from free_delivery_above)
+    Delivery charge + extra fees      -> Uber Direct quote (Shero US); with
+                                         Shiprocket connected (DST India) its
+                                         live rider price for this drop, never
+                                         a stand-in; else the business's own
+                                         flat fee (own_delivery_fee). Free from
+                                         free_delivery_above when one is set.
     Coupon discount                   -> services/promotions.py
     Total                             -> dish total + Uber charges (+ our tax)
                                          - discount
@@ -20,15 +22,18 @@ PPP column is stored as cost and never reaches a customer or Stripe.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.core import tenants
 from app.core.config import settings
 from app.core.exceptions import (ConfigurationError, IntegrationError,
                                  ItemUnavailableError)
 from app.core.logging import get_logger
 from app.db.models import Outlet, Promotion
+from app.integrations.shiprocket import client as shiprocket
 from app.integrations.uber import direct as uber
 from app.services import menu as menu_service
 from app.services import promotions
@@ -38,6 +43,11 @@ log = get_logger(__name__)
 CENTS = Decimal("0.01")
 # Lead time handed to Uber when quoting; the real window comes from the slot.
 DEFAULT_PICKUP_LEAD_MINUTES = 45
+# A Shiprocket rider price is reused this long for the same kitchen and drop,
+# so the total confirmed is the total the customer was just shown.
+RIDER_PRICE_SECONDS = 10 * 60
+# (business, kitchen pin, drop pin, rounded points, weight) -> (quote, expiry)
+_rider_prices: dict[tuple, tuple[dict, float]] = {}
 
 # PricedOrder.delivery_quote_error
 UNDELIVERABLE = "undeliverable"      # Uber cannot deliver there (its radius, an unknown place)
@@ -78,6 +88,8 @@ class PricedOrder:
     currency: str = "USD"
     uber_quote_id: str | None = None
     uber_quote_raw: dict = field(default_factory=dict)
+    # The Shiprocket rider price the delivery charge came from (DST India).
+    rider_quote: dict = field(default_factory=dict)
     delivery_quote_failed: bool = False
     # Why: Uber cannot deliver there (UNDELIVERABLE), or could not be asked.
     delivery_quote_error: str = ""
@@ -147,7 +159,19 @@ async def price_cart(
     )
 
     # Delivery quote needs a destination and an outlet to quote from.
-    if outlet is not None and dropoff_address is not None and own_delivery():
+    if outlet is not None and dropoff_address is not None and live_rider_price():
+        # Shiprocket's live price for this drop, and nothing else: no answer,
+        # no order (the customer is told, as for Uber).
+        quote, why = await rider_price(
+            outlet, postal_code=str(dropoff_address.get("zip_code") or ""),
+            latitude=dropoff_latitude, longitude=dropoff_longitude)
+        if quote is None:
+            priced.delivery_quote_failed, priced.delivery_quote_error = True, why
+        else:
+            priced.rider_quote = quote
+            priced.delivery_fee = (Decimal("0.00") if free_delivery(dish_total)
+                                   else money(quote["fee"]))
+    elif outlet is not None and dropoff_address is not None and own_delivery():
         # The business's own riders: its own charge, nobody else to ask.
         # How far they go is the kitchen's area (services/kitchen.max_km).
         priced.delivery_fee = own_delivery_fee(dish_total)
@@ -202,13 +226,64 @@ def own_delivery() -> bool:
     return settings.delivery_provider == "own"
 
 
+def free_delivery(dish_total: Decimal) -> bool:
+    """The dishes reach the free-delivery amount (when one is set)."""
+    threshold = money(settings.free_delivery_above or 0)
+    return threshold > 0 and dish_total >= threshold
+
+
 def own_delivery_fee(dish_total: Decimal) -> Decimal:
     """The business's own delivery charge: the flat fee, or nothing once the
     dishes reach the free-delivery amount (when one is set)."""
-    threshold = money(settings.free_delivery_above or 0)
-    if threshold > 0 and dish_total >= threshold:
+    if free_delivery(dish_total):
         return Decimal("0.00")
     return money(settings.own_delivery_fee or 0)
+
+
+def live_rider_price() -> bool:
+    """The delivery charge is Shiprocket's live rider price: own delivery,
+    with a Shiprocket API user (DST India). The flat fee is then never used."""
+    return own_delivery() and shiprocket.configured()
+
+
+async def rider_price(outlet: Outlet, *, postal_code: str, latitude: float | None,
+                      longitude: float | None) -> tuple[dict | None, str]:
+    """Shiprocket's price for a rider from the kitchen to the drop, the
+    cheapest it offers: ({fee, courier, quoted_at}, "") or
+    (None, why) - UNDELIVERABLE when no rider takes it, UNAVAILABLE when
+    Shiprocket could not be asked. Kept RIDER_PRICE_SECONDS per drop."""
+    if latitude is None or longitude is None or outlet.latitude is None or outlet.longitude is None:
+        log.warning("rider_price_no_pin", outlet=outlet.code)
+        return None, UNAVAILABLE
+    weight = settings.shiprocket_weight_kg
+    key = (tenants.current().key, outlet.postal_code, postal_code,
+           round(float(outlet.latitude), 4), round(float(outlet.longitude), 4),
+           round(float(latitude), 4), round(float(longitude), 4), weight)
+    cached = _rider_prices.get(key)
+    if cached and cached[1] > time.monotonic():
+        return dict(cached[0]), ""
+    try:
+        options = await shiprocket.hyperlocal_rates(
+            pickup_postcode=outlet.postal_code, delivery_postcode=postal_code or outlet.postal_code,
+            lat_from=outlet.latitude, long_from=outlet.longitude,
+            lat_to=latitude, long_to=longitude, weight=weight)
+    except IntegrationError as exc:
+        log.error("rider_price_failed", outlet=outlet.code, error=str(exc))
+        return None, UNAVAILABLE
+    priced = [o for o in options if o.get("rate") is not None and o["rate"] >= 0]
+    if not priced:
+        log.warning("rider_price_no_rider", outlet=outlet.code, postal_code=postal_code)
+        return None, UNDELIVERABLE
+    best = priced[0]                                   # couriers() puts the cheapest first
+    quote = {"fee": float(money(best["rate"])), "courier": best.get("name") or "Shiprocket",
+             "quoted_at": datetime.now(timezone.utc).isoformat()}
+    _rider_prices[key] = (quote, time.monotonic() + RIDER_PRICE_SECONDS)
+    if len(_rider_prices) > 5000:                      # never grows without end
+        now = time.monotonic()
+        for k in [k for k, (_, exp) in _rider_prices.items() if exp <= now]:
+            _rider_prices.pop(k, None)
+    log.info("rider_price", outlet=outlet.code, fee=quote["fee"], courier=quote["courier"])
+    return dict(quote), ""
 
 
 def _settle(priced: PricedOrder) -> None:

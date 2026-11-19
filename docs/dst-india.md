@@ -133,7 +133,9 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
    delivery range in km (or a PIN code list), hours, and the WhatsApp number
    that gets its order alerts.
 
-8. **Delivery and GST.** DST India → Settings: the delivery charge, the dish
+8. **Delivery and GST.** DST India → Settings: the delivery charge (only
+   without Shiprocket: once Shiprocket is connected the customer pays its live
+   rider price, see Day to day), the dish
    total above which delivery is free, the furthest distance in km, how long
    an order for now takes from ordering to the door (**Order now**, 45
    minutes by default), and the tax percent (5% GST by default; confirm it).
@@ -185,9 +187,18 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
   again (as `<order number>-2` on Shiprocket). Cancelling the order itself
   cancels its Shiprocket booking too. A kitchen with no Shiprocket pickup
   location shows what to fill in instead of Mark ready. Out for delivery and
-  Delivered stay manual. The rider is paid from the Shiprocket wallet; the
-  customer still pays the flat delivery charge set on Settings. Shiprocket
-  has no test mode: every booking is real.
+  Delivered stay manual. The rider is paid from the Shiprocket wallet.
+  Shiprocket has no test mode: every booking is real.
+- **Delivery charge** (with Shiprocket connected): the customer pays
+  Shiprocket's **live** rider price for their drop, asked at checkout from
+  the kitchen's map pin to theirs (`pricing.rider_price`), shown as Delivery
+  on the web page and in the WhatsApp summary. There is no flat or guessed
+  charge: with no rider offered the customer is told the address is outside
+  the delivery area, and if Shiprocket cannot be reached, to try again. A
+  price is kept 10 minutes for the same drop, so the total confirmed is the
+  total shown. The order keeps it (`courier.quote`) beside what the booking
+  cost (`courier.fee`). "Free delivery above" on Settings still applies when
+  set; the flat delivery charge is hidden while Shiprocket prices delivery.
 - **Payments**: Razorpay payment links (30 minutes, then the slot is
   released). Refunds from the order go back through Razorpay.
 - **Nudges, Offers, Loyalty, Payouts**: the same pages as Shero US, with
