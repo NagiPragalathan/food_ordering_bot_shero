@@ -221,7 +221,7 @@ def test_every_grouped_field_is_editable():
     assert grouped | others == set(EDITABLE_KEYS)
     assert others == {"BOT_REPLY_MODE", "BOT_ALLOWED_NUMBERS",
                       "BOT_REPLY_TRIGGER", "BOT_TRIGGER_KEYWORDS", "BOT_WELCOME_MENU",
-                      "ORDER_ALERT_NUMBERS", "ASK_CUSTOMER_EMAIL"}
+                      "ORDER_ALERT_NUMBERS", "ASK_CUSTOMER_EMAIL", "TEST_PAYMENTS"}
 
 
 def test_every_editable_key_is_a_real_setting():

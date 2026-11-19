@@ -82,6 +82,7 @@ OTHER_EDITABLE: list[tuple[str, str, bool]] = [
     ("BOT_TRIGGER_KEYWORDS", "Trigger keywords", False),
     ("BOT_WELCOME_MENU", "Welcome menu for a new chat", False),
     ("ASK_CUSTOMER_EMAIL", "Ask new customers for their email (on / off)", False),
+    ("TEST_PAYMENTS", "Test payments for the bot's test numbers (on / off)", False),
     ("ORDER_ALERT_NUMBERS", "WhatsApp numbers told about every paid order", False),
 ]
 

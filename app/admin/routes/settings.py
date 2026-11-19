@@ -26,7 +26,8 @@ from app.core.logging import get_logger
 from app.db.models import AdminUser
 from app.db.session import get_session
 from app.integrations.zoho import oauth as zoho_oauth
-from app.services import connection_tests, dispatch, dst_crm, order_alerts, zoho_connect
+from app.services import (allowlist, connection_tests, dispatch, dst_crm, order_alerts,
+                          zoho_connect)
 from app.services.settings_store import (
     EDITABLE_KEYS,
     setting_groups,
@@ -157,7 +158,25 @@ def razorpay_card() -> dict:
         "events": "payment_link.paid",
         "env": {name: f"{prefix}{name}" for name in
                 ("RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET")},
+        # Test payments: the bot's test numbers skip Razorpay (payment_gateway.test_payment_for).
+        "test_payments": settings.test_payments_on,
+        "test_numbers": [f"{e.name} (+{e.number})" if e.name else f"+{e.number}"
+                         for e in allowlist.entries()],
     }
+
+
+@router.post("/test-payments", name="admin_test_payments")
+async def save_test_payments(request: Request, session: AsyncSession = Depends(get_session),
+                             current_user: AdminUser = Depends(require_admin)):
+    """Switch test payments on or off: the bot's test numbers skip the gateway."""
+    on = (await request.form()).get("on") == "1"
+    await save_many(session, {"TEST_PAYMENTS": "on" if on else "off"},
+                    updated_by=current_user.email, allow_blank={"TEST_PAYMENTS"})
+    log.info("test_payments_saved", on=on, by=current_user.email)
+    return redirect(str(request.url_for("admin_settings")), flash=("success", (
+        f"Test payments on: the bot's test numbers skip {payment_gateway.name()} - Pay Now opens a "
+        "test page that marks the order paid. Everyone else still pays." if on else
+        f"Test payments off: every order pays through {payment_gateway.name()}.")))
 
 
 @router.post("", name="admin_settings_save")

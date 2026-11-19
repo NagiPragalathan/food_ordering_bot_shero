@@ -129,7 +129,8 @@ window.SheroAddressBook = function (deps) {
             'placeholder="e.g. Mum\'s place" maxlength="40"') + '</div>' +
 
       '<form id="addr-search" class="mb-2 flex gap-2">' +
-        '<input id="f-search" type="search" autocomplete="off" placeholder="Search your address, e.g. 12 Maple St Edison" ' +
+        '<input id="f-search" type="search" autocomplete="off" placeholder="Search your address, e.g. ' +
+        {{ ('12 Anna Salai, Chennai' if tenant_settings.country_code | upper == 'IN' else '12 Maple St Edison') | tojson }} + '" ' +
         'class="min-w-0 flex-1 rounded-lg border border-mist-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500">' +
         '<button id="f-search-go" class="rounded-lg bg-ink-800 px-4 text-sm font-semibold text-white">Search</button>' +
       '</form>' +
@@ -350,21 +351,68 @@ window.SheroAddressBook = function (deps) {
     }
   }
 
-  function locateMe(pin) {
-    if (!navigator.geolocation) { toast('Your browser cannot share its location. Move the map instead.'); return; }
+  // "Use my current location". Every way it can fail says so: a browser
+  // asking for permission (a prompt that is easy to miss, or one the browser
+  // shows only as an icon by the address bar) never answers at all, and
+  // the page would otherwise sit there looking broken.
+  const LOCATE = '◎ Use my current location';
+  const BLOCKED = 'Location is blocked for this page. Tap the icon next to the web address ' +
+                  '(🔒 or ⓘ), allow Location, then tap “Use my current location” again. ' +
+                  'Or move the map to your door, or search the address.';
+  let locating = false;
+
+  async function locateMe(pin) {
+    if (locating) return;
+    if (!window.isSecureContext || !navigator.geolocation) {
+      toast('This browser cannot share its location. Move the map to your door, or search the address.');
+      return;
+    }
+    // Already blocked for this site: the browser will not ask again, so say how to allow it.
+    try {
+      const state = navigator.permissions && (await navigator.permissions.query({ name: 'geolocation' })).state;
+      if (state === 'denied') { toast(BLOCKED); return; }
+    } catch (err) { /* Safari before 16: no permissions API - just ask */ }
+
+    locating = true;
     const b = $('locate-me');
+    const hint = (text) => { if ($('map-hint')) $('map-hint').textContent = text; };
     b.innerHTML = '<span class="inline-flex items-center gap-1.5">' + SPINNER + 'Finding you…</span>';
-    navigator.geolocation.getCurrentPosition((pos) => {
-      b.textContent = '◎ Use my current location';
+    hint('Allow location if your browser asks - look for its question, or the 📍 icon by the web address.');
+    let done = false;
+    const finish = () => {
+      done = true; locating = false;
+      clearTimeout(nudge); clearTimeout(giveUp);
+      if ($('locate-me')) $('locate-me').textContent = LOCATE;
+      hint(HINT);
+    };
+    const nudge = setTimeout(() => !done && hint(
+      'Still waiting for your browser: choose “Allow” for location (the 📍 icon by the web address).'), 7000);
+    // Waiting on a permission prompt has no timeout of its own: stop here instead.
+    const giveUp = setTimeout(() => {
+      if (done) return;
+      finish();
+      toast('Your browser did not share your location. Allow location for this page (the icon by the ' +
+            'web address), or move the map to your door, or search the address.');
+    }, 20000);
+
+    const ask = (precise) => navigator.geolocation.getCurrentPosition((pos) => {
+      if (done) return;
+      finish();
       pin.lat = +pos.coords.latitude.toFixed(6); pin.lng = +pos.coords.longitude.toFixed(6);
       if (map) map.setView(pin.lat, pin.lng, 18);   // the move fills the fields
       else fillFrom(pin);
     }, (err) => {
-      b.textContent = '◎ Use my current location';
-      toast(err.code === 1
-        ? 'Location access was blocked. Move the map to your door, or search the address.'
-        : 'Could not find your location. Move the map, or search the address.');
-    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+      if (done) return;
+      // A laptop has no GPS: the precise fix times out where Wi-Fi location answers.
+      if (precise && err.code !== 1) { ask(false); return; }
+      finish();
+      toast(err.code === 1 ? BLOCKED
+        : err.code === 2 ? 'Your device could not find its location - is Location switched on in its ' +
+                           'settings? Move the map to your door, or search the address.'
+        : 'Finding your location took too long. Move the map to your door, or search the address.');
+    }, precise ? { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+               : { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
+    ask(true);
   }
 
   return { open, selectedId: () => selected, showList,

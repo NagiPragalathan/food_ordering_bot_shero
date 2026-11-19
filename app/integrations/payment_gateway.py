@@ -10,6 +10,7 @@ MOCK_SESSION_PREFIX - so services/payments.py and the Pay Now redirect call
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import ModuleType
 
 from app.core.config import settings
@@ -41,6 +42,26 @@ def name() -> str:
 def mock_mode() -> bool:
     """No keys: Pay Now opens the test payment page and nothing is charged."""
     return current().mock_mode()
+
+
+def test_payment_for(number: str | None) -> bool:
+    """Test payments are on (Settings, the payments card) and `number` is on
+    the bot's test list (Bot replies): this order skips the gateway - Pay Now
+    opens the test payment page. Everyone else still pays."""
+    if not settings.test_payments_on or not number:
+        return False
+    from app.services import allowlist
+
+    return allowlist.match(number) is not None
+
+
+def mock_session(order_number: str) -> dict:
+    """A test payment link, as create_checkout_session returns one."""
+    module = current()
+    return {"id": f"{module.MOCK_SESSION_PREFIX}{order_number}",
+            "url": module.mock_checkout_url(order_number),
+            "expires_at": datetime.now(timezone.utc)
+            + timedelta(minutes=max(30, int(settings.payment_link_ttl_minutes or 30)))}
 
 
 def test_mode() -> bool:

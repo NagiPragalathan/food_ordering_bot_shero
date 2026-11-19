@@ -260,6 +260,10 @@ class Settings(BaseSettings):
     # See services/conversation/handlers/onboarding.py.
     ask_customer_email: str = Field(default="",
                                     validation_alias="ADMIN_PAGE_ONLY_ASK_CUSTOMER_EMAIL")
+    # Test payments: "on" lets the bot's test numbers (Bot replies list) skip
+    # the payment gateway - Pay Now opens the test page that marks the order
+    # paid, nobody is charged. Everyone else still pays. Settings page only.
+    test_payments: str = Field(default="", validation_alias="ADMIN_PAGE_ONLY_TEST_PAYMENTS")
 
     # --- Team alerts -----------------------------------------------------
     # WhatsApp numbers told about every paid order, "number|name,...". Set on
@@ -332,6 +336,11 @@ class Settings(BaseSettings):
     def asks_customer_email(self) -> bool:
         """Whether the bot asks new customers for their email (Bot replies page)."""
         return self.ask_customer_email.strip().lower() != "off"
+
+    @property
+    def test_payments_on(self) -> bool:
+        """The bot's test numbers skip the payment gateway (Settings page)."""
+        return self.test_payments.strip().lower() == "on"
 
     @property
     def meta_graph_url(self) -> str:
@@ -452,6 +461,7 @@ class DstSettings(Settings):
                                   validation_alias="DST_ADMIN_PAGE_ONLY_BOT_WELCOME_MENU")
     ask_customer_email: str = Field(default="",
                                     validation_alias="DST_ADMIN_PAGE_ONLY_ASK_CUSTOMER_EMAIL")
+    test_payments: str = Field(default="", validation_alias="DST_ADMIN_PAGE_ONLY_TEST_PAYMENTS")
     order_alert_numbers: str = Field(default="",
                                      validation_alias="DST_ADMIN_PAGE_ONLY_ORDER_ALERT_NUMBERS")
 

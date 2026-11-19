@@ -115,18 +115,12 @@ async def create_payment_link(session: AsyncSession, order: Order,
     `with_summary` (the web page) sends the full order summary with Pay Now,
     Change menu and Update location instead of the short payment_link.
     """
-    result = await payment_gateway.current().create_checkout_session(
-        order_id=str(order.id),
-        order_number=order.order_number,
-        items=order.items or [],
-        delivery_fee=Decimal(order.delivery_fee),
-        taxes_and_fees=Decimal(order.extra_fees) + Decimal(order.tax),
-        currency=order.currency,
-        customer_email=customer.email,
-        customer_phone=customer.whatsapp_number,
-        discount=Decimal(order.discount or 0),
-        discount_label=("Coupon + loyalty" if order.promo_code else "Loyalty rewards") if order.loyalty_discount else (f"Coupon {order.promo_code}" if order.promo_code else None),
-    )
+    if payment_gateway.test_payment_for(customer.whatsapp_number):
+        # A test number with test payments on: the test page, no gateway.
+        result = payment_gateway.mock_session(order.order_number)
+        log.info("test_payment_link", order_number=order.order_number)
+    else:
+        result = await _gateway_link(order, customer)
 
     order.stripe_session_id = result["id"]
     order.checkout_url = result["url"]
@@ -142,6 +136,22 @@ async def create_payment_link(session: AsyncSession, order: Order,
     await crm_sync.advance_stage(customer, LeadStage.PAYMENT_LINK_SENT)
     log.info("payment_link_sent", order_number=order.order_number)
     return result["url"]
+
+
+async def _gateway_link(order: Order, customer: Customer) -> dict:
+    """The real payment link: a Stripe session, or a Razorpay link."""
+    return await payment_gateway.current().create_checkout_session(
+        order_id=str(order.id),
+        order_number=order.order_number,
+        items=order.items or [],
+        delivery_fee=Decimal(order.delivery_fee),
+        taxes_and_fees=Decimal(order.extra_fees) + Decimal(order.tax),
+        currency=order.currency,
+        customer_email=customer.email,
+        customer_phone=customer.whatsapp_number,
+        discount=Decimal(order.discount or 0),
+        discount_label=("Coupon + loyalty" if order.promo_code else "Loyalty rewards") if order.loyalty_discount else (f"Coupon {order.promo_code}" if order.promo_code else None),
+    )
 
 
 async def _send_payment_link(order: Order, customer: Customer) -> None:

@@ -201,6 +201,12 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
   set; the flat delivery charge is hidden while Shiprocket prices delivery.
 - **Payments**: Razorpay payment links (30 minutes, then the slot is
   released). Refunds from the order go back through Razorpay.
+- **Test payments** (DST India → Settings, Razorpay card): while on, the
+  bot's test numbers (Bot replies) skip Razorpay. Pay Now opens a test page
+  whose *Simulate successful payment* marks the order paid, so the rest of
+  the flow (messages, kitchen alert, delivery queue, Mark ready) can be tried
+  without paying. Everyone else still pays through Razorpay. Turn it off
+  before going live.
 - **Nudges, Offers, Loyalty, Payouts**: the same pages as Shero US, with
   DST India's own rules, messages and money. Nudge messages written here are
   named `dst_nudge_…`; the 12 approved DST follow-ups (`dst_rnr_1` …

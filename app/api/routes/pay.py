@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import locale
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import Customer, PaymentStatus
 from app.db.session import get_session
@@ -136,7 +137,9 @@ async def mock_checkout_page(
         f"Amount: <b>{order.total:.2f} {html.escape(order.currency.upper())}</b><br>"
         + saving +
         "This is a demo checkout - no card is charged.<br>"
-        f"Real payments start once {payment_gateway.name()} is connected." + button,
+        + ("Test payments are on for the bot's test numbers (Settings)."
+           if not payment_gateway.mock_mode() else
+           f"Real payments start once {payment_gateway.name()} is connected.") + button,
         order.order_number,
     )
 
@@ -146,8 +149,9 @@ async def mock_payment_success(
     order_number: str,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
-    """Mark a test order paid, as the payment webhook would. Mock mode only."""
-    if not payment_gateway.mock_mode():
+    """Mark a test order paid, as the payment webhook would. Mock mode, or
+    test payments on (only a test link - mock_ - is found by _mock_order)."""
+    if not (payment_gateway.mock_mode() or settings.test_payments_on):
         # With a real key only Stripe or Razorpay may say an order is paid.
         return _page("Not found", "That payment link is not valid.", "", status=404)
     order = await _mock_order(session, order_number)

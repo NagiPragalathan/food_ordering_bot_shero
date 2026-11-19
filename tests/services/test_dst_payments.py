@@ -311,3 +311,97 @@ async def test_a_refund_goes_back_through_razorpay(session, customer, outlet, ds
     assert ("POST", "/payments/pay_9/refund", {}) in recorded
     stored = (await session.execute(select(Order).where(Order.order_number == NUMBER))).scalar_one()
     assert stored.stage == OrderStage.REFUNDED
+
+
+# --- test payments: the bot's test numbers skip Razorpay -----------------------------
+@pytest.fixture
+def test_payments(dst, customer, monkeypatch):
+    """Test payments on, with this customer on the bot's test list."""
+    monkeypatch.setattr(dst, "test_payments", "on")
+    monkeypatch.setattr(dst, "bot_allowed_numbers", f"{customer.whatsapp_number}|Tester")
+    return dst
+
+
+async def _post(session, path):
+    transport = httpx.ASGITransport(app=_app(session))
+    async with httpx.AsyncClient(transport=transport, base_url="http://bot.example") as client:
+        return await client.post(path)
+
+
+async def test_a_test_number_skips_razorpay_and_pays_on_the_test_page(
+        session, customer, outlet, test_payments, quiet, razorpay):
+    recorded, _ = razorpay
+    order = await _order(session, customer, outlet, stripe_session_id=None,
+                         payment_status=PaymentStatus.NOT_STARTED)
+
+    url = await payments.create_payment_link(session, order, customer)
+    assert recorded == []                                     # Razorpay never asked
+    assert url == f"https://bot.example/dst/pay/mock/{NUMBER}"
+    assert order.stripe_session_id == f"mock_{NUMBER}" and order.payment_status == PaymentStatus.LINK_SENT
+    assert quiet, "the Pay Now message still goes out"
+
+    page = await _get(session, f"/dst/pay/mock/{NUMBER}")
+    assert "Simulate successful payment" in page.text and "Test payments are on" in page.text
+    done = await _post(session, f"/dst/pay/mock/{NUMBER}/paid")
+    assert done.status_code == 200
+    assert order.payment_status == PaymentStatus.PAID and order.stage == OrderStage.PAID_SLOT_BOOKED
+
+
+async def test_everyone_else_still_pays_through_razorpay(session, customer, outlet, test_payments,
+                                                         quiet, razorpay, monkeypatch):
+    recorded, answers = razorpay
+    answers[("POST", "/payment_links")] = {"id": "plink_real", "short_url": "https://rzp.io/i/r"}
+    monkeypatch.setattr(test_payments, "bot_allowed_numbers", "919800000001|Someone else")
+    order = await _order(session, customer, outlet, stripe_session_id=None,
+                         payment_status=PaymentStatus.NOT_STARTED)
+    assert await payments.create_payment_link(session, order, customer) == "https://rzp.io/i/r"
+    assert recorded and order.stripe_session_id == "plink_real"
+
+
+async def test_with_test_payments_off_a_test_number_pays_and_the_test_page_refuses(
+        session, customer, outlet, test_payments, quiet, razorpay, monkeypatch):
+    recorded, answers = razorpay
+    answers[("POST", "/payment_links")] = {"id": "plink_real", "short_url": "https://rzp.io/i/r"}
+    monkeypatch.setattr(test_payments, "test_payments", "off")
+    order = await _order(session, customer, outlet, stripe_session_id=None,
+                         payment_status=PaymentStatus.NOT_STARTED)
+    await payments.create_payment_link(session, order, customer)
+    assert recorded and order.stripe_session_id == "plink_real"
+
+    # A test link made while it was on cannot be paid once it is off.
+    order.stripe_session_id = f"mock_{NUMBER}"
+    refused = await _post(session, f"/dst/pay/mock/{NUMBER}/paid")
+    assert refused.status_code == 404 and order.payment_status == PaymentStatus.LINK_SENT
+
+
+async def test_a_real_razorpay_order_is_never_paid_from_the_test_page(
+        session, customer, outlet, test_payments, quiet):
+    order = await _order(session, customer, outlet)              # stripe_session_id plink_1
+    refused = await _post(session, f"/dst/pay/mock/{NUMBER}/paid")
+    assert refused.status_code == 404 and order.payment_status == PaymentStatus.LINK_SENT
+
+
+async def test_the_settings_card_switches_test_payments_on_and_off(session, dst, customer, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.admin import router as admin_router
+    from app.admin.deps import require_admin
+    from app.db.models import AdminUser
+
+    monkeypatch.setattr(dst, "bot_allowed_numbers", f"{customer.whatsapp_number}|Tester")
+    monkeypatch.setattr(dst, "test_payments", "")
+    app = FastAPI()
+    app.include_router(admin_router)
+    app.add_middleware(tenants.TenantPathMiddleware)
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[require_admin] = lambda: AdminUser(
+        email="ops@shero.test", name="Ops", password_hash="x", is_active=True)
+    client = TestClient(app)
+
+    page = client.get("/dst/admin/settings")
+    assert page.status_code == 200 and "Turn on test payments" in page.text and "Tester" in page.text
+    saved = client.post("/dst/admin/settings/test-payments", data={"on": "1"}, follow_redirects=False)
+    assert saved.status_code in (302, 303) and dst.test_payments_on
+    assert "Turn off test payments" in client.get("/dst/admin/settings").text
+    client.post("/dst/admin/settings/test-payments", data={"on": "0"}, follow_redirects=False)
+    assert not dst.test_payments_on

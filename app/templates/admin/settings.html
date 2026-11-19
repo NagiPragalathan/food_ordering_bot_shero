@@ -118,6 +118,7 @@
         {{ ui.badge('keys set', 'good') }}
         {% if razorpay.mode == 'test' %}{{ ui.badge('test mode', 'warn') }}{% else %}{{ ui.badge('live', 'good') }}{% endif %}
       {% else %}{{ ui.badge('not connected', 'warn') }}{% endif %}
+      {% if razorpay.test_payments %}{{ ui.badge('test payments on', 'warn') }}{% endif %}
     </div>
     {% if razorpay.keys_set %}
       <form method="post" action="{{ url_for('admin_settings_test', service='razorpay') }}">
@@ -127,6 +128,27 @@
     {% endif %}
   </header>
   <div class="space-y-3 p-5 text-sm text-stone-600">
+    {# Test payments: the bot's test numbers skip Razorpay, to try the rest of the flow. #}
+    <form method="post" action="{{ url_for('admin_test_payments') }}" data-test-payments
+          class="rounded-lg border px-4 py-3 {{ 'border-amber-300 bg-amber-50' if razorpay.test_payments else 'border-stone-200 bg-stone-50' }}">
+      <input type="hidden" name="on" value="{{ '0' if razorpay.test_payments else '1' }}">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="font-medium text-stone-800">Test payments {{ 'are ON' if razorpay.test_payments else 'are off' }}</p>
+          <p class="mt-0.5 text-xs text-stone-500">
+            When on, the bot's test numbers skip Razorpay: Pay Now opens a test page whose
+            <b>Simulate successful payment</b> marks the order paid (kitchen alert, messages, delivery and
+            Mark ready all run as usual). Nobody is charged. Everyone else still pays through Razorpay.
+          </p>
+          <p class="mt-1 text-xs text-stone-500">Test numbers (Bot replies):
+            {{ razorpay.test_numbers | join(', ') if razorpay.test_numbers else 'none yet - add them on Bot replies' }}</p>
+        </div>
+        <button class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold shadow-sm
+                       {{ 'border border-stone-300 bg-white text-stone-800 hover:bg-stone-100' if razorpay.test_payments
+                          else 'bg-amber-600 text-white hover:bg-amber-700' }}">
+          {{ 'Turn off test payments' if razorpay.test_payments else 'Turn on test payments' }}</button>
+      </div>
+    </form>
     {% if not razorpay.keys_set %}
       <p>
         Add <code class="font-mono text-xs">{{ razorpay.env.RAZORPAY_KEY_ID }}</code> and
