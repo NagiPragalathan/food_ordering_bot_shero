@@ -65,8 +65,10 @@ class FakeShiprocket:
     """Stands in for the API calls; records what was asked."""
 
     def __init__(self, monkeypatch, *, rates=None, assign=None):
-        self.created, self.assigned, self.cancelled = [], [], []
+        self.created, self.assigned, self.cancelled, self.pickups = [], [], [], []
         self.refuse_cancel: str | None = None
+        self.refuse_pickup: str | None = None
+        self.existing_pickups = ["Anna Nagar Kitchen"]
         self.rates = [{"id": 7, "name": "Borzo", "rate": 58.0}] if rates is None else rates
         self.assign = assign or {"awb_assign_status": 1, "response": {"data": {
             "awb_code": "SRQ123", "courier_name": "Borzo"}}}
@@ -89,8 +91,19 @@ class FakeShiprocket:
             self.assigned.append((shipment_id, courier_id))
             return self.assign
 
+        async def add_pickup(payload):
+            if self.refuse_pickup:
+                raise sr.ShiprocketError(self.refuse_pickup)
+            self.pickups.append(payload)
+            self.existing_pickups.append(payload["pickup_location"])
+            return {"success": True, "pickup_id": 555}
+
+        async def pickup_locations():
+            return list(self.existing_pickups)
+
         for name, fn in (("create_order", create_order), ("hyperlocal_rates", hyperlocal_rates),
-                         ("assign_rider", assign_rider), ("cancel_order", cancel_order)):
+                         ("assign_rider", assign_rider), ("cancel_order", cancel_order),
+                         ("add_pickup", add_pickup), ("pickup_locations", pickup_locations)):
             monkeypatch.setattr(sr, name, fn)
 
 
@@ -231,14 +244,12 @@ async def test_no_rider_offered_is_said_plainly(session, customer, kitchen, conn
     assert not result.ok and "no rider is available" in result.message
 
 
-@pytest.mark.parametrize("problem", ["no_pickup", "unpaid", "delivered", "no_pin"])
+@pytest.mark.parametrize("problem", ["unpaid", "delivered", "no_pin"])
 async def test_mark_ready_refuses_what_it_cannot_book(session, customer, kitchen, connected,
                                                       monkeypatch, problem):
     fake = FakeShiprocket(monkeypatch)
     order = await _order(session, customer, kitchen, paid=problem != "unpaid",
                          stage=OrderStage.DELIVERED if problem == "delivered" else OrderStage.SENT_TO_KITCHEN)
-    if problem == "no_pickup":
-        kitchen.shiprocket_pickup = None
     if problem == "no_pin":
         order.delivery_latitude = None
     result = await shiprocket_booking.mark_ready(session, order)
@@ -374,23 +385,73 @@ async def test_mark_ready_on_the_orders_page_books_and_returns(session, customer
     assert "Last Shiprocket booking cancelled" in queue.text and "Mark ready" in queue.text
 
 
-async def test_a_kitchen_without_a_pickup_shows_what_to_do_not_mark_ready(session, customer, kitchen,
-                                                                         connected, monkeypatch):
+async def test_a_kitchen_without_a_pickup_still_shows_mark_ready_and_says_what_it_does(
+        session, customer, kitchen, connected, monkeypatch):
     FakeShiprocket(monkeypatch)
     kitchen.shiprocket_pickup = None
     await _order(session, customer, kitchen)
     client = _admin(session)
     for page in (client.get("/dst/admin/orders"), client.get("/dst/admin/deliveries")):
         assert page.status_code == 200
-        assert "set this kitchen&#39;s Shiprocket pickup location" in page.text or \
-            "set this kitchen's Shiprocket pickup location" in page.text
-        assert ">\n          Mark ready" not in page.text and "Booking a rider" not in page.text
+        assert "Mark ready" in page.text
+        assert "its address goes to Shiprocket as its pickup" in page.text
 
 
-async def test_mark_ready_never_sends_the_admin_to_another_site(session, customer, kitchen, connected,
-                                                                monkeypatch):
-    FakeShiprocket(monkeypatch)
-    order = await _order(session, customer, kitchen)
-    done = _admin(session).post(f"/dst/admin/orders/{order.order_number}/ready",
-                                data={"back": "https://evil.example/phish"}, follow_redirects=False)
-    assert "evil.example" not in done.headers["location"]
+# --- a kitchen's pickup location, made from its own record ------------------------------------
+@pytest.fixture
+def new_kitchen(kitchen):
+    kitchen.name = "Shero Home Food-Chettinad SKID-IND-1263 A"
+    kitchen.address_line1 = "Door No.27, Flat 2B, 2nd floor, Barracks Road, Periamet"
+    kitchen.kitchen_whatsapp, kitchen.phone = "919884924086", "+918690666666"
+    kitchen.latitude, kitchen.longitude = 13.0870, 80.2620
+    kitchen.shiprocket_pickup = None
+    return kitchen
+
+
+async def test_mark_ready_adds_a_kitchen_without_a_pickup_to_shiprocket_and_books(
+        session, customer, new_kitchen, connected, monkeypatch):
+    fake = FakeShiprocket(monkeypatch)
+    order = await _order(session, customer, new_kitchen)
+    result = await shiprocket_booking.mark_ready(session, order)
+    assert result.ok and order.courier["assigned"]
+
+    sent = fake.pickups[0]
+    assert sent["pickup_location"] == "DST SKID-1263 A"
+    assert sent["phone"] == "9884924086"                      # the cook, not the head-office line
+    assert sent["address"].startswith("Door No.27") and sent["pin_code"] == "600040"
+    assert sent["city"] == "Chennai" and sent["state"] == "Tamil Nadu" and sent["country"] == "India"
+    assert (sent["lat"], sent["long"]) == (13.0870, 80.2620)
+    assert new_kitchen.shiprocket_pickup == "DST SKID-1263 A"  # kept for next time
+    assert fake.created[0]["pickup_location"] == "DST SKID-1263 A"
+
+    second = await _order(session, customer, new_kitchen, number="DST-261119-BBBBB")
+    await shiprocket_booking.mark_ready(session, second)
+    assert len(fake.pickups) == 1                             # made once
+
+
+async def test_a_pickup_made_by_an_earlier_press_is_used_not_made_again(
+        session, customer, new_kitchen, connected, monkeypatch):
+    fake = FakeShiprocket(monkeypatch)
+    fake.existing_pickups.append("DST SKID-1263 A")
+    fake.refuse_pickup = "Address nick name already in use"
+    order = await _order(session, customer, new_kitchen)
+    result = await shiprocket_booking.mark_ready(session, order)
+    assert result.ok and new_kitchen.shiprocket_pickup == "DST SKID-1263 A"
+
+
+async def test_an_address_shiprocket_refuses_is_said_and_nothing_is_booked(
+        session, customer, new_kitchen, connected, monkeypatch):
+    fake = FakeShiprocket(monkeypatch)
+    fake.refuse_pickup = "Address line 1 should have House no / Flat no / Road no."
+    order = await _order(session, customer, new_kitchen)
+    result = await shiprocket_booking.mark_ready(session, order)
+    assert not result.ok and "House no" in result.message and "Kitchens page" in result.message
+    assert fake.created == [] and new_kitchen.shiprocket_pickup is None
+    assert "House no" in order.courier["error"]               # shown on the order, with Try again
+
+
+def test_long_kitchen_addresses_are_split_into_shiprocket_s_two_lines():
+    line1, line2 = shiprocket_booking._split_address(
+        "No:2 Ground Floor third Street Extension, Ramani Nagar, Krishna Nagar West, Tambaram, Chennai")
+    assert len(line1) <= 80 and line1.endswith("Krishna Nagar West")
+    assert line2 == "Tambaram, Chennai"

@@ -127,6 +127,16 @@ async def pickup_locations() -> list[str]:
     return [str(r["pickup_location"]) for r in rows if isinstance(r, dict) and r.get("pickup_location")]
 
 
+async def add_pickup(payload: dict) -> dict:
+    """POST settings/company/addpickup: a new pickup location (Settings >
+    Pickup Addresses), named payload["pickup_location"]. A refusal - an
+    address Shiprocket will not take, a name already used - raises."""
+    data = await request("POST", "settings/company/addpickup", json=payload)
+    if isinstance(data, dict) and data.get("success") is False:
+        raise ShiprocketError(str(data.get("message") or data)[:300])
+    return data if isinstance(data, dict) else {}
+
+
 async def hyperlocal_rates(*, pickup_postcode: str, delivery_postcode: str,
                            lat_from: float, long_from: float, lat_to: float, long_to: float,
                            weight: float) -> list[dict]:

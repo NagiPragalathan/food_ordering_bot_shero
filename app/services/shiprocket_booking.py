@@ -8,6 +8,11 @@ offers. What came back (Shiprocket's ids, the courier, its tracking number
 and link, the status, any error) is kept on the order's `courier`, so a
 second press never books twice and a failed one can simply be pressed again.
 
+A kitchen without a Shiprocket pickup location gets one on its first Mark
+ready: created on Shiprocket from the kitchen's own address, the cook's
+WhatsApp number, PIN code and map pin (ensure_pickup), and kept on the
+kitchen. The rider goes where the kitchen record says the food is cooked.
+
 Cancel booking cancels the Shiprocket order (and its rider); the order can
 then be marked ready again, which creates a new Shiprocket order. Cancelling
 the order itself (ops API) cancels its Shiprocket booking too.
@@ -102,6 +107,76 @@ def _money(value) -> float:
     return float(Decimal(str(value or 0)).quantize(Decimal("0.01")))
 
 
+# --- the kitchen's pickup location ------------------------------------------------------------
+PICKUP_NAME_LIMIT = 36          # Shiprocket's limit on a pickup location's name
+SKID_RE = re.compile(r"SKID[\s-]*(?:IND[\s-]*)?(\d+)\s*([A-Z])?\b", re.I)
+
+
+def pickup_name(outlet: Outlet) -> str:
+    """The name a kitchen's own pickup location gets on Shiprocket:
+    "DST SKID-1263 A" from "Shero Home Food-Chettinad SKID-IND-1263 A"."""
+    found = SKID_RE.search(outlet.name or "")
+    if found:
+        name = f"DST SKID-{found.group(1)}" + (f" {found.group(2).upper()}" if found.group(2) else "")
+    else:
+        name = f"DST {outlet.code or outlet.name or 'kitchen'}"
+    return name[:PICKUP_NAME_LIMIT].strip()
+
+
+def _split_address(text: str, limit: int = 80) -> tuple[str, str]:
+    """Two address lines, the first ending at a comma where it can."""
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text, ""
+    cut = text.rfind(",", 0, limit)
+    cut = cut if cut > 20 else limit
+    return text[:cut].strip(" ,"), text[cut:].strip(" ,")[:limit]
+
+
+def pickup_payload(outlet: Outlet, name: str) -> dict:
+    """The kitchen as Shiprocket's Add Pickup Location takes it."""
+    line1, line2 = _split_address(", ".join(
+        p for p in (outlet.address_line1, outlet.address_line2) if p))
+    state = (outlet.state or "").strip()
+    return {
+        "pickup_location": name,
+        "name": (outlet.name or "Shero kitchen")[:60],
+        "email": (outlet.kitchen_email or settings.shiprocket_email).strip(),
+        # The cook's own number: the rider calls them, not a head-office line.
+        "phone": _digits(outlet.kitchen_whatsapp or outlet.phone)[-10:],
+        "address": line1,
+        "address_2": line2,
+        "city": (outlet.city or "")[:30],
+        "state": STATES.get(state.upper(), state),
+        "country": "India",
+        "pin_code": str(outlet.postal_code or "").strip(),
+        "lat": outlet.latitude,
+        "long": outlet.longitude,
+    }
+
+
+async def ensure_pickup(session: AsyncSession, outlet: Outlet) -> str:
+    """The kitchen's Shiprocket pickup location, created from its own record
+    the first time it is needed. Raises ShiprocketError when Shiprocket
+    refuses the address."""
+    current = (outlet.shiprocket_pickup or "").strip()
+    if current:
+        return current
+    name = pickup_name(outlet)
+    try:
+        await shiprocket.add_pickup(pickup_payload(outlet, name))
+    except ShiprocketError as exc:
+        # Already there (an earlier press that failed afterwards): use it.
+        if not any(n.strip().lower() == name.lower() for n in await shiprocket.pickup_locations()):
+            raise ShiprocketError(f"could not add this kitchen's pickup address to Shiprocket "
+                                  f"({exc.message}). Check the kitchen's address and number on "
+                                  "the Kitchens page") from exc
+    outlet.shiprocket_pickup = name
+    await session.flush()
+    log.info("shiprocket_pickup_created", outlet=outlet.code, pickup=name)
+    return name
+
+
 def order_payload(order: Order, outlet: Outlet, customer: Customer | None, *,
                   now: datetime | None = None, ref: str | None = None) -> dict:
     """The order as Shiprocket's Create Custom Order takes it, for a
@@ -168,9 +243,8 @@ async def mark_ready(session: AsyncSession, order: Order) -> Result:
     if order.stage not in {str(s) for s in READY_STAGES}:
         return Result(False, f"{number} is {order.stage}: only an order with the kitchen can be marked ready.")
     outlet = await session.get(Outlet, order.outlet_id) if order.outlet_id else None
-    if outlet is None or not (outlet.shiprocket_pickup or "").strip():
-        return Result(False, "Set this kitchen's Shiprocket pickup location on the Kitchens page "
-                             "(the name it has in Shiprocket > Settings > Pickup Addresses).")
+    if outlet is None:
+        return Result(False, f"{number} has no kitchen to collect it from.")
     if order.delivery_latitude is None or order.delivery_longitude is None:
         return Result(False, f"{number} has no map pin for the drop, which Shiprocket needs.")
     customer = await session.get(Customer, order.customer_id)
@@ -179,6 +253,8 @@ async def mark_ready(session: AsyncSession, order: Order) -> Result:
     if order.ready_at is None:
         order.ready_at = now
     try:
+        # A kitchen without one gets its pickup location now, from its own record.
+        await ensure_pickup(session, outlet)
         info = details(order)
         if not info.get("shipment_id"):
             created = await shiprocket.create_order(

@@ -186,7 +186,10 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
   the Shiprocket order and releases its rider; Mark ready can then book
   again (as `<order number>-2` on Shiprocket). Cancelling the order itself
   cancels its Shiprocket booking too. A kitchen with no Shiprocket pickup
-  location shows what to fill in instead of Mark ready. Out for delivery and
+  location gets one on its first Mark ready: added to Shiprocket from the
+  kitchen's own address, the cook's WhatsApp number, PIN code and map pin,
+  named like `DST SKID-1263 A`, and kept on the kitchen. If Shiprocket
+  refuses the address, the reason shows on the order. Out for delivery and
   Delivered stay manual. The rider is paid from the Shiprocket wallet.
   Shiprocket has no test mode: every booking is real.
 - **Delivery charge** (with Shiprocket connected): the customer pays
