@@ -25,6 +25,12 @@ Backups taken before the change (code, `.env`, `app.js`, nginx and systemd
 config, and a full `pg_dump` of the database):
 `/opt/shero-dst/backups/ordering-bot-integration-20261117-074541/`.
 
+**Updated 20 Nov 2026 (version `2026-11-20.1`):** one lead per customer (the
+Welcome lead with no vertical is taken, see *Rules it keeps*). Only
+`dist/integrations/orderingBot/orderingBotService.js` changed. Backup before
+it (the old file, `dist/`, and a full `pg_dump`):
+`/opt/shero-dst/backups/ordering-bot-one-lead-20261120-065350/`.
+
 ## Please add it to the source repository
 
 The server's `dist/` was changed directly, so **the next build from your source
