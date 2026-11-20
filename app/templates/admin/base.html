@@ -4,31 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Dashboard{% endblock %} · {{ tenant.name if tenant is defined else 'Shero' }} Admin</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  {# Our own built stylesheet (tailwind/admin.config.js), served from this
+     server: the page never depends on a CDN to have its styles. #}
+  <link rel="stylesheet" href="{{ static_url('css/admin.css') }}">
   {% include "_brand.html" %}
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            // Shero brand (templates/_brand.html), shared with the ordering pages.
-            ...window.SHERO_COLORS,
-            // Every admin page is built on Tailwind's `stone` greys. Here they
-            // are a teal-tinted grey from the logo, so all pages pick up the
-            // brand from this one place instead of each template changing.
-            stone: { 50:'#F6FAFA', 100:'#EDF4F3', 200:'#DCE8E7', 300:'#C2D4D3', 400:'#8BA3A1',
-                     500:'#627B79', 600:'#475F5D', 700:'#324846', 800:'#203533', 900:'#122523' },
-          },
-          fontFamily: {
-            sans: ['Inter','system-ui','-apple-system','Segoe UI','sans-serif'],
-          },
-          boxShadow: {
-            card: '0 1px 2px rgba(13,31,30,.04), 0 6px 20px -8px rgba(13,31,30,.10)',
-          },
-        },
-      },
-    }
-  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>

@@ -106,11 +106,13 @@ app/
 ├── integrations/   gallabox, zoho, meta, uber, stripe_gw, geo
 ├── services/       business logic + the conversation state machine
 ├── admin/          the dashboard (auth, routes)
-├── templates/      server-rendered admin and ordering pages (_brand.html = colours)
+├── templates/      server-rendered admin and ordering pages
 ├── static/brand/   Shero logo and favicon
+├── static/css/     the pages' built stylesheets (from tailwind/, see below)
 ├── api/routes/     webhooks, payment redirect, ops API, health
 └── workers/        scheduled jobs
 alembic/            migrations
+tailwind/           brand colours + Tailwind configs that build static/css
 docs/               see docs/README.md
 scripts/            check_config, check_gallabox, simulate_chat, setup_zoho_crm
 tests/              287 tests
@@ -129,6 +131,13 @@ tests/              287 tests
 - [google-maps-key-setup.pdf](docs/google-maps-key-setup.pdf) — allowing the live address on the Google Maps key
 
 ## Operational notes
+
+- **Styles are built, never loaded from a CDN.** `app/static/css/admin.css`
+  and `order.css` hold exactly the Tailwind classes the templates use. The
+  Docker image rebuilds them on every deploy; after changing classes in a
+  template, run `cd tailwind && npm ci && npm run build` to refresh the
+  committed copies (used when running locally). Brand colours live in
+  `tailwind/brand.js`.
 
 - **Exactly one instance may run the scheduler** (`ENABLE_SCHEDULER`), or
   every payment reminder goes out twice.

@@ -1,0 +1,13 @@
+{
+  "name": "shero-css",
+  "private": true,
+  "description": "Builds the pages' stylesheets into app/static/css. Run `npm ci && npm run build` here after changing classes in a template.",
+  "scripts": {
+    "build": "npm run build:admin && npm run build:order",
+    "build:admin": "tailwindcss -c admin.config.js -i input.css -o ../app/static/css/admin.css --minify",
+    "build:order": "tailwindcss -c order.config.js -i input.css -o ../app/static/css/order.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}

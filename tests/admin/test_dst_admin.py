@@ -49,8 +49,9 @@ def test_both_businesses_have_tabs_and_each_opens_the_same_section(admin):
 
 def test_every_link_on_a_dst_page_stays_in_dst(admin):
     page = admin.get("/dst/admin/menu").text
-    # url_for links are absolute: http://testserver/dst/admin/...
-    sidebar = re.findall(r'href="(?:https?://[^/"]+)?(/[^"]*admin[^"]*)"',
+    # url_for links are absolute: http://testserver/dst/admin/... (the shared
+    # /static/css/admin.css stylesheet is not a page link).
+    sidebar = re.findall(r'href="(?:https?://[^/"]+)?(/(?!static/)[^"]*admin[^"]*)"',
                          page.split("data-business-tabs")[0])
     assert len(sidebar) > 10 and all(link.startswith("/dst/admin") for link in sidebar)
     assert "DST India Admin" in page

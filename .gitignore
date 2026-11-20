@@ -28,3 +28,6 @@ htmlcov/
 
 # SSH keys (e.g. the AWS server key) must never be committed.
 *.pem
+
+# Tailwind build tools (tailwind/package.json); the built CSS in app/static/css is kept.
+node_modules/
