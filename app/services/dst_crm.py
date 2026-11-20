@@ -14,10 +14,15 @@ ordering-bot endpoint (deploy/dst-crm-endpoint/, POST
 
     lead.stage      each step of the ordering funnel
                       New Enquiry                  -> welcome            NEW
+                                                      (+ a note: the original source,
+                                                       Meta ad or the DST number)
                       Details Captured             -> requirementCapture CONTACTED
                       cart, address, time, link,
                       abandoned or failed payment  -> requirementCapture IN_DISCUSSION
                       Not Serviceable              -> a note on the lead
+                      Mark ready (rider booked)    -> deliveryStatus + a note
+                                                      (courier, AWB, fee, tracking)
+                      rider booking cancelled      -> a note
     order.paid      the paid order, its dishes and the contact
                                                    -> orderConfirmed     WON
     order.status    sent to kitchen                -> orderConfirmed
@@ -29,6 +34,14 @@ ordering-bot endpoint (deploy/dst-crm-endpoint/, POST
                       a template named rnr_1, rnr_2, rnr_final, win_back
                                                    -> that stage
                       No, STOP                     -> lostFeedback       LOST
+
+This follows DST's lead design (DST_CRM_Lead_Architecture_and_WhatsApp_Flows,
+19 Nov 2026) for the Order Now branch: the lead enters at Welcome with its
+source; Requirement Capture comes from the customer's own answers, never from
+a message sent; Order Confirmed from a verified payment; Delivery Status from
+the dispatch (the rider booked) and the delivery steps; RNR from no-response
+follow-ups; Lost from No / STOP. One lead per customer, updated, never a
+second one. A test-payment order is labelled as such.
 
 Each event is written to the outbox (models/crm_outbox.py) in the same
 transaction as the change it reports, and the `crm_outbox` job posts them, in
@@ -194,6 +207,28 @@ def stage_for_nudge(send: NudgeSend, reply: str | None = None) -> str | None:
 
 
 # --- what is sent ---------------------------------------------------------------------------
+TEST_PAYMENT = "TEST - simulated payment, nothing charged"
+
+
+def source_note(customer: Customer) -> str:
+    """Where the lead came from, for its Welcome note (the design's "identify
+    the original source"): a Meta Click-to-WhatsApp ad, or the DST number."""
+    if (customer.lead_source or "").lower().startswith("meta") or customer.ad_id or customer.campaign_id:
+        referral = customer.referral_payload or {}
+        parts = ["Source: Meta ad (Click-to-WhatsApp)"]
+        if customer.ad_id:
+            parts.append(f"ad {customer.ad_id}")
+        if customer.campaign_id:
+            parts.append(f"campaign {customer.campaign_id}")
+        headline = str(referral.get("headline") or "").strip()
+        if headline:
+            parts.append(f'"{headline[:80]}"')
+        text = " · ".join(parts)
+    else:
+        text = "Source: WhatsApp, DST INDIA number"
+    return text + " - Order Now branch (Hungry Now? Order Food)."
+
+
 def _amount(value) -> str:
     return f"{Decimal(str(value or 0)):.2f}"
 
@@ -252,7 +287,10 @@ def order_fields(order: Order, *, kitchen: str | None = None) -> dict:
         "latitude": _float(order.delivery_latitude),
         "longitude": _float(order.delivery_longitude),
         "kitchen": kitchen,
-        "payment_reference": order.stripe_payment_intent_id,
+        # A test-payment order (Settings: Test payments) says so wherever the
+        # CRM shows its payment: nothing was charged.
+        "payment_reference": order.stripe_payment_intent_id or (
+            TEST_PAYMENT if (order.stripe_session_id or "").startswith("mock_") else None),
         "instructions": order.delivery_instructions,
         "refund_amount": _amount(order.refund_amount) if order.refund_amount else None,
         "feedback": order.feedback_rating,
@@ -299,8 +337,38 @@ async def record_new_enquiry(customer: Customer) -> str | None:
         return None
     await _enqueue(async_object_session(customer), customer, "lead.stage", {
         "stage": {"ours": LeadStage.NEW_ENQUIRY.value, "pipeline": WELCOME, "crm": "NEW",
-                  "note": None}}, dedupe=f"lead.new:{customer.id}")
+                  "note": source_note(customer)}}, dedupe=f"lead.new:{customer.id}")
     return WELCOME
+
+
+async def record_dispatch(customer: Customer | None, order: Order, *, booked: bool) -> str | None:
+    """The dispatch event (Mark ready booked a Shiprocket rider): the lead to
+    Delivery Status, with the courier, AWB, fee and tracking link as a note.
+    A cancelled booking is a note only. Delivered and Out for delivery still
+    come from the order's own steps (record_order_stage)."""
+    if not in_use() or customer is None:
+        return None
+    info = dict(order.courier or {})
+    if booked:
+        bits = [f"Shiprocket rider booked for {order.order_number}"]
+        if info.get("courier_name"):
+            bits.append(str(info["courier_name"]))
+        if info.get("awb"):
+            bits.append(f"AWB {info['awb']}")
+        if info.get("fee") is not None:
+            bits.append(f"rider fee ₹{float(info['fee']):.0f}")
+        note = " · ".join(bits) + (f"\nTrack: {info['tracking_url']}" if info.get("tracking_url") else "")
+        stage = {"ours": "Rider booked", "pipeline": DELIVERY, "note": note}
+        key = f"order.dispatch:{order.order_number}:{info.get('order_id') or info.get('shipment_id')}"
+    else:
+        last = (info.get("cancelled") or [{}])[-1]
+        stage = {"ours": "Rider cancelled", "pipeline": None,
+                 "note": f"Shiprocket rider booking cancelled for {order.order_number}"
+                         + (f" (AWB {last['awb']})" if last.get("awb") else "")}
+        key = f"order.dispatch.cancel:{order.order_number}:{last.get('order_id')}"
+    await _enqueue(async_object_session(order) or async_object_session(customer), customer,
+                   "lead.stage", {"stage": stage}, dedupe=key)
+    return stage["pipeline"]
 
 
 async def record_lead_stage(customer: Customer, lead_stage: str | LeadStage) -> str | None:

@@ -360,3 +360,52 @@ def test_the_settings_page_has_the_dst_crm_card_only_on_dst_india(session, monke
     assert checked == ["dst"]
     assert admin.post("/admin/settings/dst-crm/check").status_code == 303   # Shero US: refused
     assert checked == ["dst"]
+
+
+# --- DST's lead design (DST_CRM_Lead_Architecture_and_WhatsApp_Flows, 19 Nov 2026) --------------
+async def test_the_welcome_note_names_the_original_source(session, indian, dst, zoho_off):
+    indian.lead_source, indian.ad_id, indian.campaign_id = "Meta Ad", "120200111", "120200999"
+    indian.referral_payload = {"headline": "Home food in 45 minutes"}
+    await dst_crm.record_new_enquiry(indian)
+    (row,) = await outbox(session)
+    assert row.payload["stage"]["pipeline"] == "welcome"
+    assert row.payload["stage"]["note"] == ('Source: Meta ad (Click-to-WhatsApp) · ad 120200111 · '
+                                           'campaign 120200999 · "Home food in 45 minutes" - '
+                                           'Order Now branch (Hungry Now? Order Food).')
+
+
+async def test_a_plain_whatsapp_lead_says_so(session, indian, dst, zoho_off):
+    indian.lead_source = "WhatsApp"
+    await dst_crm.record_new_enquiry(indian)
+    (row,) = await outbox(session)
+    assert row.payload["stage"]["note"].startswith("Source: WhatsApp, DST INDIA number")
+
+
+async def test_the_rider_booked_is_the_dispatch_that_moves_the_lead_to_delivery_status(
+        session, indian, paid_order, dst, zoho_off):
+    paid_order.stage = OrderStage.SENT_TO_KITCHEN
+    paid_order.courier = {"assigned": True, "order_id": "9001", "shipment_id": "7001", "awb": "SRQ123",
+                          "courier_name": "Shiprocket Quick", "fee": 65.0,
+                          "tracking_url": "https://shiprocket.co/tracking/SRQ123"}
+    assert await dst_crm.record_dispatch(indian, paid_order, booked=True) == "deliveryStatus"
+    await dst_crm.record_dispatch(indian, paid_order, booked=True)          # a replay: once
+    (row,) = await outbox(session)
+    stage = row.payload["stage"]
+    assert row.event == "lead.stage" and stage["pipeline"] == "deliveryStatus"
+    assert stage["note"] == ("Shiprocket rider booked for DST-261117-K4T9P · Shiprocket Quick · "
+                             "AWB SRQ123 · rider fee ₹65\nTrack: https://shiprocket.co/tracking/SRQ123")
+
+
+async def test_a_cancelled_rider_is_a_note_only(session, indian, paid_order, dst, zoho_off):
+    paid_order.courier = {"assigned": False, "cancelled": [{"order_id": "9001", "awb": "SRQ123"}]}
+    assert await dst_crm.record_dispatch(indian, paid_order, booked=False) is None
+    (row,) = await outbox(session)
+    assert row.payload["stage"]["pipeline"] is None
+    assert row.payload["stage"]["note"] == "Shiprocket rider booking cancelled for DST-261117-K4T9P (AWB SRQ123)"
+
+
+async def test_a_test_payment_order_says_nothing_was_charged(session, indian, paid_order, dst, zoho_off):
+    paid_order.stripe_payment_intent_id, paid_order.stripe_session_id = None, "mock_DST-261117-K4T9P"
+    await dst_crm.record_paid_order(indian, paid_order)
+    (row,) = await outbox(session)
+    assert row.payload["order"]["payment_reference"] == "TEST - simulated payment, nothing charged"

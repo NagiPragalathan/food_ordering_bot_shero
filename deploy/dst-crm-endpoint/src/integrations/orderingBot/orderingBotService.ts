@@ -37,7 +37,7 @@ import { prisma } from "../../config/prisma";
 
 type Tx = Prisma.TransactionClient;
 
-export const INTEGRATION_VERSION = "2026-11-17.1";
+export const INTEGRATION_VERSION = "2026-11-20.1";
 export const VERTICAL_KEY = "orderNow";
 const VERTICAL_LABEL = "Order Now";
 const VERTICAL_SORT_ORDER = 5;
@@ -338,24 +338,28 @@ async function nextLeadCode(tx: Tx): Promise<string> {
   return `${prefix}${String(lastNumber + 1).padStart(4, "0")}`;
 }
 
-/** The customer's Order Now lead: by the bot's customer id, else an unclaimed
- * Order Now lead with the same number, else a new one. */
+/** The customer's Order Now lead: by the bot's customer id; else an unclaimed
+ * lead with the same number that is Order Now or has no vertical yet (the
+ * Welcome lead the CRM's own WhatsApp webhook made: DST's lead design keeps
+ * ONE lead and sets its vertical on the customer's choice, here Order Now);
+ * else a new one. A lead in another vertical is never taken. */
 async function leadFor(tx: Tx, setup: Setup, c: BotCustomer, at: Date, applied: string[]): Promise<Lead> {
   const phone = displayPhone(c.phone);
   let lead = await tx.lead.findUnique({
     where: { externalSource_externalId: { externalSource: EXTERNAL_SOURCE, externalId: c.id } },
   });
   if (!lead) {
-    const unclaimed = await tx.lead.findFirst({
-      where: { verticalId: setup.verticalId, externalSource: null, phone: { endsWith: lastTenDigits(c.phone) } },
-      orderBy: { updatedAt: "desc" },
-    });
+    // An Order Now lead first, then the most recent Welcome lead with no vertical.
+    const samePhone = { externalSource: null, phone: { endsWith: lastTenDigits(c.phone) } };
+    const unclaimed =
+      (await tx.lead.findFirst({ where: { ...samePhone, verticalId: setup.verticalId }, orderBy: { updatedAt: "desc" } })) ??
+      (await tx.lead.findFirst({ where: { ...samePhone, verticalId: null }, orderBy: { updatedAt: "desc" } }));
     if (unclaimed) {
       lead = await tx.lead.update({
         where: { id: unclaimed.id },
-        data: { externalSource: EXTERNAL_SOURCE, externalId: c.id },
+        data: { externalSource: EXTERNAL_SOURCE, externalId: c.id, verticalId: setup.verticalId },
       });
-      applied.push("lead linked");
+      applied.push(unclaimed.verticalId ? "lead linked" : "lead linked (vertical set to Order Now)");
     }
   }
   if (!lead) {

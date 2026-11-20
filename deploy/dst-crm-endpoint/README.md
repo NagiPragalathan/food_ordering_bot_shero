@@ -83,10 +83,15 @@ an earlier one never arrived.
 
 ### Rules it keeps
 
-- **Its own leads.** Each ordering customer has one lead in the new `orderNow`
-  ("Order Now") vertical, found again by `externalSource = ORDERING_BOT` and
-  `externalId` = the bot's customer id. A lead in another vertical (a party
-  order, a subscription) is never touched.
+- **One lead per customer** (DST's lead design, 19 Nov 2026, "update the SAME
+  lead"). Each ordering customer has one lead in the `orderNow` ("Order Now")
+  vertical, found again by `externalSource = ORDERING_BOT` and `externalId` =
+  the bot's customer id. The first time, an unclaimed lead with the same
+  number is taken instead of making a new one: an Order Now lead, else the
+  **Welcome lead with no vertical yet** that `gallaboxWebhookService` made
+  when they first messaged, whose vertical becomes Order Now (as a button
+  reply sets Party / Subscription / Sweets). A lead in another vertical (a
+  party order, a subscription) is never touched. *(Version 2026-11-20.1.)*
 - **Nothing typed by the team is overwritten.** Name, email, location,
   pincode are only filled in when empty (a name that is just a phone number is
   replaced). A lead marked `WON` stays `WON`.
@@ -103,11 +108,13 @@ an earlier one never arrived.
 
 | Bot step | Pipeline stage | CRM stage |
 |---|---|---|
-| First message | `welcome` | NEW |
-| Name / email given | `requirementCapture` | CONTACTED |
+| First message | `welcome` (+ a note with the original source: Meta ad with ad / campaign, or the DST number) | NEW |
+| Name / email given (the customer's own answer) | `requirementCapture` | CONTACTED |
 | Cart, address, time, payment link, abandoned or failed payment | `requirementCapture` | IN_DISCUSSION |
-| Paid | `orderConfirmed` | WON |
+| Paid (verified by Razorpay; a test payment says "TEST - simulated payment, nothing charged") | `orderConfirmed` | WON |
 | Sent to kitchen | `orderConfirmed` | |
+| Mark ready: Shiprocket rider booked (the dispatch) | `deliveryStatus` (+ a note: courier, AWB, fee, tracking link) | |
+| Rider booking cancelled | (a note) | |
 | Out for delivery, delivered | `deliveryStatus` | |
 | No-response follow-up 1 / 2 / 3+ | `rnr1` / `rnr2` / `rnrFinal` | |
 | Template `dst_rnr_1`, `dst_rnr_2`, `dst_rnr_final`, `dst_win_back` | that stage | |

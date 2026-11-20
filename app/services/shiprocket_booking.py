@@ -36,6 +36,7 @@ from app.core.logging import get_logger
 from app.db.models import Customer, Order, OrderStage, Outlet, PaymentStatus
 from app.integrations.shiprocket import client as shiprocket
 from app.integrations.shiprocket.client import ShiprocketError
+from app.services import dst_crm
 from app.services.slots import outlet_tz
 
 log = get_logger(__name__)
@@ -308,6 +309,8 @@ async def mark_ready(session: AsyncSession, order: Order) -> Result:
           status="Rider assigned" if awb else "Assigning a rider",
           tracking_url=f"https://shiprocket.co/tracking/{awb}" if awb else None)
     await session.flush()
+    # The dispatch event: DST's CRM moves the lead to Delivery Status.
+    await dst_crm.record_dispatch(customer, order, booked=True)
     log.info("shiprocket_rider_booked", order_number=number, awb=awb,
              courier=details(order).get("courier_name"))
     who = details(order).get("courier_name")
@@ -340,6 +343,7 @@ async def cancel_booking(session: AsyncSession, order: Order) -> Result:
           courier_name=None, fee=None, tracking_url=None, rider=None, eta=None, error=None,
           status="Cancelled on Shiprocket", cancelled_at=now)
     await session.flush()
+    await dst_crm.record_dispatch(await session.get(Customer, order.customer_id), order, booked=False)
     log.info("shiprocket_booking_cancelled", order_number=number, order_id=history[-1]["order_id"],
              answer=str(answer.get("message") or "")[:120])
     return Result(True, f"{number}: the Shiprocket booking is cancelled"
