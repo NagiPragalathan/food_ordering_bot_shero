@@ -1,78 +1,239 @@
 {% import "admin/_macros.html" as ui %}
 {% import "admin/sft/_bits.html" as sft %}
-{% set field = 'mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20' %}
+{# The same look and flow as the dashboard's Bot replies page: a status
+   banner, "who" cards with a whitelist, trigger keywords, a checker aside,
+   and the bot's wording below. #}
 
-<div class="grid gap-5 lg:grid-cols-2">
-  {# --- Who SFT answers, and what starts it ------------------------------------ #}
-  <form method="post" action="{{ url_for('admin_sft_replies') }}" class="space-y-5" data-sft-who>
-    {% call ui.card('Who SFT answers') %}
-      <div class="space-y-2">
-        {% for key, label in modes.items() %}
-        <label class="flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50/60 {{ 'border-stone-200' }}">
-          <input type="radio" name="mode" value="{{ key }}" {% if cfg.mode == key %}checked{% endif %} class="mt-0.5 h-4 w-4 text-brand-600 focus:ring-brand-500">
-          <span><b class="text-stone-900">{{ label.split(':')[0] }}</b><span class="block text-xs text-stone-500">{{ label.split(':', 1)[1] | trim }}</span></span>
-        </label>
-        {% endfor %}
-      </div>
-      <div class="mt-4">{{ sft.area('Test numbers', 'test_numbers', cfg.test_numbers | join(', '), 'With the country code, comma-separated. In Test mode only these get SFT; everyone else gets the ordering bot.', 2) }}</div>
-    {% endcall %}
+<div class="grid max-w-5xl gap-5 lg:grid-cols-3">
 
-    {% call ui.card('What starts SFT', 'On Shero US\'s shared number every other message stays with the ordering bot') %}
-      <div class="space-y-4">
-        {{ sft.area('Keywords', 'keywords', cfg.keywords | join(', '), 'A message with one of these (whole words) starts the journey. The brochure tells people to reply SFT.', 2) }}
-        {{ sft.area('Source codes', 'source_codes', cfg.source_codes.items() | map('join', '=') | join('\n'), 'code=Source, one per line. "SFT IG" (or a wa.me link with that text) files the lead under Instagram. Ads are filed as Meta Ad.', 5) }}
-        {{ sft.area('SFT ad ids', 'ad_ids', cfg.ad_ids | join(', '), 'Click-to-WhatsApp ads whose chats start the journey (an ad whose headline says SFT does anyway).', 2) }}
-        {{ sft.field('SFT\'s own WhatsApp channel id (Gallabox)', 'channel_id', cfg.channel_id, 'Empty: SFT runs on Shero US\'s number, started by the keywords, an offer code, an SFT ad or an SFT button.') }}
-        <input type="hidden" name="has_ask_name" value="1">
-        {{ sft.check('Ask for their name before the welcome', 'ask_name', cfg.ask_name, 'Off: use the name on their WhatsApp profile.') }}
-        <p class="text-[11px] text-stone-500">Offer codes start SFT too: see <a class="font-semibold text-brand-700" href="{{ url('offers') }}">Offers</a>.</p>
+  <!-- Current status -->
+  <section class="lg:col-span-3">
+    {% if cfg.mode == 'off' %}
+    <div data-sft-off class="flex items-center gap-4 rounded-2xl border border-stone-300 bg-stone-100 px-5 py-4">
+      <span class="flex h-3 w-3 rounded-full bg-stone-400"></span>
+      <div>
+        <p class="text-sm font-semibold text-stone-900">Off: SFT answers nobody</p>
+        <p class="text-xs text-stone-600">The ordering bot and your team handle every message as before. Whitelist
+          numbers to test SFT, then Everyone to go live.</p>
       </div>
-    {% endcall %}
-    <div class="flex justify-end"><button class="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">Save who SFT answers</button></div>
+    </div>
+    {% elif cfg.mode == 'live' %}
+    <div class="flex items-center gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+      <span class="relative flex h-3 w-3"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60"></span><span class="relative inline-flex h-3 w-3 rounded-full bg-emerald-500"></span></span>
+      <div>
+        <p class="text-sm font-semibold text-emerald-900">Live: replying to everyone who asks for SFT</p>
+        <p class="text-xs text-emerald-800/80">A chat starts only on the trigger keywords below, an offer code, an SFT ad
+          or an SFT button. Every other message stays with the ordering bot.</p>
+      </div>
+    </div>
+    {% else %}
+    <div class="flex items-center gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+      <span class="flex h-3 w-3 rounded-full bg-amber-500"></span>
+      <div>
+        <p class="text-sm font-semibold text-amber-900">Test mode: replying only to {{ cfg.test_numbers | length }} whitelisted number{{ '' if cfg.test_numbers | length == 1 else 's' }}</p>
+        <p class="text-xs text-amber-800/80">Customers are not answered by SFT. Switch to Everyone to go live.</p>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- Who SFT replies to -->
+  <form id="sft-who-form" method="post" action="{{ url_for('admin_sft_replies') }}"
+        class="overflow-hidden rounded-xl border border-stone-200 bg-white lg:col-span-2">
+    <div class="space-y-3 p-5">
+      <h2 class="text-sm font-semibold text-stone-900">Who should SFT reply to?</h2>
+      {% for value, title, note in [
+        ('live', 'Everyone', 'Every customer who asks for SFT gets the course journey. Use this when live.'),
+        ('test', 'Only whitelisted numbers', 'Only the numbers below get SFT. Use this for testing.'),
+        ('off', 'Nobody (off)', 'SFT answers no one; the ordering bot and your team handle every message.'),
+      ] %}
+      <label data-mode-card class="flex cursor-pointer gap-3 rounded-xl border p-4 transition
+                    {{ 'border-brand-500 bg-brand-50 ring-1 ring-brand-500' if cfg.mode == value else 'border-stone-200 hover:border-stone-300' }}">
+        <input type="radio" name="mode" value="{{ value }}" {% if cfg.mode == value %}checked{% endif %}
+               class="mt-0.5 text-brand-600 focus:ring-brand-500">
+        <span>
+          <span class="block text-sm font-semibold text-stone-900">{{ title }}</span>
+          <span class="block text-xs text-stone-500">{{ note }}</span>
+        </span>
+      </label>
+      {% endfor %}
+
+      <div id="sft-whitelist" class="pt-3 transition {{ 'opacity-50' if cfg.mode != 'test' else '' }}">
+        <input type="hidden" name="test_numbers" value="">
+        <div class="mb-2 flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-stone-900">Whitelisted numbers</h3>
+          <span id="sft-wl-count" class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600"></span>
+        </div>
+        <p id="sft-wl-note" class="mb-2 text-[11px] text-stone-400 {{ '' if cfg.mode != 'test' else 'hidden' }}">
+          Not used in this mode. Kept for when you switch back to testing.
+        </p>
+        <div id="sft-wl-rows" class="space-y-2">
+          {% for n in cfg.test_numbers %}
+          <div data-row class="grid grid-cols-[1fr_2rem] items-center gap-2">
+            <input name="test_numbers" value="{{ n }}" inputmode="tel" placeholder="15551230001"
+                   class="rounded-lg border border-stone-300 px-3 py-2 font-mono text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            <button type="button" data-remove title="Remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-600">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          {% endfor %}
+        </div>
+        <template id="sft-wl-template">
+          <div data-row class="grid grid-cols-[1fr_2rem] items-center gap-2">
+            <input name="test_numbers" inputmode="tel" placeholder="15551230001"
+                   class="rounded-lg border border-stone-300 px-3 py-2 font-mono text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            <button type="button" data-remove title="Remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-600">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+        </template>
+        <button type="button" id="sft-wl-add"
+                class="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 px-3 py-2 text-xs font-semibold text-stone-600 hover:border-brand-500 hover:text-brand-700">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Add number
+        </button>
+        <p class="mt-2 text-[11px] text-stone-400">Full number with country code, e.g. 1 for the US. Spaces, + and dashes are fine.</p>
+      </div>
+    </div>
+    <div class="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-5 py-3">
+      <span id="sft-who-unsaved" class="hidden text-xs font-medium text-amber-700">Unsaved changes</span>
+      <button class="ml-auto rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save</button>
+    </div>
   </form>
 
-  {# --- Check a message -------------------------------------------------------- #}
-  <div class="space-y-5">
-    {% call ui.card('Check a message', 'Would SFT or the ordering bot answer it, and why?') %}
-      <form method="get" class="space-y-3" data-sft-check>
-        <input type="hidden" name="tab" value="replies">
-        <label class="block text-xs font-medium text-stone-600">WhatsApp number (optional)
-          <input name="number" value="{{ check_number }}" placeholder="15551230001" class="{{ field }}"></label>
-        <label class="block text-xs font-medium text-stone-600">Message
-          <input name="message" value="{{ check_text }}" required placeholder="Hi, I saw SFT on Instagram" class="{{ field }}"></label>
-        <button class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-700">Check</button>
-      </form>
-      {% if check %}{% set taken, why = check %}
-      <div class="mt-4 rounded-xl border px-4 py-3 text-sm {{ 'border-emerald-200 bg-emerald-50 text-emerald-900' if taken else 'border-stone-200 bg-stone-50 text-stone-700' }}" data-sft-check-result>
-        <b>{{ 'SFT answers it.' if taken else 'The ordering bot answers it.' }}</b>
-        <ul class="mt-1 list-disc space-y-1 pl-4 text-xs">{% for line in why %}<li>{{ line }}</li>{% endfor %}</ul>
-      </div>
-      {% endif %}
-    {% endcall %}
+  <!-- Message checker -->
+  <aside class="h-fit rounded-xl border border-stone-200 bg-white p-5">
+    <h2 class="text-sm font-semibold text-stone-900">Check a message</h2>
+    <p class="mt-0.5 text-xs text-stone-500">Would SFT or the ordering bot answer it right now?</p>
+    <form method="get" class="mt-3 space-y-2" data-sft-check>
+      <input type="hidden" name="tab" value="replies">
+      <input name="number" value="{{ check_number }}" inputmode="tel" placeholder="Number (optional)"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      <input name="message" value="{{ check_text }}" required placeholder="e.g. Hi, I saw SFT on Instagram"
+             class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      <button class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50">Check</button>
+    </form>
+    {% if check %}{% set taken, why = check %}
+    <div class="mt-3 rounded-lg px-3 py-2 text-xs {{ 'bg-emerald-50 text-emerald-800' if taken else 'bg-stone-100 text-stone-700' }}" data-sft-check-result>
+      <b>{{ 'SFT answers it.' if taken else 'The ordering bot answers it.' }}</b>
+      <ul class="mt-1 list-disc space-y-1 pl-4">{% for line in why %}<li>{{ line }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </aside>
 
-    {% call ui.card('Placeholders', 'Filled in for each lead') %}
-      <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        {% for name, help in field_help.items() %}<dt class="font-mono text-brand-700">{{ '{' ~ name ~ '}' }}</dt><dd class="text-stone-600">{{ help }}</dd>{% endfor %}
-      </dl>
-      <p class="mt-3 text-[11px] text-stone-500">WhatsApp formatting works: *bold*, _italic_. Each message lists the placeholders it can use; the buttons under a message stay as they are, since the bot reads the lead's taps by them.</p>
-    {% endcall %}
-  </div>
+  <!-- Trigger keywords -->
+  <form id="sft-kw-form" method="post" action="{{ url_for('admin_sft_replies') }}"
+        class="overflow-hidden rounded-xl border border-stone-200 bg-white lg:col-span-2">
+    <div class="space-y-4 p-5">
+      <div>
+        <h2 class="text-sm font-semibold text-stone-900">Trigger keywords</h2>
+        <p class="mt-0.5 text-xs text-stone-500">On the shared Shero US number a chat only starts SFT when the message
+          matches one of these (whole words, capitals ignored). Everything else stays with the ordering bot.</p>
+      </div>
+      <div class="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">
+        <b>Keywords only.</b> SFT starts on {{ cfg.keywords | length }} trigger keyword{{ '' if cfg.keywords | length == 1 else 's' }},
+        an offer code (<a class="font-semibold underline" href="{{ url('offers') }}">Offers</a>), a listed ad, or an SFT button.
+      </div>
+      <div>
+        <div class="mb-2 flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-stone-900">Keywords</h3>
+          <span id="sft-kw-count" class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600"></span>
+        </div>
+        <div id="sft-kw-rows" class="space-y-2">
+          {% for k in cfg.keywords %}
+          <div data-row class="grid grid-cols-[1fr_2rem] items-center gap-2">
+            <input name="keywords" value="{{ k }}" maxlength="60" placeholder="e.g. shero food training"
+                   class="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            <button type="button" data-remove title="Remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-600">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          {% endfor %}
+        </div>
+        <template id="sft-kw-template">
+          <div data-row class="grid grid-cols-[1fr_2rem] items-center gap-2">
+            <input name="keywords" maxlength="60" placeholder="e.g. shero food training"
+                   class="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+            <button type="button" data-remove title="Remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-600">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+        </template>
+        <button type="button" id="sft-kw-add"
+                class="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 px-3 py-2 text-xs font-semibold text-stone-600 hover:border-brand-500 hover:text-brand-700">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Add keyword
+        </button>
+        <p class="mt-2 text-[11px] text-stone-400">The brochure and follow-ups tell people to reply <b>SFT</b>, so keep that one.</p>
+      </div>
+    </div>
+    <div class="flex border-t border-stone-200 bg-stone-50 px-5 py-3">
+      <button class="ml-auto rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save</button>
+    </div>
+  </form>
+
+  <!-- New leads' details -->
+  <form method="post" action="{{ url_for('admin_sft_replies') }}" class="h-fit overflow-hidden rounded-xl border border-stone-200 bg-white">
+    <div class="space-y-3 p-5">
+      <h2 class="text-sm font-semibold text-stone-900">New leads' details</h2>
+      <input type="hidden" name="has_ask_name" value="1">
+      <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-stone-200 p-3">
+        <input type="checkbox" name="ask_name" {% if cfg.ask_name %}checked{% endif %} class="mt-0.5 h-4 w-4 accent-brand-600">
+        <span>
+          <span class="block text-sm font-medium text-stone-800">Ask for their name first</span>
+          <span class="block text-xs text-stone-500">{% if cfg.ask_name %}On: SFT asks their name, then welcomes them by it.{% else %}Off: the name on their WhatsApp profile is used.{% endif %}</span>
+        </span>
+      </label>
+    </div>
+    <div class="flex border-t border-stone-100 bg-stone-50 px-5 py-3">
+      <button class="ml-auto rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save</button>
+    </div>
+  </form>
+
+  <!-- Where leads come from, and SFT's own number -->
+  <form method="post" action="{{ url_for('admin_sft_replies') }}"
+        class="overflow-hidden rounded-xl border border-stone-200 bg-white lg:col-span-2">
+    <div class="space-y-4 p-5">
+      <div>
+        <h2 class="text-sm font-semibold text-stone-900">Sources and ads <span class="ml-1 text-xs font-normal text-stone-400">(optional)</span></h2>
+        <p class="mt-0.5 text-xs text-stone-500">For the analytics and Zoho's Lead Source ("SFT - Instagram"…).</p>
+      </div>
+      {{ sft.area('Source codes', 'source_codes', cfg.source_codes.items() | map('join', '=') | join('\n'), 'code=Source, one per line. A lead who writes "SFT IG" (or taps a wa.me link with that text) is filed under Instagram. Ads are filed as Meta Ad.', 5) }}
+      {{ sft.area('SFT ad ids', 'ad_ids', cfg.ad_ids | join(', '), 'Click-to-WhatsApp ads whose chats start the journey (an ad whose headline says SFT does anyway).', 2) }}
+      {{ sft.field('SFT\'s own WhatsApp channel id (Gallabox)', 'channel_id', cfg.channel_id, 'Empty: SFT runs on Shero US\'s shared number with the keywords above. Set: every message on that number is SFT\'s, and the shared number is left alone.') }}
+    </div>
+    <div class="flex border-t border-stone-200 bg-stone-50 px-5 py-3">
+      <button class="ml-auto rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save</button>
+    </div>
+  </form>
+
+  <!-- Placeholders help -->
+  <aside class="h-fit rounded-xl border border-stone-200 bg-white p-5">
+    <h2 class="text-sm font-semibold text-stone-900">Placeholders</h2>
+    <p class="mt-0.5 text-xs text-stone-500">Filled in for each lead in the messages below.</p>
+    <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+      {% for name, help in field_help.items() %}<dt class="font-mono text-brand-700">{{ '{' ~ name ~ '}' }}</dt><dd class="text-stone-600">{{ help }}</dd>{% endfor %}
+    </dl>
+    <p class="mt-3 text-[11px] text-stone-500">WhatsApp formatting works: *bold*, _italic_. The buttons under a message
+      keep their words, since the bot reads the lead's taps by them.</p>
+  </aside>
 </div>
 
 {# --- What the bot says ------------------------------------------------------------ #}
-<section class="mt-6" data-sft-texts>
+<section class="mt-8 max-w-5xl" data-sft-texts>
   <div class="mb-3 flex flex-wrap items-end justify-between gap-2">
     <div>
       <h2 class="text-base font-semibold text-stone-900">What the bot says</h2>
-      <p class="text-xs text-stone-500">Every message of the journey, in order. Edit one and the bot says it from the next message; "Default" puts the original back. {{ edited | length }} edited.</p>
+      <p class="text-xs text-stone-500">Every message of the journey, in order. Click one to edit it; "Default" puts the
+        original back. {{ edited | length }} edited.</p>
     </div>
     <a href="{{ url('journey') }}" class="text-xs font-semibold text-brand-700">See them in the journey →</a>
   </div>
   {% for group, specs in text_groups.items() %}
   <h3 class="mb-2 mt-5 text-xs font-semibold uppercase tracking-wide text-stone-500">{{ group }}</h3>
-  <div class="grid gap-3 xl:grid-cols-2">
+  <div class="grid gap-3 lg:grid-cols-2">
     {% for spec in specs %}{% set current = cfg.texts.get(spec.key, spec.default) %}
-    <details id="text-{{ spec.key }}" class="group rounded-2xl border bg-white shadow-card open:ring-2 open:ring-brand-500/30 {{ 'border-brand-300' if spec.key in edited else 'border-stone-200/70' }}">
+    <details id="text-{{ spec.key }}" class="group rounded-xl border bg-white open:ring-2 open:ring-brand-500/30 {{ 'border-brand-300' if spec.key in edited else 'border-stone-200' }}">
       <summary class="flex cursor-pointer list-none items-start gap-3 px-4 py-3">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
@@ -101,9 +262,77 @@
   </div>
   {% endfor %}
 </section>
+
 <script>
+(function () {
+  // The same behaviour as the dashboard's Bot replies page.
+  function rowEditor(formId, rowsId, tplId, addId, countId, word) {
+    var form = document.getElementById(formId), rows = document.getElementById(rowsId);
+    var tpl = document.getElementById(tplId);
+    function count() {
+      var n = Array.prototype.filter.call(rows.querySelectorAll('input'), function (i) { return i.value.trim(); }).length;
+      var el = document.getElementById(countId);
+      if (el) el.textContent = n + ' ' + word + (n === 1 ? '' : 's');
+      return n;
+    }
+    document.getElementById(addId).addEventListener('click', function () {
+      var row = tpl.content.firstElementChild.cloneNode(true);
+      rows.appendChild(row); row.querySelector('input').focus(); count(); mark(form);
+    });
+    rows.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-remove]');
+      if (!btn) return;
+      btn.closest('[data-row]').remove(); count(); mark(form);
+    });
+    form.addEventListener('input', count);
+    count();
+    return count;
+  }
+  function mark(form) {
+    var note = form.querySelector('#sft-who-unsaved');
+    if (note) note.classList.remove('hidden');
+  }
+
+  var who = document.getElementById('sft-who-form');
+  var savedMode = {{ cfg.mode | tojson }};
+  var wlCount = rowEditor('sft-who-form', 'sft-wl-rows', 'sft-wl-template', 'sft-wl-add', 'sft-wl-count', 'number');
+  rowEditor('sft-kw-form', 'sft-kw-rows', 'sft-kw-template', 'sft-kw-add', 'sft-kw-count', 'keyword');
+
+  function paintModes() {
+    var mode = (who.querySelector('input[name=mode]:checked') || {}).value;
+    who.querySelectorAll('[data-mode-card]').forEach(function (card) {
+      var on = card.querySelector('input').checked;
+      card.classList.toggle('border-brand-500', on); card.classList.toggle('bg-brand-50', on);
+      card.classList.toggle('ring-1', on); card.classList.toggle('ring-brand-500', on);
+      card.classList.toggle('border-stone-200', !on);
+    });
+    document.getElementById('sft-whitelist').classList.toggle('opacity-50', mode !== 'test');
+    document.getElementById('sft-wl-note').classList.toggle('hidden', mode === 'test');
+  }
+  who.addEventListener('change', function () { paintModes(); mark(who); });
+  who.addEventListener('input', function () { mark(who); });
+  who.addEventListener('submit', function (e) {
+    var mode = (who.querySelector('input[name=mode]:checked') || {}).value;
+    if (mode === 'test' && !wlCount()) {
+      e.preventDefault();
+      alert('Add at least one WhatsApp number, or choose Everyone.');
+      return;
+    }
+    if (mode === 'live' && savedMode !== 'live' &&
+        !confirm('Go live? Everyone who sends an SFT keyword, code or ad will get the course journey.')) {
+      e.preventDefault();
+    }
+  });
+  document.getElementById('sft-kw-form').addEventListener('submit', function (e) {
+    var any = Array.prototype.some.call(
+      document.getElementById('sft-kw-rows').querySelectorAll('input'),
+      function (i) { return i.value.trim(); });
+    if (!any) { e.preventDefault(); alert('Keep at least one keyword, or nobody can start the journey.'); }
+  });
+
   // Opened from a link to one message (…#text-welcome): open it.
-  (function () { var el = null;
-    try { el = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1))); } catch (e) {}
-    if (el && el.tagName === 'DETAILS') { el.open = true; el.scrollIntoView({block: 'center'}); } })();
+  var el = null;
+  try { el = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1))); } catch (err) {}
+  if (el && el.tagName === 'DETAILS') { el.open = true; el.scrollIntoView({block: 'center'}); }
+})();
 </script>

@@ -361,6 +361,10 @@ async def _template_rows(cfg) -> list[dict]:
 
 
 # --- Offers --------------------------------------------------------------------------
+OFFER_STATUSES = {"running": "Running", "scheduled": "Scheduled", "used_up": "Used up",
+                  "ended": "Ended", "off": "Off"}
+
+
 async def _offers(request, session, cfg, rng, page, url) -> dict:
     rows = (await session.execute(select(SftOffer).order_by(SftOffer.created_at.desc())))\
         .scalars().all()
@@ -378,16 +382,31 @@ async def _offers(request, session, cfg, rng, page, url) -> dict:
                            "status": offers.status(offer, cfg, used),
                            "price": offers.price_after(Decimal(cfg.course_fee), offer),
                            "describe": offers.describe(offer, cfg)}
-    editing = None
+    totals = {"running": 0, "enrolled": 0, "discount": Decimal(0), "revenue": Decimal(0)}
+    counts: dict[str, int] = {}
+    for st in stats.values():
+        st["status_key"] = st["status"][0].lower().replace(" ", "_")
+        counts[st["status_key"]] = counts.get(st["status_key"], 0) + 1
+        totals["running"] += int(st["status_key"] == "running")
+        totals["enrolled"] += st["paid"]
+        totals["discount"] += st["discount"]
+        totals["revenue"] += st["revenue"]
     wanted = request.query_params.get("offer", "")
-    if wanted:
+    editing, creating = None, wanted == "new"
+    if wanted and not creating:
         try:
             editing = await session.get(SftOffer, uuid.UUID(wanted))
         except ValueError:
             editing = None
+        creating = editing is None
+    selected = request.query_params.get("status", "")
+    shown = rows if selected not in OFFER_STATUSES else \
+        [o for o in rows if stats[o.id]["status_key"] == selected]
     source_names = sorted({*cfg.source_codes.values(), "Meta Ad", "WhatsApp"})
-    return {"offers": rows, "offer_stats": stats, "editing": editing, "kinds": offers.KINDS,
-            "source_names": source_names, "today": offers.today(cfg)}
+    return {"offers": shown, "all_offers": rows, "offer_stats": stats, "editing": editing,
+            "creating": creating, "kinds": offers.KINDS, "source_names": source_names,
+            "today": offers.today(cfg), "offer_totals": totals, "offer_counts": counts,
+            "offer_statuses": OFFER_STATUSES, "selected_status": selected}
 
 
 # --- Bot replies -------------------------------------------------------------------
@@ -633,7 +652,12 @@ async def save_replies(request: Request, session: AsyncSession = Depends(get_ses
     form = await request.form()
     cfg = await config.load(session, fresh=True)
     data = cfg.model_dump(mode="json")
-    for name in ("mode", "test_numbers", "channel_id", "keywords", "ad_ids", "source_codes"):
+    # The whitelist and keywords come as one row per input (the dashboard's
+    # Bot replies look); a single comma-separated field works too.
+    for name in ("test_numbers", "keywords"):
+        if name in form:
+            data[name] = ", ".join(str(v) for v in form.getlist(name))
+    for name in ("mode", "channel_id", "ad_ids", "source_codes"):
         if name in form:
             data[name] = str(form.get(name) or "").strip()
     if "has_ask_name" in form:
@@ -810,7 +834,7 @@ async def save_offer(request: Request, session: AsyncSession = Depends(get_sessi
     form = await request.form()
     cfg = await config.load(session, fresh=True)
     offer_id = str(form.get("offer_id") or "")
-    back = _url(request, "offers", offer=offer_id)
+    back = _url(request, "offers", offer=offer_id or "new")
     try:
         values = _offer_from(form, cfg)
     except SftConfigError as exc:
@@ -857,6 +881,22 @@ async def offer_action(offer_id: str, action: str, request: Request,
     if action == "toggle":
         offer.active = not offer.active
         return redirect(back, flash=("success", f"{name} is {'on' if offer.active else 'off'}."))
+    if action == "duplicate":
+        copy = SftOffer(title=f"{offer.title} (copy)"[:80], code=None, kind=offer.kind,
+                        value=offer.value, starts_on=offer.starts_on, ends_on=offer.ends_on,
+                        usage_limit=offer.usage_limit, sources=list(offer.sources or []),
+                        active=False, note=offer.note)
+        if offer.code:
+            taken = {str(o or "").upper() for o in (await session.execute(
+                select(SftOffer.code))).scalars()}
+            for n in range(2, 100):
+                if f"{offer.code}{n}".upper() not in taken:
+                    copy.code = f"{offer.code}{n}"[:32]
+                    break
+        session.add(copy)
+        await session.flush()
+        return redirect(_url(request, "offers", offer=copy.id),
+                        flash=("success", f"Copied {name}. It is off until you switch it on."))
     if action == "delete":
         applied = await _count(session, SftLead.offer_id == offer.id)
         if applied:

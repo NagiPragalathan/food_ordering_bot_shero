@@ -1,134 +1,352 @@
 {% import "admin/_macros.html" as ui %}
 {% import "admin/sft/_bits.html" as sft %}
-{% set field = 'mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20' %}
+{# The same look and flow as the dashboard's Offers & Promotions: stat tiles,
+   status chips and ticket cards, with a separate editor and live preview. #}
+{% set TAG = 'M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01' %}
+{% set field = 'w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20' %}
+{% set label = 'mb-1.5 block text-sm font-medium text-stone-700' %}
+{% set hint = 'mt-1 text-[11px] text-stone-400' %}
 {% set o = editing %}
 
-<div class="grid gap-5 lg:grid-cols-[24rem_1fr]">
-  <form method="post" action="{{ url_for('admin_sft_offer_save') }}" data-sft-offer-form
-        class="self-start rounded-2xl border border-stone-200/70 bg-white p-5 shadow-card lg:sticky lg:top-24">
-    <div class="flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-stone-900">{{ 'Edit ' ~ (o.code or o.title) if o else 'New offer' }}</h2>
-      {% if o %}<a href="{{ url('offers') }}" class="text-xs font-semibold text-brand-700">+ New offer</a>{% endif %}
-    </div>
-    {% if o %}<input type="hidden" name="offer_id" value="{{ o.id }}">{% endif %}
-    <label class="mt-4 block text-xs font-medium text-stone-600">Name (for you)
-      <input name="title" required maxlength="80" value="{{ o.title if o else '' }}" placeholder="Launch week" class="{{ field }}"></label>
-    <label class="mt-3 block text-xs font-medium text-stone-600">Code
-      <input name="code" maxlength="20" value="{{ o.code if o and o.code else '' }}" placeholder="SFT20 (leave empty for an automatic offer)" class="{{ field }} font-mono uppercase placeholder:font-sans placeholder:normal-case" data-offer-code></label>
-    <p class="mt-1 text-[11px] text-stone-500">With a code, a lead gets the offer by sending the code on WhatsApp (put "Message SFT20" in your ad or post). Without one, it applies to everyone it covers while it runs.</p>
-
-    <div class="mt-3 grid grid-cols-[1fr_7rem] gap-2">
-      <label class="block text-xs font-medium text-stone-600">Discount
-        <select name="kind" class="{{ field }}" data-offer-kind>
-          <option value="percent" {% if not o or o.kind == 'percent' %}selected{% endif %}>Percent off</option>
-          <option value="amount" {% if o and o.kind == 'amount' %}selected{% endif %}>Amount off</option>
-          <option value="price" {% if o and o.kind == 'price' %}selected{% endif %}>Fixed price</option>
-        </select></label>
-      <label class="block text-xs font-medium text-stone-600">Value
-        <input name="value" type="number" min="0.01" step="0.01" required value="{{ o.value | float if o else '' }}" placeholder="20" class="{{ field }} tabular-nums" data-offer-value></label>
-    </div>
-    <div class="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-offer-preview data-fee="{{ cfg.course_fee }}" data-symbol="{{ '$' if cfg.currency == 'usd' else '' }}">
-      The lead sees: <b>Course fee: <span data-offer-price>…</span></b>
-    </div>
-
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <label class="block text-xs font-medium text-stone-600">Starts
-        <input name="starts_on" type="date" value="{{ o.starts_on.isoformat() if o and o.starts_on else '' }}" class="{{ field }}"></label>
-      <label class="block text-xs font-medium text-stone-600">Ends (included)
-        <input name="ends_on" type="date" value="{{ o.ends_on.isoformat() if o and o.ends_on else '' }}" class="{{ field }}"></label>
-    </div>
-    <label class="mt-3 block text-xs font-medium text-stone-600">Limit (enrollments)
-      <input name="usage_limit" type="number" min="1" value="{{ o.usage_limit if o and o.usage_limit else '' }}" placeholder="No limit" class="{{ field }}"></label>
-
-    <fieldset class="mt-3">
-      <legend class="text-xs font-medium text-stone-600">For leads from <span class="font-normal text-stone-400">(none ticked: everyone)</span></legend>
-      <div class="mt-1 flex flex-wrap gap-1.5">
-        {% for s in source_names %}
-        <label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-700 has-[:checked]:bg-brand-600 has-[:checked]:text-white">
-          <input type="checkbox" name="sources" value="{{ s }}" class="sr-only" {% if o and s in o.sources %}checked{% endif %}>{{ s }}</label>
-        {% endfor %}
-      </div>
-    </fieldset>
-    <label class="mt-3 block text-xs font-medium text-stone-600">Note (for you)
-      <input name="note" maxlength="255" value="{{ o.note if o and o.note else '' }}" placeholder="Instagram campaign, November" class="{{ field }}"></label>
-    <div class="mt-4 flex items-center justify-between">
-      {{ sft.switch('active', o.active if o else true, 'On') }}
-      <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">{{ 'Save offer' if o else 'Create offer' }}</button>
-    </div>
-  </form>
-
-  <div class="min-w-0 space-y-5">
-    <section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
-      <header class="border-b border-stone-100 px-5 py-4">
-        <h2 class="text-sm font-semibold text-stone-900">Offers{% if offers %} <span class="font-normal text-stone-500">· {{ offers | length }}</span>{% endif %}</h2>
-        <p class="mt-0.5 text-xs text-stone-500">Course fee {{ cfg.fee_label() }}. A lead pays the lowest price of the offers that apply to them; the price shows in the welcome, the brochure, the Pay button and Stripe's checkout.</p>
-      </header>
-      {% if offers %}
-      <ul class="divide-y divide-stone-100" data-sft-offers>
-        {% for offer in offers %}{% set s = offer_stats[offer.id] %}{% set label, tone = s.status %}
-        <li class="flex flex-wrap items-start gap-4 px-5 py-4 {{ 'bg-brand-50/40' if o and o.id == offer.id else '' }}">
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              {% if offer.code %}<span class="rounded-md bg-stone-900 px-2 py-0.5 font-mono text-xs font-semibold text-white">{{ offer.code }}</span>{% else %}{{ ui.badge('Automatic', 'info') }}{% endif %}
-              <span class="text-sm font-semibold text-stone-900">{{ offer.title }}</span>
-              {{ ui.badge(label, tone) }}
-            </div>
-            <div class="mt-1 text-sm text-stone-700"><b>{{ s.describe }}</b> → {{ money(s.price) }} <span class="text-stone-400 line-through">{{ cfg.fee_label() }}</span></div>
-            <div class="mt-1 text-xs text-stone-500">
-              {% if offer.starts_on or offer.ends_on %}{{ offer.starts_on.strftime('%d %b %Y') if offer.starts_on else 'Now' }} – {{ offer.ends_on.strftime('%d %b %Y') if offer.ends_on else 'no end' }}{% else %}No end date{% endif %}
-              · {{ offer.sources | join(', ') if offer.sources else 'every source' }}
-              {% if offer.usage_limit %} · limit {{ offer.usage_limit }}{% endif %}
-              {% if offer.note %} · {{ offer.note }}{% endif %}
-            </div>
-            <div class="mt-2 flex flex-wrap gap-2 text-xs">
-              <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-stone-600">Leads with it: <b class="tabular-nums">{{ s.applied }}</b></span>
-              <span class="rounded-full bg-emerald-50 px-2.5 py-0.5 text-emerald-800">Enrolled: <b class="tabular-nums">{{ s.paid }}{% if offer.usage_limit %}/{{ offer.usage_limit }}{% endif %}</b></span>
-              <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-stone-600">Revenue: <b>{{ money(s.revenue) }}</b></span>
-              <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-stone-600">Discount given: <b>{{ money(s.discount) }}</b></span>
-            </div>
-          </div>
-          <div class="flex shrink-0 flex-wrap gap-1.5">
-            <a href="{{ url('offers', offer=offer.id) }}" class="rounded-lg px-3 py-1.5 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200 hover:bg-brand-50">Edit</a>
-            <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=offer.id, action='toggle') }}">
-              <button class="rounded-lg px-3 py-1.5 text-xs font-medium text-stone-700 ring-1 ring-inset ring-stone-200 hover:bg-stone-50">{{ 'Turn off' if offer.active else 'Turn on' }}</button></form>
-            {% if not s.applied %}
-            <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=offer.id, action='delete') }}" onsubmit="return confirm('Delete this offer?')">
-              <button class="rounded-lg px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-50">Delete</button></form>
-            {% endif %}
-          </div>
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}{{ ui.empty('No offers yet. Create the first one on the left.') }}{% endif %}
-    </section>
-
-    {% call ui.card('How offers reach a lead') %}
-      <ol class="list-decimal space-y-1.5 pl-4 text-xs text-stone-600">
-        <li><b>Code:</b> the lead sends the code on WhatsApp, alone or with SFT ("SFT20" or "SFT SFT20"). The bot confirms the new fee and carries on where they were. A code starts the journey even on Shero US's shared number.</li>
-        <li><b>Automatic:</b> no code; it covers everyone (or the sources ticked) between its dates. Good for a launch price.</li>
-        <li>The lowest price wins, never below Stripe's minimum. A checkout already open at the old price is replaced at the new one.</li>
-        <li>The follow-up templates are approved by WhatsApp with fixed words, so they keep saying the full fee; the lead sees their price when they tap Enroll.</li>
-      </ol>
-    {% endcall %}
+{% if o or creating %}
+{# ============================== Editor ============================== #}
+<div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h2 class="text-lg font-semibold text-stone-900">{{ o.title if o else 'New offer' }}</h2>
+    <p class="text-xs text-stone-500">
+      {% if o %}{% if o.code %}Code <span class="font-mono font-semibold">{{ o.code }}</span>{% else %}Automatic offer{% endif %} · {{ offer_stats[o.id].status[0] }}.
+      Changes apply from the next message; a lead who already paid keeps what they paid.
+      {% else %}A code the lead sends on WhatsApp, or an automatic price for everyone it covers.{% endif %}
+    </p>
   </div>
+  <a href="{{ url('offers') }}" class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-50">Back to offers</a>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+<form id="sft-offer-form" method="post" action="{{ url_for('admin_sft_offer_save') }}" novalidate class="space-y-5">
+  {% if o %}<input type="hidden" name="offer_id" value="{{ o.id }}">{% endif %}
+
+  <!-- 1. The offer -->
+  <section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+    <header class="border-b border-stone-100 px-5 py-4">
+      <h2 class="text-sm font-semibold text-stone-900">The offer</h2>
+      <p class="mt-0.5 text-xs text-stone-500">What it is called, and the code the lead sends.</p>
+    </header>
+    <div class="grid gap-4 p-5 sm:grid-cols-2">
+      <div>
+        <label class="{{ label }}" for="title">Title</label>
+        <input id="title" name="title" required maxlength="80" value="{{ o.title if o else '' }}" placeholder="Launch week" class="{{ field }}">
+        <p class="{{ hint }}">For you and the reports; the lead never sees it.</p>
+      </div>
+      <div>
+        <label class="{{ label }}" for="code">Offer code</label>
+        <div class="flex gap-2">
+          <input id="code" name="code" maxlength="20" value="{{ o.code if o and o.code else '' }}" placeholder="SFT20"
+                 autocomplete="off" spellcheck="false" class="{{ field }} font-mono font-semibold uppercase tracking-[0.12em] placeholder:font-sans placeholder:normal-case placeholder:tracking-normal">
+          <button type="button" id="gen-code" class="shrink-0 rounded-lg border border-stone-300 bg-white px-3 text-xs font-semibold text-stone-700 hover:bg-stone-50">Generate</button>
+        </div>
+        <p class="{{ hint }}">Letters and digits, 3–20 characters. Leave blank for an automatic offer (no code: everyone it covers gets it).</p>
+      </div>
+      <div class="sm:col-span-2">
+        <label class="{{ label }}" for="note">Note <span class="font-normal text-stone-400">(for you)</span></label>
+        <input id="note" name="note" maxlength="255" value="{{ o.note if o and o.note else '' }}" placeholder="Instagram campaign, November" class="{{ field }}">
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Discount -->
+  <section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+    <header class="border-b border-stone-100 px-5 py-4">
+      <h2 class="text-sm font-semibold text-stone-900">Discount</h2>
+      <p class="mt-0.5 text-xs text-stone-500">Off the course fee of {{ cfg.fee_label() }}. The lead's price never goes below Stripe's {{ money('0.50') }} minimum.</p>
+    </header>
+    <div class="grid gap-4 p-5 sm:grid-cols-2">
+      <fieldset class="sm:col-span-2">
+        <legend class="{{ label }}">Discount type</legend>
+        <div class="grid gap-2 sm:grid-cols-3">
+          {% for value, text in [('percent', 'Percentage off'), ('amount', 'Amount off'), ('price', 'Fixed price')] %}
+          <label class="flex cursor-pointer items-center gap-2.5 rounded-xl border border-stone-200 px-3 py-2.5 text-sm transition
+                        has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 has-[:checked]:font-semibold has-[:checked]:text-brand-800 hover:border-stone-300">
+            <input type="radio" name="kind" value="{{ value }}" {% if (o.kind if o else 'percent') == value %}checked{% endif %}
+                   class="h-4 w-4 border-stone-300 text-brand-600 focus:ring-brand-500">
+            {{ text }}
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div>
+        <label class="{{ label }}" for="value">Discount value <span id="value-unit" class="font-normal text-stone-400">(%)</span></label>
+        <input id="value" name="value" inputmode="decimal" value="{{ o.value | float if o else '' }}" placeholder="20" class="{{ field }}">
+      </div>
+      <div class="flex items-end">
+        <div class="w-full rounded-xl bg-emerald-50 px-3 py-2.5 text-xs text-emerald-900">The lead pays <b id="pv-amount" class="text-sm"></b> <span id="pv-was" class="text-emerald-700/70"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Who can use it -->
+  <section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+    <header class="border-b border-stone-100 px-5 py-4">
+      <h2 class="text-sm font-semibold text-stone-900">Who can use it</h2>
+      <p class="mt-0.5 text-xs text-stone-500">A use is counted when the lead pays. A code is theirs once they send it; an automatic offer applies to everyone it covers.</p>
+    </header>
+    <div class="grid gap-4 p-5 sm:grid-cols-2">
+      <div>
+        <label class="{{ label }}" for="usage_limit">Total uses</label>
+        <input id="usage_limit" name="usage_limit" inputmode="numeric" value="{{ o.usage_limit if o and o.usage_limit else '' }}" placeholder="Unlimited" class="{{ field }}">
+        <p class="{{ hint }}">Enrollments it may give, e.g. "first 50". Blank for unlimited.</p>
+      </div>
+      <fieldset>
+        <legend class="{{ label }}">Leads from</legend>
+        <div class="flex flex-wrap gap-1.5">
+          {% for s in source_names %}
+          <label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs text-stone-700 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 has-[:checked]:font-semibold has-[:checked]:text-brand-800">
+            <input type="checkbox" name="sources" value="{{ s }}" class="sr-only" {% if o and s in o.sources %}checked{% endif %}>{{ s }}</label>
+          {% endfor %}
+        </div>
+        <p class="{{ hint }}">None ticked: every source.</p>
+      </fieldset>
+    </div>
+  </section>
+
+  <!-- 4. When -->
+  <section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+    <header class="border-b border-stone-100 px-5 py-4">
+      <h2 class="text-sm font-semibold text-stone-900">When</h2>
+      <p class="mt-0.5 text-xs text-stone-500">Whole days in SFT's timezone ({{ cfg.timezone | replace('_', ' ') }}), start and end included.</p>
+    </header>
+    <div class="grid gap-4 p-5 sm:grid-cols-2">
+      <div>
+        <label class="{{ label }}" for="starts_on">Start date</label>
+        <input id="starts_on" type="date" name="starts_on" value="{{ o.starts_on.isoformat() if o and o.starts_on else '' }}" class="{{ field }}">
+        <p class="{{ hint }}">Blank: starts straight away.</p>
+      </div>
+      <div>
+        <label class="{{ label }}" for="ends_on">End date</label>
+        <input id="ends_on" type="date" name="ends_on" value="{{ o.ends_on.isoformat() if o and o.ends_on else '' }}" class="{{ field }}">
+        <p class="{{ hint }}">Blank: runs until you pause it.</p>
+      </div>
+      <div class="flex items-center sm:col-span-2">
+        <label class="flex cursor-pointer items-start gap-2.5 text-sm text-stone-700">
+          <input type="checkbox" name="active" {% if (o.active if o else true) %}checked{% endif %} class="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600">
+          <span><span class="font-medium">Active</span>
+            <span class="block text-[11px] text-stone-400">Untick to pause it. A paused code does nothing when sent.</span></span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <div class="flex flex-wrap items-center gap-3">
+    <button class="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">{{ 'Save changes' if o else 'Create offer' }}</button>
+    <a href="{{ url('offers') }}" class="text-sm text-stone-500 underline">Cancel</a>
+  </div>
+</form>
+
+<!-- Preview and numbers: stays in view while the form scrolls. -->
+<aside class="space-y-5 lg:sticky lg:top-24 lg:h-fit">
+  <section class="rounded-2xl border border-stone-200/70 bg-white p-5 shadow-card">
+    <h2 class="text-xs font-semibold uppercase tracking-wide text-stone-500">How the lead sees it</h2>
+    <div class="mt-3 space-y-2 rounded-xl bg-[#ECE5DD] p-3">
+      <div class="flex justify-start"><div id="pv-lead" class="max-w-[85%] rounded-2xl rounded-bl-md bg-white px-3 py-2 text-[13px] shadow-sm ring-1 ring-stone-200"></div></div>
+      <div class="flex justify-end"><div class="max-w-[90%] whitespace-pre-line rounded-2xl rounded-br-md bg-[#DCF8C6] px-3 py-2 text-[13px] shadow-sm" id="pv-bot"></div></div>
+    </div>
+    <p id="pv-where" class="mt-2 text-[11px] text-stone-500"></p>
+  </section>
+
+  {% if o %}
+  <section class="rounded-2xl border border-stone-200/70 bg-white p-5 shadow-card">
+    {% set st = offer_stats[o.id] %}
+    <h2 class="text-xs font-semibold uppercase tracking-wide text-stone-500">Performance</h2>
+    <dl class="mt-3 grid grid-cols-2 gap-3">
+      <div class="rounded-xl bg-stone-50 p-3"><dt class="text-[11px] text-stone-500">Enrolled with it</dt>
+        <dd class="text-lg font-semibold tabular-nums text-stone-900">{{ st.paid }}{% if o.usage_limit %}<span class="text-xs font-normal text-stone-400"> / {{ o.usage_limit }}</span>{% endif %}</dd></div>
+      <div class="rounded-xl bg-stone-50 p-3"><dt class="text-[11px] text-stone-500">Leads with it</dt>
+        <dd class="text-lg font-semibold tabular-nums text-stone-900">{{ st.applied }}</dd></div>
+      <div class="rounded-xl bg-stone-50 p-3"><dt class="text-[11px] text-stone-500">Discount given</dt>
+        <dd class="text-lg font-semibold tabular-nums text-emerald-700">{{ money(st.discount) }}</dd></div>
+      <div class="rounded-xl bg-stone-50 p-3"><dt class="text-[11px] text-stone-500">Revenue</dt>
+        <dd class="text-lg font-semibold tabular-nums text-stone-900">{{ money(st.revenue) }}</dd></div>
+    </dl>
+    <div class="mt-4 flex gap-2 border-t border-stone-100 pt-4">
+      <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=o.id, action='duplicate') }}">
+        <button class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50">Duplicate</button>
+      </form>
+      {% if not st.applied %}
+      <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=o.id, action='delete') }}" class="ml-auto"
+            onsubmit="return confirm('Delete {{ o.code or o.title }}?')">
+        <button class="rounded-lg px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+</aside>
 </div>
 
 <script>
-  // The price the lead will see, as the offer is typed.
-  (function () {
-    var box = document.querySelector('[data-offer-preview]'); if (!box) return;
-    var fee = parseFloat(box.dataset.fee), sym = box.dataset.symbol;
-    var kind = document.querySelector('[data-offer-kind]'), value = document.querySelector('[data-offer-value]');
-    var out = box.querySelector('[data-offer-price]');
-    function money(n) { var t = n.toFixed(2).replace(/\.00$/, ''); return sym ? sym + t : t; }
-    function show() {
-      var v = parseFloat(value.value), p = fee;
-      if (!isNaN(v) && v > 0) {
-        p = kind.value === 'percent' ? fee * (100 - Math.min(v, 100)) / 100 : kind.value === 'amount' ? fee - v : v;
-        p = Math.min(fee, Math.max(0.5, Math.round(p * 100) / 100));
-      }
-      out.textContent = p < fee ? money(p) + ' (was ' + money(fee) + ')' : money(fee);
-    }
-    kind.addEventListener('change', show); value.addEventListener('input', show); show();
-  })();
+(function () {
+  const form = document.getElementById('sft-offer-form');
+  const $ = (id) => document.getElementById(id);
+  const FEE = {{ cfg.course_fee | float }};
+  const SYM = {{ ('$' if cfg.currency == 'usd' else '') | tojson }};
+  const CUR = {{ cfg.currency | upper | tojson }};
+  const num = (id) => { const n = parseFloat(String($(id).value).replace(/[$,%\s]/g, '')); return isFinite(n) ? n : null; };
+  const money = (n) => { const t = (Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, ''); return SYM ? SYM + t : t + ' ' + CUR; };
+  const type = () => (form.querySelector('[name=kind]:checked') || {}).value || 'percent';
+  function price() {
+    const v = num('value'); if (v === null || v <= 0) return FEE;
+    let p = type() === 'percent' ? FEE * (100 - Math.min(v, 100)) / 100 : type() === 'amount' ? FEE - v : v;
+    return Math.min(FEE, Math.max(0.5, Math.round(p * 100) / 100));
+  }
+  function render() {
+    $('value-unit').textContent = type() === 'percent' ? '(%)' : '(' + (SYM || CUR) + ')';
+    const p = price(), code = $('code').value.replace(/\s+/g, '').toUpperCase();
+    $('pv-amount').textContent = money(p);
+    $('pv-was').textContent = p < FEE ? '(was ' + money(FEE) + ')' : '';
+    const feeText = p < FEE ? money(p) + ' (was ' + money(FEE) + ')' : money(FEE);
+    $('pv-lead').textContent = code ? code : 'SFT';
+    $('pv-bot').textContent = code
+      ? '🎉 Code *' + code + '* applied, Priya! Your course fee is now *' + money(p) + '* (was ' + money(FEE) + ').'
+      : 'Hi Priya! 👋 Welcome to Shero Food Training…\n💲 One-time course fee: *' + feeText + '*';
+    const srcs = Array.from(form.querySelectorAll('[name=sources]:checked')).map(i => i.value);
+    $('pv-where').textContent = (code ? 'Given when a lead sends ' + code + '.' : 'Given automatically.') +
+      (srcs.length ? ' Leads from ' + srcs.join(', ') + ' only.' : ' Every source.');
+  }
+  $('gen-code').addEventListener('click', () => {
+    const abc = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+    const base = ($('title').value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6)) || 'SFT';
+    let tail = ''; const bytes = new Uint32Array(3); crypto.getRandomValues(bytes);
+    bytes.forEach(b => { tail += abc[b % abc.length]; });
+    $('code').value = base + tail; render();
+  });
+  $('code').addEventListener('input', () => {
+    const at = $('code').selectionStart;
+    $('code').value = $('code').value.toUpperCase().replace(/\s+/g, '');
+    $('code').setSelectionRange(at, at);
+  });
+  form.addEventListener('input', render); form.addEventListener('change', render); render();
+})();
 </script>
+
+{% else %}
+{# ============================== List ============================== #}
+<div class="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+  {{ ui.stat('Running offers', offer_totals.running, sub=(all_offers | length ~ ' offer' ~ ('' if all_offers | length == 1 else 's') ~ ' in total'), tone='good', icon=TAG) }}
+  {{ ui.stat('Enrolled with an offer', offer_totals.enrolled, sub='paid enrollments', icon='M9 12l2 2 4-4M21 12a9 9 0 11-18 0 9 9 0 0118 0z') }}
+  {{ ui.stat('Discount given', money(offer_totals.discount), sub='taken off the course fee', icon='M12 3v18M17 7.5C17 5.6 14.8 4.5 12 4.5S7 5.6 7 7.5s2.2 2.9 5 3.5 5 1.6 5 3.5-2.2 3-5 3-5-1.1-5-3') }}
+  {{ ui.stat('Revenue with offers', money(offer_totals.revenue), sub='what those leads paid', icon='M3 17l6-6 4 4 8-8M14 7h7v7') }}
+</div>
+
+<div class="mb-5 flex flex-wrap items-center gap-2">
+  {% if all_offers %}
+  <a href="{{ url('offers') }}" class="rounded-lg border px-3 py-1.5 text-sm {% if not selected_status %}border-brand-600 bg-brand-50 font-semibold text-brand-700{% else %}border-stone-200 bg-white text-stone-600 hover:border-stone-300{% endif %}">
+    All <span class="ml-1 text-xs text-stone-400">{{ all_offers | length }}</span></a>
+  {% for key, name in offer_statuses.items() if offer_counts.get(key) %}
+  <a href="{{ url('offers', status=key) }}" class="rounded-lg border px-3 py-1.5 text-sm {% if selected_status == key %}border-brand-600 bg-brand-50 font-semibold text-brand-700{% else %}border-stone-200 bg-white text-stone-600 hover:border-stone-300{% endif %}">
+    {{ name }} <span class="ml-1 text-xs text-stone-400">{{ offer_counts[key] }}</span></a>
+  {% endfor %}
+  {% endif %}
+  <a href="{{ url('offers', offer='new') }}" class="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    Add offer</a>
+</div>
+
+{% if offers %}
+<div class="grid gap-4 xl:grid-cols-2" data-sft-offers>
+  {% for offer in offers %}{% set st = offer_stats[offer.id] %}{% set slabel, stone = st.status %}
+  {% set dim = st.status_key in ('off', 'ended') %}
+  <article class="group relative flex overflow-hidden rounded-2xl border border-stone-200/70 bg-white shadow-card transition hover:shadow-lg">
+    <div class="relative flex w-24 shrink-0 flex-col items-center justify-center gap-1 px-2 py-4 text-center text-white sm:w-28
+                {% if dim %}bg-stone-400{% elif st.status_key == 'used_up' %}bg-amber-500{% else %}bg-gradient-to-b from-brand-500 to-brand-700{% endif %}">
+      <svg class="h-5 w-5 opacity-80" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="{{ TAG }}"/></svg>
+      <div class="text-[13px] font-extrabold uppercase leading-tight tracking-wide [overflow-wrap:anywhere]">{{ st.describe }}</div>
+      <span class="absolute -right-2 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-stone-100"></span>
+    </div>
+    <div class="min-w-0 flex-1 p-4 sm:p-5">
+      <div class="flex items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="truncate text-[15px] font-semibold text-stone-900">{{ offer.title }}</h2>
+            {{ ui.badge(slabel, stone) }}
+          </div>
+          <div class="mt-1.5 flex flex-wrap items-center gap-2">
+            {% if offer.code %}
+            <button type="button" data-copy="{{ offer.code }}" title="Copy code"
+                    class="copy-code inline-flex items-center gap-1.5 rounded-md border border-dashed border-brand-300 bg-brand-50 px-2 py-0.5 font-mono text-xs font-bold tracking-[0.12em] text-brand-700 hover:bg-brand-100">
+              {{ offer.code }}
+              <svg class="h-3.5 w-3.5 opacity-60" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
+            </button>
+            {% else %}{{ ui.badge('Automatic', 'info') }}{% endif %}
+            <span class="text-xs font-semibold text-stone-700">Lead pays {{ money(st.price) }} <span class="font-normal text-stone-400 line-through">{{ cfg.fee_label() }}</span></span>
+          </div>
+        </div>
+        <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=offer.id, action='toggle') }}" class="shrink-0">
+          <button title="{{ 'Pause this offer' if offer.active else 'Switch this offer on' }}" aria-label="{{ 'Pause' if offer.active else 'Switch on' }} {{ offer.code or offer.title }}"
+                  class="relative inline-flex h-6 w-11 items-center rounded-full transition {% if offer.active %}bg-emerald-500 hover:bg-emerald-600{% else %}bg-stone-300 hover:bg-stone-400{% endif %}">
+            <span class="inline-block h-5 w-5 rounded-full bg-white shadow transition {% if offer.active %}translate-x-[22px]{% else %}translate-x-0.5{% endif %}"></span>
+          </button>
+        </form>
+      </div>
+      {% if offer.note %}<p class="mt-2 line-clamp-2 text-xs text-stone-500">{{ offer.note }}</p>{% endif %}
+      <div class="mt-3 flex flex-wrap gap-1.5 text-[11px]">
+        <span class="rounded-md bg-stone-100 px-1.5 py-0.5 text-stone-600">
+          {% if offer.starts_on and offer.ends_on %}{{ offer.starts_on.strftime('%d %b') }} – {{ offer.ends_on.strftime('%d %b %Y') }}
+          {% elif offer.starts_on %}From {{ offer.starts_on.strftime('%d %b %Y') }}
+          {% elif offer.ends_on %}Until {{ offer.ends_on.strftime('%d %b %Y') }}
+          {% else %}No end date{% endif %}</span>
+        <span class="rounded-md bg-stone-100 px-1.5 py-0.5 text-stone-600">{{ offer.sources | join(', ') if offer.sources else 'Every source' }}</span>
+        {% if offer.usage_limit %}<span class="rounded-md bg-stone-100 px-1.5 py-0.5 text-stone-600">First {{ offer.usage_limit }}</span>{% endif %}
+      </div>
+      <div class="mt-3.5">
+        <div class="flex items-baseline justify-between text-xs">
+          <span class="text-stone-500"><span class="font-semibold text-stone-800">{{ st.paid }}</span> enrolled · {{ st.applied }} lead{{ '' if st.applied == 1 else 's' }} with it</span>
+          <span class="text-stone-400">{% if offer.usage_limit %}of {{ offer.usage_limit }}{% else %}no limit{% endif %}</span>
+        </div>
+        {% if offer.usage_limit %}
+          {% set pct = [100, (st.paid * 100 / offer.usage_limit) | round(0, 'floor')] | min %}
+          <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-stone-100"><div class="h-full rounded-full {% if pct >= 100 %}bg-amber-500{% else %}bg-brand-500{% endif %}" style="width: {{ pct }}%"></div></div>
+        {% endif %}
+        {% if st.paid %}<div class="mt-1.5 text-[11px] text-stone-500">{{ money(st.discount) }} given · {{ money(st.revenue) }} in revenue</div>{% endif %}
+      </div>
+      <div class="mt-4 flex items-center gap-1 border-t border-stone-100 pt-3">
+        <a href="{{ url('offers', offer=offer.id) }}" class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
+          Edit</a>
+        <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=offer.id, action='duplicate') }}">
+          <button class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
+            Duplicate</button>
+        </form>
+        {% if not st.applied %}
+        <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=offer.id, action='delete') }}" class="ml-auto"
+              onsubmit="return confirm('Delete {{ offer.code or offer.title }}?')">
+          <button class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
+            Delete</button>
+        </form>
+        {% else %}<span class="ml-auto text-[11px] text-stone-400">On {{ st.applied }} lead{{ '' if st.applied == 1 else 's' }}: pause it instead of deleting</span>{% endif %}
+      </div>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% elif all_offers %}
+  <div class="rounded-2xl border border-dashed border-stone-300 bg-white py-14 text-center text-sm text-stone-500">
+    No offers with that status. <a href="{{ url('offers') }}" class="font-semibold text-brand-700 underline">Show all</a>
+  </div>
+{% else %}
+  <div class="rounded-2xl border border-dashed border-stone-300 bg-white px-6 py-16 text-center">
+    <span class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+      <svg class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="{{ TAG }}"/></svg>
+    </span>
+    <h2 class="mt-4 text-base font-semibold text-stone-900">No offers yet</h2>
+    <p class="mx-auto mt-1 max-w-md text-sm text-stone-500">Create a code the lead sends on WhatsApp, or an automatic launch price: a percentage, an amount off or a fixed price, with dates, a limit and the sources it is for.</p>
+    <a href="{{ url('offers', offer='new') }}" class="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Create your first offer</a>
+  </div>
+{% endif %}
+<script>
+  document.querySelectorAll('.copy-code').forEach(btn => btn.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(btn.dataset.copy); const before = btn.innerHTML; btn.textContent = 'Copied!'; setTimeout(() => { btn.innerHTML = before; }, 1200); } catch (e) {}
+  }));
+</script>
+{% endif %}

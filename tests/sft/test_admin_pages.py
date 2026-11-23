@@ -148,3 +148,49 @@ async def test_the_csv_has_the_leads_and_the_payments(admin, session, cfg, rec):
     lines = csv.text.strip().splitlines()
     assert lines[0].startswith("Name,WhatsApp") and "Priya" in lines[1] and "99" in lines[1]
     assert "+15551230001" in admin.get("/admin/sft/export?what=leads").text
+
+
+async def test_bot_replies_looks_like_the_dashboards_and_saves_rows(admin, session):
+    page = admin.get("/admin/sft?tab=replies").text
+    for part in ("Who should SFT reply to?", "Whitelisted numbers", "Trigger keywords",
+                 "Check a message", "id=\"sft-who-form\""):
+        assert part in page, part
+    # One row per number and per keyword, as the dashboard's page posts them.
+    saved = admin.post("/admin/sft/replies", data={
+        "mode": "test", "test_numbers": ["", "+1 555 123 0001", "1 555 123 0002"]})
+    assert saved.status_code == 303
+    cfg = await config.load(session, fresh=True)
+    assert cfg.mode == "test" and cfg.test_numbers == ["15551230001", "15551230002"]
+    admin.post("/admin/sft/replies", data={"keywords": ["sft", "food course"]})
+    assert (await config.load(session, fresh=True)).keywords == ["sft", "food course"]
+    assert "Test mode: replying only to 2 whitelisted numbers" in admin.get("/admin/sft?tab=replies").text
+
+
+async def test_offers_have_a_list_with_cards_and_an_editor(admin, session, cfg):
+    page = admin.get("/admin/sft?tab=offers").text
+    assert "No offers yet" in page and "offer=new" in page
+    editor = admin.get("/admin/sft?tab=offers&offer=new").text
+    assert 'id="sft-offer-form"' in editor and "How the lead sees it" in editor
+    admin.post("/admin/sft/offers", data={"title": "Launch", "code": "SFT20", "kind": "amount",
+                                          "value": "20", "active": "on"})
+    offer = (await session.execute(select(SftOffer))).scalar_one()
+    page = admin.get("/admin/sft?tab=offers").text
+    assert "data-copy=\"SFT20\"" in page and "Running" in page and "Lead pays $79" in page
+    assert "Running offers" in page
+    assert "SFT20" in admin.get("/admin/sft?tab=offers&status=running").text
+    assert "No offers with that status" in admin.get("/admin/sft?tab=offers&status=ended").text
+    edit = admin.get(f"/admin/sft?tab=offers&offer={offer.id}").text
+    assert "Performance" in edit and 'value="SFT20"' in edit
+    copied = admin.post(f"/admin/sft/offers/{offer.id}/duplicate")
+    assert copied.status_code == 303
+    rows = (await session.execute(select(SftOffer).order_by(SftOffer.created_at))).scalars().all()
+    assert len(rows) == 2 and rows[1].code == "SFT202" and not rows[1].active
+
+
+async def test_nudges_rules_look_like_the_dashboards(admin):
+    page = admin.get("/admin/sft?tab=nudges").text
+    for part in ("Nudges on", "Send between", "Wait time", "Trigger condition", "Save rules",
+                 "Hand to the team"):
+        assert part in page, part
+    templates = admin.get("/admin/sft?tab=nudges&section=templates").text
+    assert "Submit the missing ones to WhatsApp" in templates and "sft_followup_1" in templates

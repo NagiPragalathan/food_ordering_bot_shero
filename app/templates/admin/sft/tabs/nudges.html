@@ -1,190 +1,204 @@
 {% import "admin/_macros.html" as ui %}
 {% import "admin/sft/_bits.html" as sft %}
+{# The same look and flow as the dashboard's Nudges page: the on/off bar with
+   send hours, tab pills, a rules table with On switches, stat tiles for the
+   leads, and the messages list. #}
 {% set field = 'rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20' %}
 {% set num = field ~ ' w-20 tabular-nums' %}
 {% set button = 'rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700' %}
 
-{# Status, always in view. #}
-<div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-stone-200/70 bg-white px-5 py-3 text-sm shadow-card" data-sft-nudge-status>
-  {% if cfg.nudges_on and cfg.is_on %}{{ ui.badge('Nudges sending', 'good') }}
-  {% elif not cfg.nudges_on %}{{ ui.badge('Nudges off: nothing is sent', 'warn') }}
-  {% else %}{{ ui.badge('SFT is off: nothing is sent', 'warn') }}{% endif %}
-  <span class="text-stone-600">Between <b>{{ '%02d' | format(cfg.send_from_hour) }}:00</b> and <b>{{ '%02d' | format(cfg.send_until_hour) }}:00</b>, {{ cfg.timezone | replace('_', ' ') }}</span>
+{% macro switch(name, on) %}
+<label class="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-700">
+  <input type="checkbox" name="{{ name }}" {% if on %}checked{% endif %} class="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+  On
+</label>
+{% endmacro %}
+
+{% if section == 'rules' %}<form method="post" action="{{ url_for('admin_sft_nudges') }}" data-sft-nudge-rules>{% endif %}
+
+{# --- On / off and send hours (the whole rules form saves from here too) ---------- #}
+<div class="mb-5 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-stone-200/70 bg-white px-5 py-4 shadow-card" data-sft-nudge-status>
+  {% if section == 'rules' %}
+  <label class="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-stone-800">
+    <input type="checkbox" name="nudges_on" {% if cfg.nudges_on %}checked{% endif %} class="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+    Nudges on
+  </label>
+  {{ ui.badge('Sending', 'good') if cfg.nudges_on and cfg.is_on else ui.badge('Off: nothing is sent', 'warn') }}
+  <span class="text-sm text-stone-600">Send between
+    <select name="send_from_hour" class="{{ field }}">{% for h in hours if h < 24 %}<option value="{{ h }}" {% if h == cfg.send_from_hour %}selected{% endif %}>{{ '%02d' | format(h) }}:00</option>{% endfor %}</select>
+    and
+    <select name="send_until_hour" class="{{ field }}">{% for h in hours if h > 0 %}<option value="{{ h }}" {% if h == cfg.send_until_hour %}selected{% endif %}>{{ '%02d' | format(h) }}:00</option>{% endfor %}</select>
+  </span>
+  <label class="text-sm text-stone-600">Time zone <input name="timezone" value="{{ cfg.timezone }}" class="{{ field }} w-44"></label>
+  <button class="{{ button }} ml-auto">Save</button>
+  {% else %}
+  <span class="text-sm font-semibold text-stone-800">Nudges</span>
+  {{ ui.badge('Sending', 'good') if cfg.nudges_on and cfg.is_on else ui.badge('Off: nothing is sent', 'warn') }}
+  <span class="text-sm text-stone-600">Between <b>{{ '%02d' | format(cfg.send_from_hour) }}:00</b> and <b>{{ '%02d' | format(cfg.send_until_hour) }}:00</b>, {{ cfg.timezone | replace('_', ' ') }}</span>
   {% if cfg.nudges_off %}<span class="text-xs text-stone-500">Switched off: {{ cfg.nudges_off | map('replace', '_', ' ') | join(', ') }}</span>{% endif %}
   <span class="ml-auto text-xs text-stone-400">Checked every 5 minutes</span>
+  {% endif %}
 </div>
 
-<nav class="mb-5 inline-flex flex-wrap gap-1 rounded-xl bg-stone-200/70 p-1" data-sft-nudge-sections>
-  {% for key, label in nudge_sections.items() %}
+{# --- Tabs ------------------------------------------------------------------- #}
+<nav class="mb-5 inline-flex flex-wrap gap-1 rounded-xl bg-stone-100 p-1" data-sft-nudge-sections>
+  {% for key, name in nudge_sections.items() %}
   <a href="{{ url('nudges', section=key) }}" {% if section == key %}aria-current="page"{% endif %}
-     class="rounded-lg px-4 py-1.5 text-sm font-medium {{ 'bg-white text-stone-900 shadow-sm' if section == key else 'text-stone-600 hover:text-stone-900' }}">{{ label }}</a>
+     class="inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium {{ 'bg-white text-stone-900 shadow-sm' if section == key else 'text-stone-600 hover:text-stone-900' }}">{{ name }}
+    {%- if key == 'templates' and template_status is defined %}{% set waiting = template_status.values() | reject('equalto', 'approved') | list | length %}{% if waiting %}<span class="rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800">{{ waiting }} waiting</span>{% endif %}{% endif %}</a>
   {% endfor %}
 </nav>
 
 {% if section == 'rules' %}
-{# ============================ Rules ============================ #}
-<form method="post" action="{{ url_for('admin_sft_nudges') }}" data-sft-nudge-rules>
-  <div class="mb-5 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-stone-200/70 bg-white px-5 py-4 shadow-card">
-    {{ sft.switch('nudges_on', cfg.nudges_on, 'Nudges on') }}
-    <span class="text-sm text-stone-600">Send between
-      <select name="send_from_hour" class="{{ field }}">{% for h in hours if h < 24 %}<option value="{{ h }}" {% if h == cfg.send_from_hour %}selected{% endif %}>{{ '%02d' | format(h) }}:00</option>{% endfor %}</select>
-      and
-      <select name="send_until_hour" class="{{ field }}">{% for h in hours if h > 0 %}<option value="{{ h }}" {% if h == cfg.send_until_hour %}selected{% endif %}>{{ '%02d' | format(h) }}:00</option>{% endfor %}</select>
-    </span>
-    <label class="text-sm text-stone-600">Time zone <input name="timezone" value="{{ cfg.timezone }}" class="{{ field }} w-48"></label>
-    <span class="text-xs text-stone-500">Outside these hours a nudge waits; the team's tasks are raised at any hour.</span>
+{# --- Targeting rules -------------------------------------------------------- #}
+<section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="border-b border-stone-100 px-5 py-4">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-700">Automated WhatsApp messages</h2>
+    <p class="mt-0.5 text-xs text-stone-500">Checked every 5 minutes. Never to a lead with the team, one who said Not interested or STOP, or one who has finished.
+      Outside WhatsApp's 24-hour window only an approved template can go.</p>
+  </header>
+  <div class="overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <tr><th class="px-4 py-3">Nudge</th><th class="px-4 py-3">Wait time</th><th class="px-4 py-3">Trigger condition</th>
+          <th class="px-4 py-3">Message</th><th class="px-4 py-3">Status</th></tr>
+    </thead>
+    <tbody class="divide-y divide-stone-100">
+    {% set rows = cfg.followup_hours | length %}
+    {% for n in range(1, [rows + 1, 5] | min + 1) %}
+      {% set hours_value = cfg.followup_hours[n - 1] if n <= rows else '' %}
+      {% set tpl = 'sft_followup_' ~ ([n, 3] | min) %}
+      <tr class="align-top {{ '' if n <= rows else 'bg-stone-50/40' }}">
+        <td class="px-4 py-3 font-semibold text-stone-900">Follow-up {{ n }}{% if n > rows %}<div class="text-[11px] font-normal text-stone-500">Add one: enter its wait</div>{% endif %}</td>
+        <td class="whitespace-nowrap px-4 py-3"><input name="followup_{{ n }}_hours" type="number" min="1" value="{{ hours_value }}" placeholder="hours" class="{{ num }}"> hours quiet
+          {% if n > 1 and n <= rows %}<div class="mt-1 text-[11px] text-stone-400">and {{ cfg.followup_hours[n - 1] - cfg.followup_hours[n - 2] }}h after follow-up {{ n - 1 }}</div>{% endif %}</td>
+        <td class="px-4 py-3 text-stone-600">{% if n == 1 %}In the journey, no reply for that long{% else %}No answer to follow-up {{ n - 1 }}{% endif %}</td>
+        <td class="px-4 py-3"><div class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs">{{ tpl }}</span>{{ sft.wa_status(template_status.get(tpl, 'unknown')) }}</div>
+          {% if n == 1 %}<div class="mt-1 text-[11px] text-stone-500">Payment Pending: <span class="font-mono">sft_payment_reminder</span> {{ sft.wa_status(template_status.get('sft_payment_reminder', 'unknown')) }}</div>{% endif %}</td>
+        <td class="px-4 py-3">{{ switch('followup_' ~ n ~ '_on', n > rows or ('followup_' ~ n) not in cfg.nudges_off) }}</td>
+      </tr>
+    {% endfor %}
+      <tr class="align-top">
+        <td class="px-4 py-3 font-semibold text-stone-900">Payment link again</td>
+        <td class="whitespace-nowrap px-4 py-3"><input name="payment_reminder_minutes" type="number" min="10" max="1440" value="{{ cfg.payment_reminder_minutes }}" class="{{ num }}"> minutes after the link</td>
+        <td class="px-4 py-3 text-stone-600">Payment Pending, still inside the 24-hour window</td>
+        <td class="px-4 py-3 text-xs text-stone-600">"{{ c.say(cfg, 'pay_reminder', first='Priya') | truncate(70) }}" + Pay button
+          <div class="text-[11px] text-stone-400">Words: <a class="text-brand-700 underline" href="{{ url('replies') }}#text-pay_reminder">Bot replies</a></div></td>
+        <td class="px-4 py-3">{{ switch('payment_reminder_on', 'payment_reminder' not in cfg.nudges_off) }}</td>
+      </tr>
+      <tr class="align-top">
+        <td class="px-4 py-3 font-semibold text-stone-900">Maybe later check-in</td>
+        <td class="px-4 py-3 text-stone-600">On the day they chose, then every
+          <input name="nurture_days" value="{{ cfg.nurture_days | join(', ') }}" class="{{ field }} w-24" placeholder="30"> days</td>
+        <td class="px-4 py-3 text-stone-600">Tapped Maybe later, or the team set a follow-up date</td>
+        <td class="px-4 py-3"><div class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs">sft_nurture</span>{{ sft.wa_status(template_status.get('sft_nurture', 'unknown')) }}</div></td>
+        <td class="px-4 py-3">{{ switch('nurture_on', 'nurture' not in cfg.nudges_off) }}</td>
+      </tr>
+      <tr class="align-top">
+        <td class="px-4 py-3 font-semibold text-stone-900">Course check</td>
+        <td class="whitespace-nowrap px-4 py-3"><input name="access_check_hours" type="number" min="1" value="{{ cfg.access_check_hours }}" class="{{ num }}"> hours after paying</td>
+        <td class="px-4 py-3 text-stone-600">Enrolled, not yet said they're in</td>
+        <td class="px-4 py-3"><div class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs">sft_course_check</span>{{ sft.wa_status(template_status.get('sft_course_check', 'unknown')) }}</div></td>
+        <td class="px-4 py-3">{{ switch('course_check_on', 'course_check' not in cfg.nudges_off) }}</td>
+      </tr>
+    </tbody>
+  </table>
   </div>
+  <div class="flex items-center justify-between gap-3 border-t border-stone-100 px-5 py-4">
+    <p class="text-xs text-stone-500">Templates not approved yet? Submit them on the <a class="font-medium text-brand-700 underline" href="{{ url('nudges', section='templates') }}">WhatsApp templates</a> tab.</p>
+    <button class="{{ button }}">Save rules</button>
+  </div>
+</section>
 
-  <section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
-    <header class="border-b border-stone-100 px-5 py-4">
-      <h2 class="text-sm font-semibold text-stone-900">Automated WhatsApp messages</h2>
-      <p class="mt-0.5 text-xs text-stone-500">Never to a lead with the team, one who said Not interested or STOP, or one who has finished. Outside WhatsApp's 24-hour window only an approved template can go.</p>
-    </header>
-    <div class="overflow-x-auto">
-    <table class="min-w-full text-sm">
-      <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
-        <tr><th class="px-4 py-3">Nudge</th><th class="px-4 py-3">When</th><th class="px-4 py-3">Who gets it</th><th class="px-4 py-3">Message</th><th class="px-4 py-3">On</th></tr>
-      </thead>
-      <tbody class="divide-y divide-stone-100">
-      {% set rows = cfg.followup_hours | length %}
-      {% for n in range(1, [rows + 1, 5] | min + 1) %}
-        {% set hours_value = cfg.followup_hours[n - 1] if n <= rows else '' %}
-        {% set tpl = 'sft_followup_' ~ ([n, 3] | min) %}
-        <tr class="align-top {{ '' if n <= rows else 'bg-stone-50/60' }}">
-          <td class="px-4 py-3 font-semibold text-stone-900">Follow-up {{ n }}{% if n > rows %}<div class="text-[11px] font-normal text-stone-500">Add one: enter its wait</div>{% endif %}</td>
-          <td class="whitespace-nowrap px-4 py-3 text-stone-600"><input name="followup_{{ n }}_hours" type="number" min="1" value="{{ hours_value }}" placeholder="hours" class="{{ num }}"> hours quiet
-            {% if n > 1 and n <= rows %}<div class="mt-1 text-[11px] text-stone-400">and {{ cfg.followup_hours[n - 1] - cfg.followup_hours[n - 2] }}h after follow-up {{ n - 1 }}</div>{% endif %}</td>
-          <td class="px-4 py-3 text-xs text-stone-600">{% if n == 1 %}Anyone in the journey who goes quiet{% else %}No answer to follow-up {{ n - 1 }}{% endif %}</td>
-          <td class="px-4 py-3"><div class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs">{{ tpl }}</span>{{ sft.wa_status(template_status.get(tpl, 'unknown')) }}</div>
-            {% if n == 1 %}<div class="mt-1 text-[11px] text-stone-500">Payment Pending: <span class="font-mono">sft_payment_reminder</span> {{ sft.wa_status(template_status.get('sft_payment_reminder', 'unknown')) }}</div>{% endif %}</td>
-          <td class="px-4 py-3">{{ sft.switch('followup_' ~ n ~ '_on', n > rows or ('followup_' ~ n) not in cfg.nudges_off) }}</td>
-        </tr>
-      {% endfor %}
-        <tr class="align-top">
-          <td class="px-4 py-3 font-semibold text-stone-900">Payment link again</td>
-          <td class="whitespace-nowrap px-4 py-3 text-stone-600"><input name="payment_reminder_minutes" type="number" min="10" max="1440" value="{{ cfg.payment_reminder_minutes }}" class="{{ num }}"> minutes after the link</td>
-          <td class="px-4 py-3 text-xs text-stone-600">Payment Pending, still inside the 24-hour window</td>
-          <td class="px-4 py-3 text-xs text-stone-600">"{{ c.say(cfg, 'pay_reminder', first='Priya') | truncate(70) }}" + Pay button
-            <div class="text-[11px] text-stone-400">Edit the words in <a class="text-brand-700 underline" href="{{ url('replies') }}#text-pay_reminder">Bot replies</a></div></td>
-          <td class="px-4 py-3">{{ sft.switch('payment_reminder_on', 'payment_reminder' not in cfg.nudges_off) }}</td>
-        </tr>
-        <tr class="align-top">
-          <td class="px-4 py-3 font-semibold text-stone-900">Maybe later check-in</td>
-          <td class="px-4 py-3 text-stone-600">On the day they chose, then again after
-            <input name="nurture_days" value="{{ cfg.nurture_days | join(', ') }}" class="{{ field }} w-24" placeholder="30"> days</td>
-          <td class="px-4 py-3 text-xs text-stone-600">Tapped Maybe later (a week, a month), or the team chose a follow-up date</td>
-          <td class="px-4 py-3"><div class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs">sft_nurture</span>{{ sft.wa_status(template_status.get('sft_nurture', 'unknown')) }}</div></td>
-          <td class="px-4 py-3">{{ sft.switch('nurture_on', 'nurture' not in cfg.nudges_off) }}</td>
-        </tr>
-        <tr class="align-top">
-          <td class="px-4 py-3 font-semibold text-stone-900">Course check</td>
-          <td class="whitespace-nowrap px-4 py-3 text-stone-600"><input name="access_check_hours" type="number" min="1" value="{{ cfg.access_check_hours }}" class="{{ num }}"> hours after paying</td>
-          <td class="px-4 py-3 text-xs text-stone-600">Enrolled, not yet said they're in</td>
-          <td class="px-4 py-3"><div class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs">sft_course_check</span>{{ sft.wa_status(template_status.get('sft_course_check', 'unknown')) }}</div></td>
-          <td class="px-4 py-3">{{ sft.switch('course_check_on', 'course_check' not in cfg.nudges_off) }}</td>
-        </tr>
-      </tbody>
-    </table>
-    </div>
-  </section>
-
-  <section class="mt-5 rounded-2xl border border-stone-200/70 bg-white shadow-card">
-    <header class="border-b border-stone-100 px-5 py-4">
-      <h2 class="text-sm font-semibold text-stone-900">Hand to the team</h2>
-      <p class="mt-0.5 text-xs text-stone-500">A lead stuck at a stage this long becomes a task (once per stage, and a Zoho Task), with the suggested message. 0 turns one off.</p>
-    </header>
-    <div class="overflow-x-auto">
-    <table class="min-w-full text-sm">
-      <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
-        <tr><th class="px-4 py-3">Stage</th><th class="px-4 py-3">After</th><th class="px-4 py-3">Suggested message</th><th class="px-4 py-3">Next action</th></tr>
-      </thead>
-      <tbody class="divide-y divide-stone-100">
-      {% for key, hours in cfg.attention_hours.items() %}{% set d = c.DROPS[key] %}
-        <tr class="align-top">
-          <td class="px-4 py-3 font-medium text-stone-900">{{ d.stage_name }}{% if d.priority == 'high' %} {{ ui.badge('High', 'bad') }}{% endif %}
-            <div class="text-[11px] font-normal text-stone-500">{{ d.trigger.format(hours='N') }}</div></td>
-          <td class="whitespace-nowrap px-4 py-3"><input name="attention_{{ key }}" type="number" min="0" step="0.5" value="{{ hours | int if hours == hours | int else hours }}" class="{{ num }}"> hours</td>
-          <td class="px-4 py-3 text-xs text-stone-600">"{{ d.script.format(first='Priya', goal='starting a food business') }}"</td>
-          <td class="px-4 py-3 text-xs text-stone-600">{{ d.next_action }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  </section>
-  <div class="mt-5 flex justify-end"><button class="{{ button }}">Save nudges</button></div>
+<section class="mt-5 rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="border-b border-stone-100 px-5 py-4">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-700">Hand to the team</h2>
+    <p class="mt-0.5 text-xs text-stone-500">A lead stuck at a stage this long becomes a task (once per stage, and a Zoho Task), with the suggested message. 0 turns one off.</p>
+  </header>
+  <div class="overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <tr><th class="px-4 py-3">Stage</th><th class="px-4 py-3">Wait time</th><th class="px-4 py-3">Suggested message</th><th class="px-4 py-3">Next action</th></tr>
+    </thead>
+    <tbody class="divide-y divide-stone-100">
+    {% for key, hours_at in cfg.attention_hours.items() %}{% set d = c.DROPS[key] %}
+      <tr class="align-top">
+        <td class="px-4 py-3 font-semibold text-stone-900">{{ d.stage_name }}{% if d.priority == 'high' %} {{ ui.badge('High', 'bad') }}{% endif %}
+          <div class="text-[11px] font-normal text-stone-500">{{ d.trigger.format(hours='N') }}</div></td>
+        <td class="whitespace-nowrap px-4 py-3"><input name="attention_{{ key }}" type="number" min="0" step="0.5" value="{{ hours_at | int if hours_at == hours_at | int else hours_at }}" class="{{ num }}"> hours</td>
+        <td class="px-4 py-3 text-xs text-stone-600">"{{ d.script.format(first='Priya', goal='starting a food business') }}"</td>
+        <td class="px-4 py-3 text-xs text-stone-600">{{ d.next_action }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="flex justify-end border-t border-stone-100 px-5 py-4"><button class="{{ button }}">Save</button></div>
+</section>
 </form>
 
 {% elif section == 'flows' %}
-{# ============================ Leads by flow ============================ #}
+{# --- Leads: who is in which flow ------------------------------------------ #}
 <div class="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5" data-sft-flow-tiles>
-  {% for key, (label, hint) in flows.items() %}
-  <a href="{{ url('nudges', section='flows', flow='' if flow == key else key) }}" title="{{ hint }}"
-     class="rounded-2xl border bg-white p-4 shadow-card transition hover:-translate-y-0.5 {{ 'border-brand-500 ring-2 ring-brand-500/30' if flow == key else 'border-stone-200/70' }}">
-    <div class="text-[11px] font-medium uppercase tracking-wide text-stone-500">{{ label }}</div>
-    <div class="mt-1 text-2xl font-semibold tabular-nums {{ 'text-amber-700' if key in ('followups_done', 'with_team') and flow_counts[key] else 'text-stone-900' }}">{{ flow_counts[key] }}</div>
-  </a>
+  {% for key, (name, hint) in flows.items() %}
+  <a href="{{ url('nudges', section='flows', flow='' if flow == key else key) }}" title="{{ hint }}" class="block {{ 'rounded-2xl ring-2 ring-brand-500' if flow == key else '' }}">
+    {{ ui.stat(name, flow_counts[key], 'in this flow', 'warn' if key in ('followups_done', 'with_team') and flow_counts[key] else 'default') }}</a>
   {% endfor %}
 </div>
-<section class="overflow-hidden rounded-2xl border border-stone-200/70 bg-white shadow-card">
+<section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
   <header class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-5 py-4">
-    <div><h2 class="text-sm font-semibold text-stone-900">{{ flows[flow][0] if flow else 'Every lead' }}{% if flow %} <span class="font-normal text-stone-500">· {{ flows[flow][1] }}</span>{% endif %}</h2>
-      <p class="mt-0.5 text-xs text-stone-500">What each one got last, and what the bot sends next. Soonest first.</p></div>
-    {% if flow %}<a href="{{ url('nudges', section='flows') }}" class="text-xs font-semibold text-brand-700">Show every flow</a>{% endif %}
+    <div><h2 class="text-sm font-semibold text-stone-900">Leads{% if flow %} in {{ flows[flow][0] }}{% endif %}</h2>
+      <p class="mt-0.5 text-xs text-stone-500">{{ flows[flow][1] if flow else 'Everyone the nudges are working on' }}: their last move and what happens next, soonest first.</p></div>
+    {% if flow %}<a href="{{ url('nudges', section='flows') }}" class="text-xs font-medium text-brand-700 hover:underline">Show everyone</a>{% endif %}
   </header>
   {% if flow_rows %}
   <div class="overflow-x-auto">
   <table class="min-w-full text-sm">
-    <thead class="bg-stone-50 text-left text-xs text-stone-500">
-      <tr><th class="px-4 py-2.5 font-medium">Lead</th><th class="px-3 font-medium">Stage</th><th class="px-3 font-medium">Now</th><th class="px-3 font-medium">Next</th><th class="px-3 font-medium">Last move</th></tr>
+    <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <tr><th class="px-4 py-2.5">Lead</th><th class="px-4 py-2.5">Stage</th><th class="px-4 py-2.5">Flow</th><th class="px-4 py-2.5">Next</th><th class="px-4 py-2.5">Last move</th></tr>
     </thead>
     <tbody class="divide-y divide-stone-100">
     {% for lead, f in flow_rows %}
-      <tr class="align-top hover:bg-stone-50/70">
-        <td class="px-4 py-2.5"><a href="{{ url_for('admin_sft_lead', lead_id=lead.id) }}" class="font-medium text-stone-900 hover:text-brand-700">{{ lead.name or lead.profile_name or 'Unknown' }}</a>
-          <div class="text-xs text-stone-500">+{{ lead.whatsapp_number }} · {{ lead.source }}</div></td>
-        <td class="px-3 py-2.5">{{ sft.stage(c, lead.stage) }}</td>
-        <td class="px-3 py-2.5 text-xs"><div class="font-semibold text-stone-800">{{ f.name }}</div><div class="text-stone-500">{{ f.now }}</div></td>
-        <td class="px-3 py-2.5 text-xs">{% if f.next %}<div class="{{ 'text-stone-400 line-through' if f.paused else 'font-medium text-brand-700' }}">{{ f.next }}</div>
-          {% if f.at %}<div class="text-stone-500">{{ local(f.at) }}</div>{% endif %}{% if f.paused %}<div class="text-[10px] font-semibold uppercase text-amber-700">Switched off</div>{% endif %}
-          {% else %}<span class="text-stone-400">-</span>{% endif %}</td>
-        <td class="whitespace-nowrap px-3 py-2.5 text-xs text-stone-500">{{ local(lead.last_activity_at) }}</td>
+      <tr class="align-top">
+        <td class="px-4 py-2.5"><a href="{{ url_for('admin_sft_lead', lead_id=lead.id) }}" class="font-medium text-stone-900 hover:text-brand-700">{{ lead.name or lead.profile_name or 'No name' }}</a>
+          <div class="font-mono text-xs text-stone-500">+{{ lead.whatsapp_number }}</div></td>
+        <td class="px-4 py-2.5">{{ sft.stage(c, lead.stage) }}</td>
+        <td class="px-4 py-2.5">{{ ui.badge(f.name, 'warn' if f.key in ('followups_done', 'with_team') else 'info') }}<div class="mt-0.5 text-xs text-stone-500">{{ f.now }}</div></td>
+        <td class="px-4 py-2.5 text-xs">{% if f.next %}<span class="{{ 'text-stone-400 line-through' if f.paused else 'text-amber-700' }}">{{ f.next }}</span>
+          {% if f.at %}<div class="text-stone-600">{{ local(f.at) }}</div>{% endif %}{% if f.paused %}<div class="text-[10px] font-semibold uppercase text-stone-400">Switched off</div>{% endif %}
+          {% else %}<span class="text-stone-400">&mdash;</span>{% endif %}</td>
+        <td class="whitespace-nowrap px-4 py-2.5 text-xs text-stone-500">{{ local(lead.last_activity_at) }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
   {{ ui.pager(page, url_with) }}
-  {% else %}{{ ui.empty('Nobody in this flow.') }}{% endif %}
+  {% else %}{{ ui.empty('Nobody here yet. Leads appear as they start the journey.') }}{% endif %}
 </section>
 
 {% elif section == 'sent' %}
-{# ============================ Messages sent ============================ #}
-{% if sent_by %}
-<div class="mb-4 flex flex-wrap gap-2 text-xs">
-  {% for name, n in sent_by | dictsort(by='value', reverse=true) %}<span class="rounded-full bg-white px-3 py-1 text-stone-600 ring-1 ring-stone-200"><span class="font-mono">{{ name }}</span>: <b class="tabular-nums">{{ n }}</b></span>{% endfor %}
-</div>
-{% endif %}
-<section class="overflow-hidden rounded-2xl border border-stone-200/70 bg-white shadow-card">
-  <header class="border-b border-stone-100 px-5 py-4"><h2 class="text-sm font-semibold text-stone-900">Nudges sent</h2>
-    <p class="mt-0.5 text-xs text-stone-500">Every automated follow-up, reminder and check-in in these dates, newest first. "As a template" went outside the 24-hour window; "as a message" inside it.</p></header>
+{# --- Messages sent ------------------------------------------------------------ #}
+<section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="border-b border-stone-100 px-5 py-4"><h2 class="text-sm font-semibold text-stone-900">Messages sent</h2>
+    <p class="mt-0.5 text-xs text-stone-500">Every automated follow-up, reminder and check-in in these dates, newest first.
+      {% if sent_by %}{% for name, n in sent_by | dictsort(by='value', reverse=true) %}<span class="ml-1 rounded-full bg-stone-100 px-2 py-0.5 text-[11px]"><span class="font-mono">{{ name }}</span> {{ n }}</span>{% endfor %}{% endif %}</p></header>
   {% if sends %}
   <div class="overflow-x-auto">
   <table class="min-w-full text-sm">
-    <thead class="bg-stone-50 text-left text-xs text-stone-500">
-      <tr><th class="px-4 py-2.5 font-medium">When</th><th class="px-3 font-medium">Lead</th><th class="px-3 font-medium">Nudge</th><th class="px-3 font-medium">Template</th><th class="px-3 font-medium">Sent</th></tr>
+    <thead class="bg-stone-50 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <tr><th class="px-4 py-2.5">When</th><th class="px-4 py-2.5">Lead</th><th class="px-4 py-2.5">For</th><th class="px-4 py-2.5">Message</th><th class="px-4 py-2.5">Status</th></tr>
     </thead>
     <tbody class="divide-y divide-stone-100">
     {% for e, lead in sends %}{% set data = e.data or {} %}
       <tr>
         <td class="whitespace-nowrap px-4 py-2.5 text-xs text-stone-600">{{ local(e.at) }}</td>
-        <td class="px-3 py-2.5"><a href="{{ url_for('admin_sft_lead', lead_id=lead.id) }}" class="font-medium text-stone-900 hover:text-brand-700">{{ lead.name or lead.profile_name or 'Unknown' }}</a>
-          <div class="text-xs text-stone-500">+{{ lead.whatsapp_number }}</div></td>
-        <td class="px-3 py-2.5 text-xs text-stone-700">{{ e.detail }}</td>
-        <td class="px-3 py-2.5 font-mono text-xs">{{ data.template or '-' }}</td>
-        <td class="px-3 py-2.5 text-xs">{% if e.kind == 'nudge_skip' %}{{ ui.badge('Skipped (off)') }}
-          {% elif data.how == 'template' %}{{ ui.badge('As a template', 'good') }}
-          {% elif data.how in ('text', 'buttons') %}{{ ui.badge('As a message', 'good') }}
+        <td class="px-4 py-2.5">{{ lead.name or lead.profile_name or 'No name' }} <span class="font-mono text-xs text-stone-500">+{{ lead.whatsapp_number }}</span></td>
+        <td class="px-4 py-2.5 text-xs">{{ e.detail }}</td>
+        <td class="px-4 py-2.5 font-mono text-xs">{{ data.template or '-' }}</td>
+        <td class="px-4 py-2.5">{% if e.kind == 'nudge_skip' %}{{ ui.badge('Skipped (off)') }}
+          {% elif data.how == 'template' %}{{ ui.badge('Sent as template', 'good') }}
+          {% elif data.how in ('text', 'buttons') %}{{ ui.badge('Sent', 'good') }}
           {% elif 'how' in data %}{{ ui.badge('Not sent', 'bad') }}
           {% else %}{{ ui.badge('Sent', 'good') }}{% endif %}</td>
       </tr>
@@ -193,29 +207,36 @@
   </table>
   </div>
   {{ ui.pager(page, url_with) }}
-  {% else %}{{ ui.empty('No nudges went out in these dates.') }}{% endif %}
+  {% else %}{{ ui.empty('No messages sent yet.') }}{% endif %}
 </section>
 
 {% else %}
-{# ============================ WhatsApp templates ============================ #}
-{% call ui.card('Follow-up templates', 'WhatsApp only delivers these outside the 24-hour window once Meta approves them. Until then a nudge goes as an ordinary message when the window is open, and is skipped when it is not.') %}
-  {% if templates and templates[0].error %}<p class="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">Could not read Gallabox's list: {{ templates[0].error }}</p>{% endif %}
-  <div class="overflow-x-auto">
-  <table class="w-full text-sm">
-    <thead><tr class="text-left text-xs text-stone-500"><th class="py-1.5 pr-3 font-medium">Template</th><th class="pr-3 font-medium">Sent when</th><th class="pr-3 font-medium">Text</th><th class="font-medium">Status</th></tr></thead>
-    <tbody class="divide-y divide-stone-100">
+{# --- WhatsApp templates ----------------------------------------------------------- #}
+<section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  <header class="flex flex-wrap items-start justify-between gap-2 border-b border-stone-100 px-5 py-4">
+    <div>
+      {% set waiting = templates | rejectattr('status', 'equalto', 'approved') | list | length %}
+      <h2 class="text-sm font-semibold text-stone-900">Messages <span class="font-normal text-stone-500">· {{ templates | length }}{% if waiting %}, {{ waiting }} not approved yet{% endif %}</span></h2>
+      <p class="mt-0.5 text-xs text-stone-500">{% if templates and templates[0].error %}Gallabox could not be reached, so approval is not shown right now: {{ templates[0].error }}{% else %}Approval as WhatsApp reports it. A template's text can't be changed once sent for approval. Until Meta approves one, its nudge goes as an ordinary message inside the 24-hour window and is skipped outside it.{% endif %}</p>
+    </div>
+    <a href="{{ url('nudges', section='templates') }}" class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200 hover:bg-brand-50">Check approval now</a>
+  </header>
+  <ul class="divide-y divide-stone-100">
     {% for row in templates %}
-      <tr class="align-top"><td class="py-2 pr-3 font-mono text-xs text-stone-800">{{ row.spec.name }}<div class="font-sans text-[11px] text-stone-400">{{ row.spec.category | lower }}</div></td>
-        <td class="pr-3 text-xs text-stone-600">{{ row.spec.trigger }}</td>
-        <td class="pr-3 text-xs text-stone-600">{{ row.spec.sample_body }}{% if row.spec.quick_replies %}<div class="mt-1 flex flex-wrap gap-1">{% for qr in row.spec.quick_replies %}<span class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px]">{{ qr }}</span>{% endfor %}</div>{% endif %}</td>
-        <td class="text-xs">{{ sft.wa_status(row.status) }}{% if row.reason %}<div class="mt-1 text-[11px] text-red-600">{{ row.reason }}</div>{% endif %}</td></tr>
+    <li class="flex flex-wrap items-start gap-4 px-5 py-4">
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-2"><span class="text-sm font-semibold text-stone-900">{{ row.spec.trigger | replace('SFT: ', '') | capitalize }}</span>{{ sft.wa_status(row.status) }}</div>
+        <div class="mt-0.5 font-mono text-[11px] text-stone-500">{{ row.spec.name }} · {{ row.spec.category | lower }}</div>
+        <p class="mt-1.5 max-w-xl whitespace-pre-line rounded-xl rounded-tl-sm bg-emerald-50 px-3 py-2 text-sm text-stone-800">{{ row.spec.sample_body | replace('{{1}}', 'Priya') | replace('{{2}}', '+1 555 123 0001') | replace('{{3}}', 'asked a question') }}</p>
+        <div class="mt-1.5 flex flex-wrap gap-1.5">{% for qr in row.spec.quick_replies %}<span class="rounded-md border border-stone-200 px-2 py-0.5 text-[11px] text-sky-700">{{ qr }}</span>{% else %}<span class="text-[11px] text-stone-400">No buttons</span>{% endfor %}</div>
+        {% if row.reason %}<p class="mt-1.5 text-xs text-red-600">{{ row.reason }}</p>{% endif %}
+      </div>
+    </li>
     {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  <form method="post" action="{{ url_for('admin_sft_templates') }}" class="mt-4">
-    <button class="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Submit the missing ones to WhatsApp</button>
-    <span class="ml-2 text-xs text-stone-500">On {{ 'SFT\'s own number' if cfg.channel_id else 'Shero US\'s number' }}. Meta usually decides within a day.</span>
+  </ul>
+  <form method="post" action="{{ url_for('admin_sft_templates') }}" class="flex flex-wrap items-center gap-3 border-t border-stone-100 bg-stone-50 px-5 py-4">
+    <span class="text-xs text-stone-500">On {{ 'SFT\'s own number' if cfg.channel_id else 'Shero US\'s number' }}. Meta usually decides within a day.</span>
+    <button class="{{ button }} ml-auto">Submit the missing ones to WhatsApp</button>
   </form>
-{% endcall %}
+</section>
 {% endif %}
