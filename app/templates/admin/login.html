@@ -67,8 +67,9 @@
     <div class="rise w-full max-w-sm">
       <form id="login" method="post" action="{{ url_for('admin_login') }}" novalidate
             class="rounded-2xl border border-mist-200 bg-white p-6 shadow-xl shadow-ink-900/5 sm:p-8">
+        {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
         <h1 class="text-xl font-semibold">Welcome back</h1>
-        <p class="mt-1 text-sm text-ink-700/60">Sign in to continue to the dashboard.</p>
+        <p class="mt-1 text-sm text-ink-700/60">Sign in to continue to {{ 'Shero Food Training' if next and '/admin/sft' in next else 'the dashboard' }}.</p>
 
         {% if error %}
         <div role="alert" class="mt-5 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800">

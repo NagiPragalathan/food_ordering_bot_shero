@@ -1,0 +1,173 @@
+<!doctype html>
+{# Shero Food Training's own layout: only the course's sections, none of the
+   ordering bot's (Menu, Orders, Kitchens…) and no Shero US / DST India tabs.
+   Same login and stylesheet as the dashboard. Pages set `tab` to the section
+   they belong to. #}
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SFT{% endblock %} · Shero Food Training</title>
+  <link rel="stylesheet" href="{{ static_url('css/admin.css') }}">
+  {% include "_brand.html" %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    ::-webkit-scrollbar{width:10px;height:10px}
+    ::-webkit-scrollbar-thumb{background:#c2d4d3;border-radius:8px}
+    ::-webkit-scrollbar-track{background:transparent}
+    .dots{background-image:radial-gradient(rgba(255,255,255,.28) 1px,transparent 1.5px);background-size:22px 22px}
+    @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    .page-in{animation:rise .3s ease-out both}
+    @media (prefers-reduced-motion:reduce){.page-in{animation:none}}
+    /* A wide table scrolls inside its card instead of widening the page on a phone. */
+    main .grid > *{min-width:0}
+  </style>
+</head>
+<body class="h-full bg-stone-100 font-sans text-stone-800 antialiased">
+
+{% set home = url_for('admin_sft') %}
+{% set here = tab if tab is defined else 'overview' %}
+{% set sections = [
+  ('Course leads', [
+    ('overview', 'Overview', 'M3 3v18h18M7 15l4-4 3 3 5-6'),
+    ('leads', 'Leads', 'M17 20h5v-2a4 4 0 00-5-3.9M9 20H4v-2a4 4 0 015-3.9m8-6.1a4 4 0 11-8 0 4 4 0 018 0z'),
+    ('chat', 'Test chat', 'M21 12a8 8 0 01-11.6 7.1L3 21l1.9-6.4A8 8 0 1121 12z'),
+  ]),
+  ('Set up', [
+    ('journey', 'Journey', 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01'),
+    ('settings', 'Settings', 'M10.3 4.3a2 2 0 013.4 0l.5.9a2 2 0 002 1l1 .1a2 2 0 011.7 2.9l-.5.9a2 2 0 000 2l.5.9a2 2 0 01-1.7 2.9l-1 .1a2 2 0 00-2 1l-.5.9a2 2 0 01-3.4 0l-.5-.9a2 2 0 00-2-1l-1-.1a2 2 0 01-1.7-2.9l.5-.9a2 2 0 000-2l-.5-.9A2 2 0 015.8 6.3l1-.1a2 2 0 002-1zM12 14a2 2 0 100-4 2 2 0 000 4z'),
+    ('templates', 'Templates', 'M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5M9 13h6M9 17h4'),
+  ]),
+] %}
+{% set badges = {'overview': attention_count if attention_count is defined else 0} %}
+{% set mode = cfg.mode if cfg is defined else 'off' %}
+{% set sign_out = url_for('admin_logout') ~ '?next=' ~ (home.path | urlencode) %}
+
+<div class="flex min-h-full">
+
+  <aside class="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-hidden bg-gradient-to-b
+                from-brand-600 via-brand-700 to-brand-900 text-white lg:flex" data-sft-sidebar>
+    <div class="dots pointer-events-none absolute inset-0 w-64 opacity-40
+                [mask-image:linear-gradient(180deg,#000,transparent_40%)]"></div>
+
+    <a href="{{ home }}" class="relative flex h-20 items-center gap-3 px-5">
+      <img src="/static/brand/shero-logo-192.png" alt="" width="44" height="44"
+           class="h-11 w-11 rounded-xl shadow-lg ring-2 ring-white/25">
+      <div>
+        <div class="font-semibold leading-tight">Shero Food Training</div>
+        <div class="text-xs leading-tight text-white/65">SFT · course on WhatsApp</div>
+      </div>
+    </a>
+
+    <nav class="relative flex-1 space-y-1 px-3 py-2">
+      {% for heading, items in sections %}
+        <div class="px-3 pb-2 {{ 'pt-4' if not loop.first else '' }} text-[10px] font-semibold uppercase tracking-wider text-white/45">{{ heading }}</div>
+        {% for key, label, icon in items %}
+          {% set active = here == key %}
+          <a href="{{ home }}?tab={{ key }}" {% if active %}aria-current="page"{% endif %}
+             class="group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition
+                    {% if active %}bg-white font-semibold text-brand-700 shadow-lg shadow-brand-900/20
+                    {% else %}text-white/80 hover:bg-white/10 hover:text-white{% endif %}">
+            <svg class="h-[18px] w-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.8"
+                 stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="{{ icon }}"/></svg>
+            {{ label }}
+            {% if badges.get(key) %}
+              <span class="ml-auto rounded-full bg-accent-500 px-1.5 text-[10px] font-bold leading-4 text-white">{{ badges[key] }}</span>
+            {% elif active %}<span class="ml-auto h-1.5 w-1.5 rounded-full bg-accent-500"></span>{% endif %}
+          </a>
+        {% endfor %}
+      {% endfor %}
+    </nav>
+
+    {# Who SFT answers right now, one tap from changing it. #}
+    <a href="{{ home }}?tab=settings" class="relative mx-3 mb-2 flex items-center gap-2.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs ring-1 ring-white/10 hover:bg-white/15">
+      <span class="h-2 w-2 shrink-0 rounded-full {{ 'bg-emerald-400' if mode == 'live' else ('bg-amber-400' if mode == 'test' else 'bg-white/40') }}"></span>
+      <span class="flex-1">
+        <span class="block font-semibold">{{ {'live': 'Live', 'test': 'Test mode'}.get(mode, 'Off') }}</span>
+        <span class="block text-white/60">{{ {'live': 'Answering every SFT lead', 'test': 'Answering the test numbers only'}.get(mode, 'Answering nobody yet') }}</span>
+      </span>
+    </a>
+
+    <div class="relative m-3 mt-0 rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+      <div class="flex items-center gap-2.5">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-sm font-bold text-brand-700">
+          {{ (current_user.name or current_user.email)[:1] | upper }}
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-medium">{{ current_user.name or 'Admin' }}</div>
+          <div class="truncate text-[11px] text-white/60">{{ current_user.email }}</div>
+        </div>
+        <a href="{{ sign_out }}" title="Sign out" aria-label="Sign out"
+           class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/70 transition hover:bg-white/15 hover:text-white">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+               stroke-linejoin="round" viewBox="0 0 24 24"><path d="M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 01-2-2V5a2 2 0 012-2h7"/></svg>
+        </a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="flex min-w-0 flex-1 flex-col">
+    <!-- Phone top bar; the sections are in the bottom bar. -->
+    <div class="flex items-center justify-between bg-gradient-to-r from-brand-600 to-brand-700 px-4 py-3 text-white lg:hidden">
+      <a href="{{ home }}" class="flex items-center gap-2.5">
+        <img src="/static/brand/shero-logo-192.png" alt="" width="32" height="32" class="h-8 w-8 rounded-lg ring-1 ring-white/30">
+        <span class="text-sm font-semibold">Shero Food Training</span>
+      </a>
+      <a href="{{ sign_out }}" class="rounded-lg px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10">Sign out</a>
+    </div>
+
+    <header class="sticky top-0 z-10 flex min-h-[4.5rem] flex-wrap items-center justify-between gap-3 border-b
+                   border-stone-200/80 bg-stone-100 px-5 py-3 lg:px-8">
+      <div>
+        <h1 class="text-xl font-semibold tracking-tight text-stone-900">{% block heading %}Shero Food Training{% endblock %}</h1>
+        {% block subheading %}{% endblock %}
+      </div>
+      <div class="flex items-center gap-2">{% block actions %}{% endblock %}</div>
+    </header>
+
+    <main class="page-in flex-1 p-5 lg:p-8">
+      {% with messages = flash %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div role="status" class="mb-5 flex items-start gap-3 rounded-2xl border bg-white px-4 py-3 text-sm shadow-card
+              {% if category == 'error' %}border-red-200 text-red-800
+              {% elif category == 'warning' %}border-amber-200 text-amber-900
+              {% else %}border-emerald-200 text-emerald-800{% endif %}">
+              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full
+                {% if category == 'error' %}bg-red-100{% elif category == 'warning' %}bg-amber-100{% else %}bg-emerald-100{% endif %}">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4"
+                     stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                  {% if category in ('error', 'warning') %}<path d="M12 8v5m0 3h.01"/>
+                  {% else %}<path d="M20 6L9 17l-5-5"/>{% endif %}
+                </svg>
+              </span>
+              <div class="whitespace-pre-line pt-0.5">{{ message }}</div>
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<!-- Phone bottom nav: the same six sections. -->
+<nav class="fixed inset-x-0 bottom-0 z-20 flex border-t border-stone-200 bg-white/95 backdrop-blur lg:hidden">
+  {% for heading, items in sections %}{% for key, label, icon in items %}
+    {% set active = here == key %}
+    <a href="{{ home }}?tab={{ key }}" class="relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[10px]
+       {% if active %}font-semibold text-brand-700{% else %}text-stone-500{% endif %}">
+      {% if active %}<span class="absolute top-0 h-0.5 w-8 rounded-full bg-brand-500"></span>{% endif %}
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="{{ icon }}"/></svg>
+      <span class="max-w-full truncate px-0.5">{{ 'Chat' if key == 'chat' else label }}</span>
+    </a>
+  {% endfor %}{% endfor %}
+</nav>
+<div class="h-16 lg:hidden"></div>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

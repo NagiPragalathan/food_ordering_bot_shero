@@ -1,7 +1,8 @@
-{% extends "admin/base.html" %}
+{% extends "admin/sft/base.html" %}
 {% import "admin/_macros.html" as ui %}
 {% import "admin/sft/_bits.html" as sft %}
-{% block title %}SFT lead{% endblock %}
+{% set tab = 'leads' %}
+{% block title %}{{ lead.name or lead.profile_name or 'Lead' }}{% endblock %}
 {% block heading %}{{ lead.name or lead.profile_name or ('+' ~ lead.whatsapp_number) }}{% endblock %}
 {% block subheading %}
   <p class="text-xs text-stone-500"><a href="{{ back }}" class="font-semibold text-brand-700">← SFT leads</a> · +{{ lead.whatsapp_number }} · came in {{ local(lead.created_at) }}</p>

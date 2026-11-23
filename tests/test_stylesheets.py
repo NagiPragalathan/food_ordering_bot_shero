@@ -11,6 +11,7 @@ from app.templating import STATIC_DIR, TEMPLATE_DIR, static_url
 PAGES = {
     "admin/base.html": "css/admin.css",
     "admin/login.html": "css/admin.css",
+    "admin/sft/base.html": "css/admin.css",
     "order/index.html": "css/order.css",
     "order/location.html": "css/order.css",
     "order/expired.html": "css/order.css",

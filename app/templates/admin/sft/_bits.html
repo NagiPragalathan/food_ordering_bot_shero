@@ -48,7 +48,7 @@
 {% macro bubble(e, local) %}
 {% set mine = e.kind == 'inbound' %}
 <div class="flex {{ 'justify-start' if mine else 'justify-end' }}">
-  <div class="max-w-[85%] rounded-2xl px-3.5 py-2 text-sm shadow-sm
+  <div class="min-w-0 max-w-[85%] rounded-2xl px-3.5 py-2 text-sm shadow-sm [overflow-wrap:anywhere]
     {% if mine %}rounded-bl-md bg-white ring-1 ring-stone-200
     {% elif e.kind in ('send_failed', 'not_sent') %}rounded-br-md bg-red-50 text-red-800 ring-1 ring-red-200
     {% else %}rounded-br-md bg-[#DCF8C6] text-stone-900{% endif %}">

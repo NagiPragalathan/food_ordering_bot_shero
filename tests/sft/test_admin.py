@@ -31,7 +31,21 @@ def admin(session):
 def test_every_tab_opens(admin, tab):
     page = admin.get(f"/admin/sft?tab={tab}")
     assert page.status_code == 200, page.text[:500]
-    assert "Shero Food Training (SFT)" in page.text
+    assert "Shero Food Training" in page.text and "data-sft-sidebar" in page.text
+    assert f'href="http://testserver/admin/sft?tab={tab}" aria-current="page"' in page.text
+
+
+@pytest.mark.parametrize("path", ["/admin/sft", "/admin/sft?tab=settings", "lead"])
+async def test_sft_has_its_own_menu_not_the_food_dashboards(admin, session, cfg, rec, path):
+    if path == "lead":
+        await say(session, cfg, "SFT")
+        path = f"/admin/sft/leads/{(await leads.get(session, NUMBER)).id}"
+    page = admin.get(path).text
+    for key in ("overview", "leads", "chat", "journey", "settings", "templates"):
+        assert f"/admin/sft?tab={key}" in page, key
+    for food in ("Kitchens", "Uber queue", "Payouts", "Loyalty", "Bot replies", "DST India",
+                 "data-business-tabs", "admin/menu"):
+        assert food not in page, food
 
 
 def test_it_is_not_in_the_dashboards_menu(admin):

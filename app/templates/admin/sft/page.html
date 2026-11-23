@@ -1,10 +1,18 @@
-{% extends "admin/base.html" %}
+{% extends "admin/sft/base.html" %}
 {% import "admin/_macros.html" as ui %}
 {% import "admin/sft/_bits.html" as sft %}
-{% block title %}Shero Food Training{% endblock %}
-{% block heading %}Shero Food Training (SFT){% endblock %}
+{% set intro = {
+  'overview': 'How the course\'s WhatsApp leads are doing, and who is waiting for the team.',
+  'leads': 'Everyone who started the SFT journey on WhatsApp.',
+  'chat': 'Try the journey as a lead would. Nothing is sent on WhatsApp.',
+  'journey': 'Every message and button the lead sees, stage by stage.',
+  'settings': 'Who SFT answers, the course, the follow-ups, the team\'s tasks and Zoho.',
+  'templates': 'The WhatsApp templates the follow-ups need outside the 24-hour window.',
+} %}
+{% block title %}{{ tabs[tab] }}{% endblock %}
+{% block heading %}{{ tabs[tab] }}{% endblock %}
 {% block subheading %}
-  <p class="text-xs text-stone-500">The course's WhatsApp journey: leads, follow-ups, the team's tasks and Zoho.</p>
+  <p class="text-xs text-stone-500">{{ intro[tab] }}</p>
 {% endblock %}
 {% block actions %}
   {% if cfg.mode == 'live' %}{{ ui.badge('SFT live', 'good') }}
@@ -13,27 +21,23 @@
 {% endblock %}
 
 {% block content %}
-{% set tab_items = [] %}
-{% for key, label in tabs.items() %}
-  {% set count = attention_count if key == 'overview' else (counts.values() | sum if key == 'leads' else '') %}
-  {% set _ = tab_items.append((label, count, url(key), tab == key, 'warn' if key == 'overview' else 'default')) %}
-{% endfor %}
-<div data-sft-tabs>{{ ui.tabs(tab_items) }}</div>
-
-{% if cfg.mode == 'off' %}
-<div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+{% set notices = tab in ('overview', 'settings') and (cfg.mode == 'off' or missing) %}
+{% if notices %}<div class="mb-5 space-y-3">{% endif %}
+{% if cfg.mode == 'off' and tab in ('overview', 'settings') %}
+<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
   SFT is <b>off</b>: it answers nobody, and the ordering bot works exactly as before. Walk the journey in
   <a class="font-semibold underline" href="{{ url('chat') }}">Test chat</a>, then switch it to Test or Live in
   <a class="font-semibold underline" href="{{ url('settings') }}">Settings</a>.
 </div>
 {% endif %}
-{% if missing %}
-<div class="mt-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-xs text-stone-600">
+{% if missing and tab in ('overview', 'settings') %}
+<div class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-xs text-stone-600">
   Before going live: {{ missing | join('; ') }}.
 </div>
 {% endif %}
+{% if notices %}</div>{% endif %}
 
-<div class="mt-5">
+<div>
 {# ============================== Overview ============================== #}
 {% if tab == 'overview' %}
   {% set r = report %}
@@ -178,7 +182,7 @@
 {# ============================== Test chat ============================== #}
 {% elif tab == 'chat' %}
   <div class="grid gap-5 lg:grid-cols-3">
-    <div class="lg:col-span-2">
+    <div class="min-w-0 lg:col-span-2">
       <section class="overflow-hidden rounded-2xl border border-stone-200/70 shadow-card">
         <header class="flex items-center justify-between gap-3 bg-[#075E54] px-4 py-3 text-white">
           <div class="text-sm font-semibold">Test lead +{{ number }}</div>
@@ -204,14 +208,14 @@
           {% endif %}
           <form method="post" action="{{ url_for('admin_sft_chat') }}" class="flex gap-2">
             <input type="hidden" name="number" value="{{ number }}">
-            <input name="text" autocomplete="off" placeholder="Type a message as the lead…" autofocus
+            <input name="text" autocomplete="off" placeholder="Type a message as the lead…" data-sft-say
                    class="min-w-0 flex-1 rounded-full border border-stone-300 px-4 py-2 text-sm outline-none focus:border-brand-500">
             <button class="rounded-full bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">Send</button>
           </form>
         </div>
       </section>
     </div>
-    <div class="space-y-5">
+    <div class="min-w-0 space-y-5">
       {% call ui.card('How the test chat works') %}
         <ul class="list-disc space-y-1.5 pl-4 text-xs text-stone-600">
           <li>It runs the real journey, but nothing is sent on WhatsApp and the lead never goes to Zoho.</li>
@@ -426,6 +430,9 @@
 <script>
   // Newest message in view, as in WhatsApp.
   (function () { var chat = document.querySelector('[data-sft-chat]'); if (chat) chat.scrollTop = chat.scrollHeight; })();
+  // Ready to type on a computer; on a phone, no jump to the bottom and no keyboard popping up.
+  (function () { var say = document.querySelector('[data-sft-say]');
+    if (say && window.matchMedia('(min-width: 1024px)').matches) say.focus({preventScroll: true}); })();
 </script>
 {% endif %}
 {% endblock %}

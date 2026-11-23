@@ -158,8 +158,13 @@ app.include_router(admin_router)
 
 @app.exception_handler(NotAuthenticated)
 async def not_authenticated_handler(request: Request, _: NotAuthenticated):
-    """Send signed-out admins to the login page rather than a bare 401."""
-    return RedirectResponse(request.url_for("admin_login_form"), status_code=303)
+    """Send signed-out admins to the login page rather than a bare 401, and
+    back to the page they opened once signed in (e.g. /admin/sft)."""
+    from app.admin.routes.auth import login_url
+
+    here = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    return RedirectResponse(login_url(request, here if request.method == "GET" else None),
+                            status_code=303)
 
 
 # How each upstream is named on the admin pages.
