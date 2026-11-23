@@ -133,6 +133,11 @@ class Settings(BaseSettings):
     # --- Ops API (outlet staff marking orders) -------------------------------
     ops_api_key: str = ""
 
+    # --- Integration API (read-only: catalogue and orders) --------------------
+    # Each business its own (DST_INTEGRATION_API_KEY for DST India), made on its
+    # admin Settings page. Empty: /api/v1 answers 503 and gives nothing out.
+    integration_api_key: str = ""
+
     # --- Admin dashboard -----------------------------------------------------
     admin_session_secret: str = ""
     admin_session_hours: int = 12

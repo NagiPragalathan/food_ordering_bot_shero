@@ -223,3 +223,15 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
 - India kitchens, ₹ prices, the delivery charge and free-delivery amount,
   and confirmation of 5% GST.
 - Approval of the `dst_` ordering templates (submitted from the script above).
+
+## Integration API (read-only, for DST's CRM)
+
+`/dst/api/v1/kitchens`, `/cuisines`, `/menu`, `/orders`, `/orders/{number}`
+(`app/api/routes/integration.py`): the catalogue and the orders with their
+dishes (each line's sku, cuisine and category), in the same order/customer
+shapes as the pushed CRM events. Header `X-Api-Key`: DST's own key, made on
+**DST India → Settings → Integration API → Generate a new key** (shown once;
+a new key replaces the old one; *Switch off* answers 503). Shero US has its
+own key at `/api/v1`. The developer's guide is
+`docs/DST-India-Integration-API.pdf` (not committed).
+

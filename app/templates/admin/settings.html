@@ -225,6 +225,46 @@
 </section>
 {% endif %}
 
+{# The read-only integration API (api/routes/integration.py): the catalogue and
+   the orders for this business's own systems (DST India's CRM). #}
+<section id="integration-api" class="mb-5 overflow-hidden rounded-xl border border-stone-200 bg-white" data-integration-card>
+  <header class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 bg-stone-50 px-5 py-3">
+    <div class="flex items-center gap-2">
+      <h2 class="text-sm font-semibold">Integration API &middot; read-only</h2>
+      {% if integration.on %}{{ ui.badge('on', 'good') }}{% else %}{{ ui.badge('off') }}{% endif %}
+    </div>
+    <div class="flex gap-2">
+      <form method="post" action="{{ url_for('admin_integration_key', action='generate') }}">
+        <button class="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">{{ 'Generate a new key' if integration.on else 'Switch on: generate a key' }}</button>
+      </form>
+      {% if integration.on %}
+      <form method="post" action="{{ url_for('admin_integration_key', action='off') }}">
+        <button class="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-stone-100">Switch off</button>
+      </form>
+      {% endif %}
+    </div>
+  </header>
+  <div class="space-y-3 p-5 text-sm text-stone-600">
+    {% if new_integration_key %}
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50 p-3" data-integration-new-key>
+      <p class="text-xs font-semibold text-emerald-900">Your new key. Copy it now: it is not shown again.</p>
+      <div class="mt-2 flex items-center gap-2">
+        <code class="block flex-1 break-all rounded bg-white px-2 py-1.5 font-mono text-xs text-stone-900 ring-1 ring-emerald-200" id="integration-key-value">{{ new_integration_key }}</code>
+        <button type="button" class="shrink-0 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
+                onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('integration-key-value').textContent.trim()); this.textContent='Copied';">Copy</button>
+      </div>
+      <p class="mt-2 text-[11px] text-emerald-900">Send it to the developer privately (not inside the PDF or a group chat). The previous key, if any, has stopped working.</p>
+    </div>
+    {% endif %}
+    <p>Lets another system (DST&rsquo;s CRM) read this business&rsquo;s <strong>kitchens, cuisines, menu</strong> and
+      <strong>orders with their dishes</strong>. It can&rsquo;t change anything.</p>
+    <p class="text-xs">Base address <code class="rounded bg-stone-100 px-1.5 py-0.5 font-mono">{{ integration.base_url }}</code>,
+      the key in the <code class="font-mono">X-Api-Key</code> header. Endpoints:
+      <code class="font-mono">/kitchens</code>, <code class="font-mono">/cuisines</code>, <code class="font-mono">/menu</code>,
+      <code class="font-mono">/orders</code>, <code class="font-mono">/orders/&lt;number&gt;</code>.</p>
+  </div>
+</section>
+
 {% include "admin/_order_alerts.html" %}
 
 <form method="post" action="{{ url_for('admin_settings_save') }}" class="space-y-5">

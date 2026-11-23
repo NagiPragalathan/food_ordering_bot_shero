@@ -84,6 +84,8 @@ OTHER_EDITABLE: list[tuple[str, str, bool]] = [
     ("ASK_CUSTOMER_EMAIL", "Ask new customers for their email (on / off)", False),
     ("TEST_PAYMENTS", "Test payments for the bot's test numbers (on / off)", False),
     ("ORDER_ALERT_NUMBERS", "WhatsApp numbers told about every paid order", False),
+    # Made by the Settings page's Integration API card (a new random key).
+    ("INTEGRATION_API_KEY", "Read-only integration API key", True),
 ]
 
 # Shown only to the business that delivers that way (DELIVERY_PROVIDER).

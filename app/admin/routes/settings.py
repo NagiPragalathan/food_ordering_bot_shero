@@ -47,6 +47,11 @@ async def settings_page(
     session: AsyncSession = Depends(get_session),
     current_user: AdminUser = Depends(require_admin),
 ):
+    return await _settings_page(request, session, current_user)
+
+
+async def _settings_page(request: Request, session: AsyncSession, current_user: AdminUser,
+                         **extra):
     overridden = await stored_keys(session)
 
     groups = []
@@ -78,7 +83,45 @@ async def settings_page(
         "razorpay": razorpay_card() if payment_gateway.uses_razorpay() else None,
         # DST India's own CRM (Lead Pipeline & Tracker); Shero US has Zoho only.
         "dst_crm": await dst_crm_card(session) if dst_crm.in_use() else None,
+        # The read-only integration API (api/routes/integration.py).
+        "integration": integration_card(),
+        **extra,
     })
+
+
+def integration_card() -> dict:
+    from app.api.routes import integration
+
+    return {"on": bool((settings.integration_api_key or "").strip()),
+            "base_url": integration.base_url(),
+            "env": f"{tenants.current().env_prefix}INTEGRATION_API_KEY"}
+
+
+@router.post("/integration-key/{action}", name="admin_integration_key")
+async def integration_key(
+    request: Request,
+    action: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: AdminUser = Depends(require_admin),
+):
+    """Make a new read-only API key (shown once, on the page it returns), or
+    switch the API off. A new key replaces the old one at once."""
+    url = str(request.url_for("admin_settings")) + "#integration-api"
+    if action == "off":
+        await save_many(session, {"INTEGRATION_API_KEY": ""}, updated_by=current_user.email,
+                        allow_blank={"INTEGRATION_API_KEY"})
+        log.info("integration_api_key_cleared", by=current_user.email)
+        return redirect(url, flash=("success", "Integration API switched off: the old key no "
+                                               "longer works."))
+    if action != "generate":
+        return redirect(url, flash=("error", f"Unknown action '{action}'."))
+    if is_unset(settings.settings_encryption_key):
+        return redirect(url, flash=("error", "SETTINGS_ENCRYPTION_KEY is not set, so a key "
+                                             "can't be stored safely."))
+    key = "shk_" + secrets.token_urlsafe(32)
+    await save_many(session, {"INTEGRATION_API_KEY": key}, updated_by=current_user.email)
+    log.info("integration_api_key_generated", by=current_user.email)
+    return await _settings_page(request, session, current_user, new_integration_key=key)
 
 
 async def dst_crm_card(session: AsyncSession) -> dict:
