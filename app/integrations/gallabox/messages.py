@@ -14,6 +14,7 @@ limits below are enforced by truncation rather than left to chance:
 
 from __future__ import annotations
 
+import mimetypes
 from dataclasses import dataclass
 
 BUTTON_TITLE_LIMIT = 20
@@ -151,10 +152,17 @@ def cta_url_message(body: str, *, url: str, display_text: str,
 
 
 def document_message(url: str, *, filename: str, caption: str | None = None) -> dict:
-    """A document (a PDF) by its public link, in Meta's shape."""
+    """A document (a PDF) by its public link, in Gallabox's shape: `path` and
+    `mimeType` (its API reference, "Send Document Message").
+
+    Not Meta's `link`/`filename`: Gallabox answers ACCEPTED to that and then
+    drops the message, so the file never reaches the customer. WhatsApp
+    shows the file under the last part of the link, so name the file well.
+    """
     if not url:
         raise ValueError("a document message needs a url")
-    document: dict = {"link": url, "filename": filename}
+    mime = mimetypes.guess_type(filename or url)[0] or "application/pdf"
+    document: dict = {"path": url, "mimeType": mime}
     if caption:
         document["caption"] = caption
     return {"type": "document", "document": document}

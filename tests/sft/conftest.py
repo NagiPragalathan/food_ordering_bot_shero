@@ -51,8 +51,14 @@ class Recorder:
         return [k for k, _, _ in self.sent]
 
     def last(self):
-        assert self.sent, "nothing was sent"
-        return self.sent[-1]
+        """The last message, not counting the receipt PDF that follows a payment
+        (see receipts() for those)."""
+        shown = [s for s in self.sent if not _is_receipt(s)]
+        assert shown, "nothing was sent"
+        return shown[-1]
+
+    def receipts(self) -> list[tuple[str, str, object]]:
+        return [s for s in self.sent if _is_receipt(s)]
 
     def buttons(self) -> list[str]:
         """The titles of the last message's buttons (or list rows)."""
@@ -63,6 +69,20 @@ class Recorder:
 
     def clear(self) -> None:
         self.sent.clear()
+
+
+def _is_receipt(sent) -> bool:
+    return sent[0] == "document" and str(sent[1]).startswith("SFT-Enrollment-Receipt-")
+
+
+@pytest.fixture(autouse=True)
+def media_dir(tmp_path, monkeypatch):
+    """Uploads and receipts go to a temporary folder, never the repo's data/."""
+    from app.services import media
+
+    folder = tmp_path / "media"
+    monkeypatch.setattr(media, "MEDIA_DIR", folder)
+    return folder
 
 
 @pytest.fixture

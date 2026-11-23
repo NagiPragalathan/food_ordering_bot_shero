@@ -44,7 +44,8 @@ from app.db.session import get_session
 from app.integrations.gallabox.client import use_channel
 from app.integrations.gallabox.sender import use_sender
 from app.schemas.inbound import InboundEvent, InboundKind
-from app.sft import analytics, config, content as c, crm, flow, leads, nudges, offers, payments
+from app.sft import analytics, brochure, config, content as c, crm, flow, leads, nudges, offers
+from app.sft import payments, receipt
 from app.sft import periods, sending, views
 from app.sft import router as sft_router
 from app.sft.config import MODES, NUDGES, SftConfigError
@@ -437,7 +438,9 @@ async def _chat(request, session, cfg, rng, page, url) -> dict:
 
 
 async def _settings(request, session, cfg, rng, page, url) -> dict:
-    return {"stripe_live": not is_unset(settings.stripe_secret_key)}
+    return {"stripe_live": not is_unset(settings.stripe_secret_key),
+            "brochure": brochure.describe(cfg), "brochure_max_mb": brochure.MAX_BYTES // 2**20,
+            "zoho_statuses": crm.statuses()}
 
 
 async def _timeline(session, lead, kinds: tuple[str, ...] | None = None, limit: int = 300):
@@ -481,6 +484,9 @@ async def lead_page(lead_id: str, request: Request, session: AsyncSession = Depe
         "events": await _timeline(session, lead), "drop": drop, "script": script,
         "local": lambda when: _local(cfg, when),
         "enrol_url": flow.enrol_url(lead), "tags": sorted(crm.tags(lead)),
+        "lead_status": crm.lead_status(lead),
+        "receipt_url": (f"/sft/receipt/{lead.pay_token}/{receipt.filename(lead)}"
+                        if lead.paid_at else ""),
         "back": _url(request, "leads"), "flow_state": views.flow_of(lead, cfg, last.get(lead.id)),
         "price": price, "price_text": offers.fee_text(cfg, price),
         "attention_count": await _count(session, SftLead.needs_attention.is_(True)),
@@ -643,6 +649,41 @@ async def save_settings(request: Request, session: AsyncSession = Depends(get_se
             data[flag] = form.get(flag) == "on"
     return await _save(request, session, data, current_user.email, _url(request, "settings"),
                        "SFT settings saved.")
+
+
+@router.post("/brochure", name="admin_sft_brochure")
+async def brochure_upload(request: Request, session: AsyncSession = Depends(get_session),
+                          current_user: AdminUser = Depends(require_admin)):
+    """Replace the brochure PDF the bot sends, or go back to the original."""
+    form = await request.form()
+    back = _url(request, "settings")
+    cfg = await config.load(session, fresh=True)
+    data = cfg.model_dump(mode="json")
+    old = cfg.brochure_file
+    if form.get("action") == "reset":
+        data.update(brochure_file="", brochure_label="")
+        done = "Back to the original brochure. Leads get it from now on."
+    else:
+        upload = form.get("brochure")
+        if upload is None or not hasattr(upload, "read"):
+            return redirect(back, flash=("error", "Choose a PDF file first."))
+        raw = await upload.read(brochure.MAX_BYTES + 1)
+        try:
+            data["brochure_file"] = brochure.store(raw)
+        except brochure.BrochureError as exc:
+            return redirect(back, flash=("error", str(exc)))
+        data["brochure_label"] = (getattr(upload, "filename", "") or "")[:120]
+        replaced_link = bool(data.get("brochure_url"))
+        data["brochure_url"] = ""
+        done = ("New brochure saved: leads get this PDF from now on."
+                + (" (It replaces the brochure link that was set.)" if replaced_link else ""))
+    try:
+        await config.save(session, data, current_user.email)
+    except SftConfigError as exc:
+        return redirect(back, flash=("error", f"Not saved: {exc}"))
+    if old and old != data["brochure_file"]:
+        brochure.remove(old)
+    return redirect(back, flash=("success", done))
 
 
 @router.post("/replies", name="admin_sft_replies")
@@ -916,8 +957,8 @@ async def zoho_actions(request: Request, session: AsyncSession = Depends(get_ses
     try:
         if form.get("action") == "prepare":
             added = await crm.prepare(session)
-            message = ("Added to Zoho's Lead Source: " + ", ".join(added)) if added else \
-                "Zoho already has every SFT Lead Source."
+            message = ("Added to Zoho: " + ", ".join(added)) if added else \
+                "Zoho already has every SFT Lead Source and Lead Status."
         else:
             synced = await crm.run(session)
             message = f"Synced {synced} lead(s) to Zoho."

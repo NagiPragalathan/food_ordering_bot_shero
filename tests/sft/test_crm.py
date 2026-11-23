@@ -9,7 +9,7 @@ from app.core.exceptions import IntegrationError
 from app.db.models import SftEvent
 from app.integrations.zoho import crm as zcrm
 from app.sft import content as c
-from app.sft import crm, leads
+from app.sft import config, crm, leads
 from tests.sft.conftest import NUMBER, say
 
 
@@ -176,3 +176,99 @@ async def test_prepare_adds_the_sft_lead_sources(session, cfg, zoho, monkeypatch
     missing = await crm.prepare(session)
     assert "SFT - WhatsApp" not in missing and "SFT - Meta Ad" in missing
     assert "SFT - Instagram" in added
+
+
+# --- Zoho Free: no tags, no room for custom fields -----------------------------------
+def _no_tags_on_this_plan(zoho, monkeypatch):
+    """Zoho Free's answer to add_tags (a 403 NOT_SUPPORTED_FEATURE)."""
+    real_post = zoho.post
+    calls = []
+
+    async def post(path, json=None, **kw):
+        if "_tags" in path:
+            calls.append(path)
+            raise IntegrationError(
+                "zoho", 'POST add_tags returned 403: {"code":"NOT_SUPPORTED_FEATURE",'
+                '"message":"your edition doesn\'t support this feature"}', status_code=403,
+                payload={"code": "NOT_SUPPORTED_FEATURE", "status": "error"})
+        return await real_post(path, json=json, **kw)
+
+    monkeypatch.setattr(zoho, "post", post)
+    return calls
+
+
+async def test_a_plan_without_tags_still_syncs_with_lead_status_and_notes(session, cfg, rec,
+                                                                         zoho, monkeypatch):
+    calls = _no_tags_on_this_plan(zoho, monkeypatch)
+    lead = await _brochure_lead(session, cfg)
+    assert await crm.run(session) == 1                   # not a failure
+    assert lead.crm_error is None and not lead.crm_dirty and lead.zoho_tags == []
+    assert zoho.created[0][1]["Lead_Status"] == "SFT - Brochure Sent"
+    assert zoho.paths("/Notes")                          # the timeline went
+    assert (await config.load(session, fresh=True)).zoho_no_tags
+    # Remembered: the next change doesn't ask Zoho for tags again.
+    await say(session, cfg, "yes")                       # Payment Pending
+    await crm.run(session)
+    assert len(calls) == 1
+    assert zoho.updated[-1][2]["Lead_Status"] == "SFT - Payment Pending"
+
+
+async def test_a_food_customers_record_keeps_its_lead_status(session, cfg, rec, zoho,
+                                                            monkeypatch):
+    _no_tags_on_this_plan(zoho, monkeypatch)
+
+    async def found(module, number):
+        return {"id": "7007"} if module == "Leads" else None
+
+    monkeypatch.setattr(zcrm, "find_by_phone", found)
+    lead = await _brochure_lead(session, cfg)
+    assert await crm.run(session) == 1
+    assert zoho.created == [] and zoho.updated == []      # Lead Status untouched
+    note = zoho.paths("/Notes")[0]["data"][0]
+    assert "Stage: Brochure Sent" in note["Note_Content"] and lead.crm_error is None
+
+
+async def test_lead_statuses_follow_the_funnel():
+    assert crm.statuses() == ["SFT - New", "SFT - Contacted", "SFT - Interested",
+                              "SFT - Brochure Sent", "SFT - Questions", "SFT - Payment Pending",
+                              "SFT - Enrolled", "SFT - Nurture", "SFT - Lost"]
+
+
+async def test_prepare_adds_the_lead_statuses_and_tries_tags_again(session, cfg, zoho,
+                                                                  monkeypatch):
+    added: dict[str, list[str]] = {}
+
+    async def fields(module):
+        return [{"api_name": "Lead_Source", "id": "f1", "pick_list_values": []},
+                {"api_name": "Lead_Status", "id": "f2",
+                 "pick_list_values": [{"actual_value": "Contacted"},
+                                      {"actual_value": "SFT - New"}]}]
+
+    async def add(module, field_id, options):
+        added[field_id] = list(options)
+
+    monkeypatch.setattr(zoho, "list_fields", fields, raising=False)
+    monkeypatch.setattr(zoho, "add_picklist_options", add, raising=False)
+    data = cfg.model_dump(mode="json")
+    data["zoho_no_tags"] = True
+    await config.save(session, data, "t")
+    result = await crm.prepare(session)
+    assert "SFT - New" not in added["f2"] and "SFT - Enrolled" in added["f2"]
+    assert "SFT - Enrolled" in result and "SFT - WhatsApp" in result
+    assert not (await config.load(session, fresh=True)).zoho_no_tags
+
+
+async def test_a_missing_lead_status_option_is_dropped_with_a_hint(session, cfg, rec, zoho,
+                                                                  monkeypatch):
+    async def create(module, fields):
+        if "Lead_Status" in fields:
+            raise IntegrationError("zoho", "invalid", payload={
+                "code": "INVALID_DATA", "details": {"api_name": "Lead_Status"}})
+        zoho.created.append((module, fields))
+        return "5001"
+
+    monkeypatch.setattr(zoho, "create_record", create)
+    lead = await _brochure_lead(session, cfg)
+    await crm.run(session)
+    assert lead.zoho_id == "5001" and "Lead_Status" not in zoho.created[0][1]
+    assert lead.crm_error.startswith("Lead Status 'SFT - Brochure Sent'")

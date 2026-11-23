@@ -29,7 +29,7 @@ from app.core.logging import get_logger
 from app.db.models import SftLead
 from app.integrations.stripe_gw import checkout
 from app.sft import content as c
-from app.sft import leads, offers, sending
+from app.sft import leads, offers, receipt, sending
 from app.sft.config import TEST, SftConfig
 from app.sft.leads import aware, event, move, now
 
@@ -69,7 +69,8 @@ async def checkout_url(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> 
             "price_data": {
                 "currency": cfg.currency,
                 "unit_amount": checkout.to_minor_units(price.amount),
-                "product_data": {"name": PRODUCT, "description": PRODUCT_TEXT},
+                "product_data": {"name": PRODUCT, "description": PRODUCT_TEXT,
+                                 "images": [f"{base}/static/brand/shero-logo-192.png"]},
             },
             "quantity": 1,
         }],
@@ -151,6 +152,7 @@ async def mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
                            c.say(cfg, "paid_no_link", first=first, amount=amount_text),
                            what="paid")
         await leads.raise_attention(session, lead, "course_link")
+    await _send_receipt(session, lead, cfg, price.offer.title if price.offer else None)
     if not sending.in_window(lead):
         await leads.raise_attention(
             session, lead, "course_link",
@@ -158,6 +160,23 @@ async def mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
                    "reached them: send the course access")
     log.info("sft_paid", lead_id=str(lead.id), test=test)
     return True
+
+
+async def _send_receipt(session: AsyncSession, lead: SftLead, cfg: SftConfig,
+                        offer_title: str | None) -> bool:
+    """The enrollment receipt, as a PDF in their WhatsApp chat. Best effort:
+    a receipt that can't be drawn or sent never undoes the payment."""
+    try:
+        receipt.save(lead, cfg, offer_title=offer_title)
+    except Exception as exc:  # noqa: BLE001 - the payment stands whatever the PDF does
+        log.error("sft_receipt_failed", lead_id=str(lead.id), error=str(exc))
+        await event(session, lead, "send_failed", f"receipt: {exc}"[:300],
+                    data={"what": "receipt"})
+        return False
+    return await sending.document(
+        session, lead, cfg, url=receipt.url(lead), filename=receipt.filename(lead),
+        caption=c.RECEIPT_CAPTION.format(number=receipt.number(lead)),
+        what="receipt", label="Open the receipt")
 
 
 async def failed(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> None:

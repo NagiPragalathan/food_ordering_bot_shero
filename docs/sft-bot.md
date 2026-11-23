@@ -40,7 +40,7 @@ between them.
 | 1 | Lead enters | "May I know your name?", then the welcome with their name, the $99 fee, 10 videos · 10 quizzes · 3 cuisines | Start food business · Improve my skills (the old *Course details* button is gone) |
 | 2 | Choose interest | How SFT helps that goal | View course details · Ask a question |
 | 3 | Send brochure | The brochure PDF, then "Would you like to enroll now?" | **Yes, enroll me** · **Not right now** · **Ask a question** |
-| 3a | Yes | The fee and a secure Stripe checkout button (Pay $99 to enroll) | |
+| 3a | Yes | The fee and a Pay button. It opens the **enroll page**: the course (5-day plan, topics, how certification works), the order summary with any offer, then Stripe's secure checkout | |
 | 3b | Not right now | "No problem… reply SFT any time", then the automated follow-ups | |
 | 3c | Ask a question | "Please type your question". When they do: *"We're transferring you to a member of our team, who will reply to you here shortly."* **The bot then sends this lead nothing (no replies, no follow-ups) until someone on the team hands the chat back** on the SFT page | |
 | 4 | Questions (before the brochure) | A list: What will I learn? · Do I get a certificate? · Kitchen Partner pathway · How much does it cost? · Ask my own question (goes to the team) | View course details · Enroll now · Another question |
@@ -102,8 +102,15 @@ Synced every minute by a job, never inside the chat.
 
 * **Lead Source**: `SFT - WhatsApp`, `SFT - Meta Ad`, `SFT - Instagram`,
   `SFT - Website`… (press **Prepare Zoho** once on the Settings tab to add
-  these options to the picklist).
-* **Tags**: `SFT` on every SFT lead; one stage tag (`SFT New`, `SFT Contacted`,
+  these options, and the Lead Statuses below, to the picklists).
+* **Lead Status** (the funnel, on the bot's own SFT Leads): `SFT - New`,
+  `SFT - Contacted`, `SFT - Interested`, `SFT - Brochure Sent`,
+  `SFT - Questions`, `SFT - Payment Pending`, `SFT - Enrolled`,
+  `SFT - Nurture`, `SFT - Lost`. In Zoho: filter Leads by Lead Source starts
+  with "SFT", group by Lead Status.
+* **Tags**, where the Zoho plan has them (Zoho **Free does not**: its first
+  "NOT_SUPPORTED_FEATURE" switches tags off and the sync carries on with Lead
+  Status and notes; Prepare Zoho tries tags again, e.g. after an upgrade): `SFT` on every SFT lead; one stage tag (`SFT New`, `SFT Contacted`,
   `SFT Interested`, `SFT Brochure Sent`, `SFT Questions`, `SFT Payment Pending`,
   `SFT Enrolled`, `SFT Nurture`, `SFT Lost`); `SFT Goal Business` / `SFT Goal
   Skills`; `SFT via <source>`; `SFT With Team` / `SFT Needs Call`.
@@ -111,8 +118,10 @@ Synced every minute by a job, never inside the chat.
 * **Tasks**: the team's tasks above.
 
 A number Zoho already has (a food customer) keeps its record, name and Lead
-Source; it only gains the SFT tags and notes. Leads made in the Test chat
-never go to Zoho.
+Source and Lead Status (the ordering bot's); it only gains the SFT notes
+(and tags, where the plan has them). Leads made in the Test chat never go to
+Zoho. Shero US's Zoho is the Free edition: no tags, and the 10 custom fields
+per module are used by the ordering bot, which is why SFT uses Lead Status.
 
 ## Where leads come from (for the analytics)
 
@@ -146,7 +155,32 @@ bot at stage 3. It is printed from `docs/sft-brochure/brochure.html`:
     chrome --headless=new --no-pdf-header-footer --print-to-pdf=app/static/sft/shero-food-training-brochure.pdf docs/sft-brochure/brochure.html
 
 Its facts match the bot's FAQ answers (`app/sft/content.py`); change both
-together. A different brochure can be used by putting its link in Settings.
+together.
+
+**Replace the PDF** on the Settings tab (PDF only, up to 16 MB, Gallabox's
+limit): it is kept in the data volume (`data/media/sft/<hash>/Shero-Food-
+Training-SFT-Brochure.pdf`, served under `/media/`), sent from then on, and
+**Use the original** goes back. A link to a brochure elsewhere can be set
+instead (it must open the PDF itself).
+
+Gallabox's document message is `{"path": <link>, "mimeType":
+"application/pdf", "caption": ...}`. Meta's own `link`/`filename` shape is
+answered ACCEPTED by Gallabox and then dropped, so the file never arrived.
+
+## The enroll page and the receipt
+
+`/sft/enrol/<token>` shows the course and the order summary (fee, offer,
+total) with Pay; Pay opens Stripe's checkout (`/sft/enrol/<token>/pay`),
+whose Back link returns to the page. In Test mode (or without a Stripe key)
+Pay marks the lead paid with nobody charged, and the page says so.
+
+Once paid, the page shows "You're enrolled" with the receipt number, and the
+bot sends, after the payment confirmation, the **enrollment receipt PDF**
+(`SFT-Enrollment-Receipt-SFT-<date>-<id>.pdf`: billed to, receipt details,
+course, offer, total paid, next steps; a test payment is marked as one). It
+is drawn at payment and kept under `data/media/sft/receipts/`, so the link
+works the moment WhatsApp fetches it; `/sft/receipt/<token>/<file>` serves it
+(and draws it again if it is missing). The lead's page in the admin links it.
 
 ## The nudges
 

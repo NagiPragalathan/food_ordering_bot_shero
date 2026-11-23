@@ -9,7 +9,14 @@ backoff. One record per WhatsApp number, as for the ordering bot:
   * a new number becomes a Lead with Lead Source "SFT - <source>"
     (SFT - WhatsApp, SFT - Meta Ad, SFT - Instagram, ...)
 
-Tags tell SFT leads apart and say where each is, for Zoho's views and reports:
+Lead Status says where the bot's own SFT Lead is in the funnel (SFT - New,
+SFT - Contacted, ... SFT - Enrolled): it works on every Zoho plan, including
+Free, which has no tags and no room for custom fields. A record Zoho already
+had keeps its own Lead Status (the ordering bot's); the notes say the stage.
+
+Tags tell SFT leads apart and say where each is, for Zoho's views and reports,
+where the Zoho plan has tags (Free does not: the first refusal switches them
+off, and Prepare Zoho tries again after an upgrade):
 
     SFT                          every SFT lead
     SFT <stage>                  exactly one: New, Contacted, Interested,
@@ -48,12 +55,16 @@ BATCH = 25
 BACKOFF_MINUTES = (2, 5, 15, 30, 60, 180, 360)
 ERRORS = (IntegrationError, ConfigurationError, ValueError, KeyError)
 SOURCE_PREFIX = "SFT - "
+STATUS_PREFIX = "SFT - "
 # Leads made in the admin's test chat never go to Zoho.
 TEST_SOURCE = "Test chat"
 TAG_MAX = 25
 # Fields the CRM may not have (added by the ordering bot's setup, or a
 # Lead Source option not created yet): dropped rather than failing the lead.
-OPTIONAL = (f.LEAD_SOURCE, f.AD_ID, f.CAMPAIGN_ID, f.WHATSAPP_PROFILE_NAME, "Description")
+OPTIONAL = (f.LEAD_SOURCE, f.LEAD_STATUS, f.AD_ID, f.CAMPAIGN_ID, f.WHATSAPP_PROFILE_NAME,
+            "Description")
+# Picklist options Prepare Zoho adds; a refusal names the field in the lead's error.
+PICKLIST_LABELS = {f.LEAD_SOURCE: "Lead Source", f.LEAD_STATUS: "Lead Status"}
 
 
 def connected() -> bool:
@@ -62,6 +73,27 @@ def connected() -> bool:
 
 def lead_source(lead: SftLead) -> str:
     return f"{SOURCE_PREFIX}{lead.source}"[:100]
+
+
+def _status_of(stage: str) -> str:
+    tag = c.STAGE_TAGS.get(stage, f"SFT {stage}")
+    return f"{STATUS_PREFIX}{tag.removeprefix(c.TAG_ALL + ' ')}"[:100]
+
+
+def lead_status(lead: SftLead) -> str:
+    """The funnel stage as Zoho's Lead Status: SFT - New ... SFT - Enrolled."""
+    return _status_of(lead.stage)
+
+
+def statuses() -> list[str]:
+    """Every SFT Lead Status, in the funnel's order (Prepare Zoho adds them)."""
+    return [_status_of(stage) for stage in c.STAGE_TAGS]
+
+
+def tags_unsupported(exc: IntegrationError) -> bool:
+    """Zoho's answer when the plan (Free) has no tags."""
+    payload = exc.payload if isinstance(exc.payload, dict) else {}
+    return payload.get("code") == "NOT_SUPPORTED_FEATURE" or "NOT_SUPPORTED_FEATURE" in str(exc)
 
 
 def tags(lead: SftLead) -> set[str]:
@@ -104,16 +136,16 @@ async def run(session: AsyncSession) -> int:
 
 
 async def sync(session: AsyncSession, lead: SftLead, cfg) -> None:
+    # Cleared first: a field Zoho refuses this time says so again below.
+    lead.crm_error = None
     module, record_id = await _record(lead)
     await _update(lead, module, record_id)
-    await _tags(lead, module, record_id)
+    await _tags(session, lead, module, record_id, cfg)
     await _notes(session, lead, module, record_id, tasks=cfg.zoho_tasks)
     lead.crm_dirty = False
     lead.crm_attempts = 0
     lead.crm_next_try_at = None
     lead.crm_synced_at = now()
-    if lead.crm_error and not lead.crm_error.startswith("Lead Source"):
-        lead.crm_error = None
 
 
 async def _record(lead: SftLead) -> tuple[str, str]:
@@ -133,6 +165,7 @@ async def _record(lead: SftLead) -> tuple[str, str]:
         f.PHONE: zcrm.phone(lead.whatsapp_number),
         f.EMAIL: lead.email,
         f.LEAD_SOURCE: lead_source(lead),
+        f.LEAD_STATUS: lead_status(lead),
         f.AD_ID: lead.ad_id,
         f.CAMPAIGN_ID: lead.campaign_id,
         f.WHATSAPP_PROFILE_NAME: lead.profile_name,
@@ -150,12 +183,14 @@ async def _record(lead: SftLead) -> tuple[str, str]:
 
 
 async def _update(lead: SftLead, module: str, record_id: str) -> None:
-    """Their name, email and Lead Source, on the bot's own SFT lead only: a
-    record Zoho already had (a food customer's) keeps its own details."""
+    """Their name, email, Lead Source and Lead Status (the funnel stage), on
+    the bot's own SFT lead only: a record Zoho already had (a food
+    customer's) keeps its own details."""
     if not lead.zoho_created or module != f.LEADS:
         return
     first, last = f.split_name(lead.name)
-    fields = {f.EMAIL: lead.email, f.LEAD_SOURCE: lead_source(lead)}
+    fields = {f.EMAIL: lead.email, f.LEAD_SOURCE: lead_source(lead),
+              f.LEAD_STATUS: lead_status(lead)}
     if lead.name:
         fields.update({f.FIRST_NAME: first or None, f.LAST_NAME: last})
     try:
@@ -178,28 +213,46 @@ async def _write_dropping(write, fields: dict, lead: SftLead):
             refused = zcrm._rejected_field(exc)
             if refused not in OPTIONAL or refused not in payload:
                 raise
-            if refused == f.LEAD_SOURCE:
-                lead.crm_error = (f"Lead Source '{payload[refused]}' is not an option in Zoho: "
-                                  "use Prepare Zoho on the SFT page")
+            if refused in PICKLIST_LABELS:
+                lead.crm_error = (f"{PICKLIST_LABELS[refused]} '{payload[refused]}' is not an "
+                                  "option in Zoho: use Prepare Zoho on the SFT Settings page")
             log.warning("sft_zoho_field_dropped", field=refused)
             payload = {k: v for k, v in payload.items() if k != refused}
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-async def _tags(lead: SftLead, module: str, record_id: str) -> None:
+async def _tags(session: AsyncSession, lead: SftLead, module: str, record_id: str,
+                cfg) -> None:
+    if cfg.zoho_no_tags:
+        return                         # Zoho's plan has none: Lead Status and notes carry it
     wanted = tags(lead)
     had = set(lead.zoho_tags or [])
     add, remove = wanted - had, {t for t in had - wanted if t.startswith("SFT")}
     path = f"/crm/{API_VERSION}/{module}/{record_id}/actions"
-    if add:
-        result = await zoho_client.post(f"{path}/add_tags",
-                                        json={"tags": [{"name": t} for t in sorted(add)]})
-        _check(result, "add tags")
-    if remove:
-        result = await zoho_client.post(f"{path}/remove_tags",
-                                        json={"tags": [{"name": t} for t in sorted(remove)]})
-        _check(result, "remove tags")
+    try:
+        if add:
+            result = await zoho_client.post(f"{path}/add_tags",
+                                            json={"tags": [{"name": t} for t in sorted(add)]})
+            _check(result, "add tags")
+        if remove:
+            result = await zoho_client.post(f"{path}/remove_tags",
+                                            json={"tags": [{"name": t} for t in sorted(remove)]})
+            _check(result, "remove tags")
+    except IntegrationError as exc:
+        if not tags_unsupported(exc):
+            raise
+        await _tags_off(session, cfg)
+        return
     lead.zoho_tags = sorted(wanted)
+
+
+async def _tags_off(session: AsyncSession, cfg) -> None:
+    """Remember that this Zoho plan has no tags, so no lead asks again."""
+    log.warning("sft_zoho_tags_not_on_plan")
+    cfg.zoho_no_tags = True                      # the rest of this run
+    data = (await config.load(session, fresh=True)).model_dump(mode="json")
+    data["zoho_no_tags"] = True
+    await config.save(session, data, "Zoho sync")
 
 
 async def _notes(session: AsyncSession, lead: SftLead, module: str, record_id: str, *,
@@ -278,24 +331,38 @@ def _stamp(at: datetime) -> str:
 
 
 async def prepare(session: AsyncSession) -> list[str]:
-    """Add the SFT Lead Source options to Zoho's picklist (admin button).
-    Returns the options added."""
-    cfg = await config.load(session)
-    wanted = [f"{SOURCE_PREFIX}{s}" for s in
-              ("WhatsApp", "Meta Ad", *cfg.source_codes.values())]
-    found = next((fld for fld in await zoho_client.list_fields(f.LEADS)
-                  if fld.get("api_name") == f.LEAD_SOURCE), None)
-    if found is None:
+    """Add the SFT Lead Source and Lead Status options to Zoho's picklists
+    (admin button). Returns the options added."""
+    cfg = await config.load(session, fresh=True)
+    wanted = {
+        f.LEAD_SOURCE: [f"{SOURCE_PREFIX}{s}" for s in
+                        ("WhatsApp", "Meta Ad", *cfg.source_codes.values())],
+        f.LEAD_STATUS: statuses(),
+    }
+    fields = {fld.get("api_name"): fld for fld in await zoho_client.list_fields(f.LEADS)}
+    if f.LEAD_SOURCE not in fields:
         raise IntegrationError("zoho", "Zoho's Leads module has no Lead Source field")
-    have = {str(o.get("actual_value") or o.get("display_value"))
-            for o in found.get("pick_list_values") or []}
-    missing = [w for w in dict.fromkeys(wanted) if w not in have]
-    if missing:
-        await zoho_client.add_picklist_options(f.LEADS, str(found["id"]), missing)
-    # Leads whose Lead Source was dropped: write it again.
-    stale = (await session.execute(select(SftLead).where(
-        SftLead.crm_error.like("Lead Source%")))).scalars().all()
+    added: list[str] = []
+    for api_name, options in wanted.items():
+        found = fields.get(api_name)
+        if found is None:
+            continue
+        have = {str(o.get("actual_value") or o.get("display_value"))
+                for o in found.get("pick_list_values") or []}
+        missing = [w for w in dict.fromkeys(options) if w not in have]
+        if missing:
+            await zoho_client.add_picklist_options(f.LEADS, str(found["id"]), missing)
+            added += missing
+    # The bot's own SFT Leads: write Lead Source and Lead Status again.
+    stale = (await session.execute(select(SftLead).where(or_(
+        SftLead.crm_error.like("Lead Source%"), SftLead.crm_error.like("Lead Status%"),
+        SftLead.zoho_created.is_(True))))).scalars().all()
     for lead in stale:
         lead.crm_error = None
         lead.crm_dirty = True
-    return missing
+    if cfg.zoho_no_tags:
+        # Tags were refused before: try again, in case the Zoho plan changed.
+        data = cfg.model_dump(mode="json")
+        data["zoho_no_tags"] = False
+        await config.save(session, data, "Prepare Zoho")
+    return added

@@ -194,3 +194,72 @@ async def test_nudges_rules_look_like_the_dashboards(admin):
         assert part in page, part
     templates = admin.get("/admin/sft?tab=nudges&section=templates").text
     assert "Submit the missing ones to WhatsApp" in templates and "sft_followup_1" in templates
+
+
+# --- The brochure PDF: replace it, go back to the original ----------------------------
+PDF = b"%PDF-1.7\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+
+
+async def test_the_brochure_can_be_replaced_and_restored(admin, session, cfg, media_dir):
+    page = admin.get("/admin/sft?tab=settings").text
+    assert "data-sft-brochure" in page and "Replace PDF" in page and "Original" in page
+    sent = admin.post("/admin/sft/brochure", data={"action": "upload"},
+                      files={"brochure": ("SFT brochure v2.pdf", PDF, "application/pdf")})
+    assert sent.status_code == 303
+    cfg = await config.load(session, fresh=True)
+    assert cfg.brochure_label == "SFT brochure v2.pdf"
+    assert cfg.brochure_file.endswith("/Shero-Food-Training-SFT-Brochure.pdf")
+    stored = media_dir / "sft" / cfg.brochure_file
+    assert stored.read_bytes() == PDF
+    assert cfg.brochure_link().endswith(f"/media/sft/{cfg.brochure_file}")
+    page = admin.get("/admin/sft?tab=settings").text
+    assert "SFT brochure v2.pdf" in page and "Use the original" in page
+
+    # A second upload replaces the first and removes its file.
+    admin.post("/admin/sft/brochure", data={"action": "upload"},
+               files={"brochure": ("v3.pdf", PDF + b"% v3\n", "application/pdf")})
+    newer = await config.load(session, fresh=True)
+    assert newer.brochure_file != cfg.brochure_file and not stored.exists()
+
+    admin.post("/admin/sft/brochure", data={"action": "reset"})
+    back = await config.load(session, fresh=True)
+    assert back.brochure_file == "" and back.brochure_link().endswith(
+        "/static/sft/shero-food-training-brochure.pdf")
+
+
+async def test_a_brochure_that_isnt_a_pdf_is_refused(admin, session, cfg):
+    admin.post("/admin/sft/brochure", data={"action": "upload"},
+               files={"brochure": ("photo.png", b"\x89PNG....", "image/png")})
+    assert (await config.load(session, fresh=True)).brochure_file == ""
+    admin.post("/admin/sft/brochure", data={"action": "upload"})
+    assert (await config.load(session, fresh=True)).brochure_file == ""
+
+
+async def test_the_bot_sends_the_uploaded_brochure(admin, session, cfg, rec):
+    admin.post("/admin/sft/brochure", data={"action": "upload"},
+               files={"brochure": ("b.pdf", PDF, "application/pdf")})
+    cfg = await config.load(session, fresh=True)
+    await say(session, cfg, "SFT")
+    await say(session, cfg, "Priya")
+    await say(session, cfg, button=c.B_BUSINESS, title="Start food business")
+    await say(session, cfg, button=c.B_DETAILS, title="View course details")
+    (kind, name, url), = [s for s in rec.sent if s[0] == "document"]
+    assert url.endswith(f"/media/sft/{cfg.brochure_file}")
+
+
+async def test_the_lead_page_links_the_receipt_and_shows_lead_status(admin, session, cfg, rec):
+    lead = await _enrolled(session, cfg)
+    page = admin.get(f"/admin/sft/leads/{lead.id}").text
+    assert "data-sft-receipt-link" in page and "SFT-Enrollment-Receipt-" in page
+    assert "SFT - Enrolled" in page and "data-sft-zoho-fields" in page
+
+
+def test_a_document_goes_in_gallaboxs_shape():
+    """path + mimeType: Gallabox accepts Meta's link/filename but never delivers it."""
+    from app.integrations.gallabox import messages as m
+
+    block = m.document_message("https://x.example/a/Brochure.pdf", filename="Brochure.pdf",
+                               caption="The brochure")
+    assert block == {"type": "document", "document": {
+        "path": "https://x.example/a/Brochure.pdf", "mimeType": "application/pdf",
+        "caption": "The brochure"}}

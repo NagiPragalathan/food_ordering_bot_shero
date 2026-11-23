@@ -161,6 +161,8 @@ ENROL = ("Wonderful, {first}! 🎉 You're ready to start Shero Food Training.\n\
 PAY_REMINDER = ("Hi {first}, your enrollment isn't complete yet. Your secure checkout is below; "
                 "it only takes a minute. 🙂")
 ALREADY_PAID = "You're already enrolled, {first}! 🎉 Here's your course again."
+# The caption on the receipt PDF sent after paying.
+RECEIPT_CAPTION = "Your enrollment receipt 🧾 No. {number}"
 
 PAID = ("Congratulations, {first}! 🎉 Your enrollment payment of {amount} is confirmed. "
         "Welcome to Shero Food Training!\n\n"

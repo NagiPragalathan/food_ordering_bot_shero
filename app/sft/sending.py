@@ -90,11 +90,12 @@ async def faq_list(session, lead, cfg, body: str) -> bool:
                      {"buttons": [[i, t] for i, t, _ in c.FAQ_ROWS]})
 
 
-async def document(session, lead, cfg, *, url: str, filename: str, caption: str) -> bool:
-    return await _go(session, lead, cfg, "brochure",
+async def document(session, lead, cfg, *, url: str, filename: str, caption: str,
+                   what: str = "brochure", label: str = "Open the brochure") -> bool:
+    return await _go(session, lead, cfg, what,
                      lambda s: s.send_document(lead.whatsapp_number, url=url, filename=filename,
                                                caption=caption),
-                     f"📄 {filename}", {"link": url, "label": "Open the brochure"})
+                     f"📄 {filename}", {"link": url, "label": label})
 
 
 async def template(session, lead, cfg, spec: TemplateSpec, *values: object, at=None) -> str:

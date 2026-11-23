@@ -72,8 +72,12 @@ class SftConfig(BaseModel):
     ask_name: bool = True
     course_fee: Decimal = Field(default=Decimal("99"), gt=0, le=10000)
     currency: str = "usd"
-    # Empty: the brochure this server serves (/static/sft/...).
+    # A link to the brochure somewhere else. Empty: the PDF uploaded on the
+    # Settings page (brochure_file, under /media/sft/), else the one this
+    # server ships (/static/sft/...).
     brochure_url: str = ""
+    brochure_file: str = ""
+    brochure_label: str = ""      # the uploaded file's own name, for the Settings page
     # The course platform's link, sent once they have paid.
     course_url: str = ""
     course_access_note: str = ""
@@ -117,6 +121,9 @@ class SftConfig(BaseModel):
     # Zoho CRM (Shero US's): leads, tags, notes and team tasks.
     zoho_sync: bool = True
     zoho_tasks: bool = True
+    # Set by the sync when Zoho says the plan has no tags (Free edition):
+    # the stage then lives in Lead Status and the notes. Prepare Zoho clears it.
+    zoho_no_tags: bool = False
 
     @field_validator("test_numbers", "team_numbers", mode="before")
     @classmethod
@@ -204,6 +211,14 @@ class SftConfig(BaseModel):
             raise ValueError("a link starting with https://")
         return value
 
+    @field_validator("brochure_file")
+    @classmethod
+    def _brochure_file(cls, value):
+        value = (value or "").strip()
+        if value and not re.fullmatch(r"[0-9a-f]{8,64}/[A-Za-z0-9._-]{1,120}\.pdf", value):
+            raise ValueError("an uploaded brochure's name")
+        return value
+
     @field_validator("timezone")
     @classmethod
     def _timezone(cls, value):
@@ -243,7 +258,12 @@ class SftConfig(BaseModel):
     def brochure_link(self) -> str:
         if self.brochure_url:
             return self.brochure_url
-        return f"{settings.public_base_url.rstrip('/')}/static/sft/{BROCHURE_FILE}"
+        from app.sft import brochure
+
+        base = settings.public_base_url.rstrip("/")
+        if self.brochure_file and brochure.path_of(self.brochure_file) is not None:
+            return f"{base}/media/sft/{self.brochure_file}"
+        return f"{base}/static/sft/{BROCHURE_FILE}"
 
 
 BROCHURE_FILE = "shero-food-training-brochure.pdf"

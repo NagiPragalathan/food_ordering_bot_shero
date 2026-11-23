@@ -4,31 +4,263 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
+  {% if state == 'pending' %}<meta http-equiv="refresh" content="5">{% endif %}
   <title>{{ title }} · Shero Food Training</title>
   <link rel="stylesheet" href="{{ static_url('css/order.css') }}">
   {% include "_brand.html" %}
 </head>
-<body class="flex min-h-screen items-center justify-center bg-mist-100 px-4 text-ink-900">
-  <div class="w-full max-w-sm rounded-2xl border border-mist-200 bg-white p-8 text-center shadow-card">
-    <img src="/static/brand/shero-logo-192.png" alt="Shero Home Food" width="64" height="64"
-         class="mx-auto h-16 w-16 rounded-xl">
-    <p class="mt-3 text-[11px] font-semibold uppercase tracking-widest text-brand-600">Shero Food Training</p>
-    <h1 class="mt-1 text-lg font-semibold">{{ title }}</h1>
-    <p class="mt-2 text-sm text-stone-600">{{ message }}</p>
-    {% if test_pay_url %}
-      <form method="post" action="{{ test_pay_url }}" class="mt-6">
-        <button type="submit"
-                class="flex w-full items-center justify-center rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white hover:bg-brand-700">
-          Pay {{ fee }} (test)
-        </button>
-      </form>
-    {% endif %}
-    {% if course_url %}
-      <a href="{{ course_url }}"
-         class="mt-6 flex w-full items-center justify-center rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white hover:bg-brand-700">
-        Open your course
-      </a>
-    {% endif %}
+<body class="min-h-screen bg-mist-100 text-ink-900 antialiased">
+
+{# --- Header ------------------------------------------------------------------------- #}
+<header class="bg-gradient-to-br from-brand-700 via-brand-600 to-brand-800 text-white">
+  <div class="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4">
+    <div class="flex items-center gap-3">
+      <img src="/static/brand/shero-logo-192.png" alt="Shero Home Food" width="44" height="44"
+           class="h-11 w-11 rounded-xl bg-white shadow-sm">
+      <div class="leading-tight">
+        <p class="text-[15px] font-semibold">Shero Food Training</p>
+        <p class="text-[11px] text-white/75">by Shero Home Food</p>
+      </div>
+    </div>
+    <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold ring-1 ring-white/25">
+      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+      Secure enrollment
+    </span>
   </div>
+</header>
+
+{% if test %}
+<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-900" data-sft-test>
+  Test mode: this payment charges nobody.
+</div>
+{% endif %}
+
+{# --- Review: the course, the price, Pay ------------------------------------------- #}
+{% if state == 'review' %}
+<main class="mx-auto grid max-w-5xl gap-5 px-4 py-6 md:grid-cols-[minmax(0,1fr)_340px] md:items-start md:py-10">
+
+  {# Order summary: first on a phone, on the right on a computer. #}
+  <aside class="md:sticky md:top-6 md:order-2" data-sft-summary>
+    <div class="overflow-hidden rounded-2xl border border-mist-200 bg-white shadow-card">
+      <div class="border-b border-mist-200 bg-mist-50 px-5 py-3">
+        <p class="text-[11px] font-semibold uppercase tracking-widest text-brand-700">Order summary</p>
+      </div>
+      <div class="space-y-3 px-5 py-4 text-sm">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="font-semibold">Shero Food Training (SFT)</p>
+            <p class="text-xs text-stone-500">5-day self-paced online course</p>
+          </div>
+          <p class="font-semibold tabular-nums">{{ fee }}</p>
+        </div>
+        {% if saving %}
+        <div class="flex items-center justify-between gap-3 text-herb-700" data-sft-offer>
+          <span class="inline-flex items-center gap-1.5">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
+            Offer{% if offer_name %} <b class="font-semibold">{{ offer_name }}</b>{% endif %}
+          </span>
+          <span class="font-semibold tabular-nums">−{{ saving }}</span>
+        </div>
+        {% endif %}
+        <div class="flex items-end justify-between gap-3 border-t border-dashed border-mist-200 pt-3">
+          <div>
+            <p class="font-semibold">Total due today</p>
+            <p class="text-[11px] text-stone-500">One-time course fee</p>
+          </div>
+          <p class="text-2xl font-bold tabular-nums text-brand-700" data-sft-total>{{ total }}</p>
+        </div>
+      </div>
+      <div class="px-5 pb-5">
+        {% if test %}
+        <form method="post" action="{{ test_pay_url }}">
+          <button type="submit" class="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[15px] font-semibold text-white shadow-sm transition hover:bg-brand-700 active:scale-[.99]">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+            Pay {{ total }} (test)
+          </button>
+        </form>
+        {% else %}
+        <a href="{{ pay_url }}" data-sft-pay class="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[15px] font-semibold text-white shadow-sm transition hover:bg-brand-700 active:scale-[.99]">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+          Pay {{ total }} securely
+        </a>
+        {% endif %}
+        <p class="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-stone-500">
+          <svg class="mt-0.5 h-3.5 w-3.5 flex-none text-brand-600" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          {% if test %}A test checkout: no card is asked for and nobody is charged.
+          {% else %}Payment is processed by Stripe. Your card details go straight to Stripe and never reach Shero.{% endif %}
+        </p>
+        {% if first or masked %}
+        <p class="mt-2 text-[11px] text-stone-500">Enrolling: <b class="font-semibold text-ink-800">{{ first or 'you' }}</b>{% if masked %} · WhatsApp {{ masked }}{% endif %}</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="mt-3 grid gap-2 text-sm">
+      <a href="{{ brochure }}" target="_blank" rel="noopener" class="flex items-center gap-3 rounded-xl border border-mist-200 bg-white px-4 py-3 font-medium shadow-card hover:border-brand-200">
+        <span class="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-accent-50 text-accent-600">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 15h6M9 18h4"/></svg>
+        </span>
+        <span class="flex-1">The course brochure <span class="block text-[11px] font-normal text-stone-500">PDF · the full 5-day plan</span></span>
+        <svg class="h-4 w-4 flex-none text-brand-600" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M7 17L17 7M8 7h9v9"/></svg>
+      </a>
+      {% if contact %}
+      <a href="{{ contact }}" class="flex items-center gap-3 rounded-xl border border-mist-200 bg-white px-4 py-3 font-medium shadow-card hover:border-brand-200">
+        <span class="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-herb-500/10 text-herb-600">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 01-12.4 7.4L3 21l2.1-5.4A8.4 8.4 0 1121 11.5z"/></svg>
+        </span>
+        <span class="flex-1">Questions before you pay? <span class="block text-[11px] font-normal text-stone-500">Chat with us on WhatsApp</span></span>
+        <svg class="h-4 w-4 flex-none text-brand-600" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+      {% endif %}
+    </div>
+  </aside>
+
+  {# The course. #}
+  <section class="space-y-5 md:order-1">
+    <div class="rounded-2xl border border-mist-200 bg-white p-5 shadow-card md:p-7">
+      {% if first %}<p class="text-sm text-stone-600">Hi {{ first }} 👋 you're one step away.</p>{% endif %}
+      <p class="mt-1 text-[11px] font-semibold uppercase tracking-widest text-brand-600">You're enrolling in</p>
+      <h1 class="mt-1 text-2xl font-bold leading-tight md:text-3xl">Shero Food Training (SFT)</h1>
+      <p class="mt-2 text-sm leading-relaxed text-stone-600">A 5-day, self-paced online course that teaches you to cook to Shero's standards, step by step, and work towards Shero's certification.</p>
+      <div class="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {% for big, small in facts %}
+        <div class="rounded-xl bg-brand-50 px-3 py-3 text-center">
+          <p class="text-2xl font-bold text-brand-700">{{ big }}</p>
+          <p class="text-[11px] font-medium text-brand-800/80">{{ small }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="rounded-2xl border border-mist-200 bg-white p-5 shadow-card md:p-7">
+      <h2 class="text-base font-semibold">Your 5-day plan</h2>
+      <p class="mt-1 text-xs text-stone-500">Two short videos and two quizzes a day, one mid-day and one at the end of the day.</p>
+      <ol class="mt-4 space-y-0">
+        {% for day, topic in days %}
+        <li class="relative flex gap-3 pb-4 last:pb-0">
+          {% if not loop.last %}<span class="absolute left-[15px] top-8 h-[calc(100%-1.75rem)] w-px bg-brand-100"></span>{% endif %}
+          <span class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">{{ loop.index }}</span>
+          <div class="pt-1">
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-brand-600">{{ day }}</p>
+            <p class="text-sm font-medium">{{ topic }}</p>
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+    </div>
+
+    <div class="grid gap-5 lg:grid-cols-2">
+      <div class="rounded-2xl border border-mist-200 bg-white p-5 shadow-card">
+        <h2 class="text-base font-semibold">What you'll learn</h2>
+        <div class="mt-3 flex flex-wrap gap-1.5">
+          {% for t in topics %}<span class="rounded-full bg-mist-100 px-2.5 py-1 text-xs font-medium text-ink-800 ring-1 ring-mist-200">{{ t }}</span>{% endfor %}
+        </div>
+        <p class="mt-3 text-xs leading-relaxed text-stone-500">As one repeatable process, the Shero way. Learn on your own schedule on a laptop or desktop.</p>
+      </div>
+      <div class="rounded-2xl border border-mist-200 bg-white p-5 shadow-card">
+        <h2 class="text-base font-semibold">How certification works</h2>
+        <ul class="mt-3 space-y-2 text-sm">
+          {% for step in ['Finish the 5 days of lessons and quizzes.',
+                          'Prepare your assigned items with the standard recipe.',
+                          'Upload photos in the app for Shero to review.',
+                          'Your certificate is issued once they are approved.'] %}
+          <li class="flex gap-2"><svg class="mt-0.5 h-4 w-4 flex-none text-herb-600" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg><span>{{ step }}</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <div class="rounded-2xl border border-mist-200 bg-white/70 p-5 text-xs leading-relaxed text-stone-500">
+      <p class="font-semibold text-stone-600">Good to know</p>
+      <p class="mt-1">The certificate isn't automatic on payment: it follows Shero's review of your work. Becoming a Shero Kitchen Partner is a separate step that depends on Shero's review, standards, eligibility and local requirements; the course doesn't guarantee partner acceptance, orders or income.</p>
+    </div>
+
+    {# A second Pay at the end, for phones. #}
+    <div class="rounded-2xl bg-ink-900 p-5 text-white md:hidden">
+      <div class="flex items-center justify-between">
+        <p class="text-sm text-white/80">Total due today</p>
+        <p class="text-xl font-bold tabular-nums">{{ total }}</p>
+      </div>
+      {% if test %}
+      <form method="post" action="{{ test_pay_url }}" class="mt-3">
+        <button type="submit" class="w-full rounded-xl bg-white py-3 text-sm font-semibold text-ink-900">Pay {{ total }} (test)</button>
+      </form>
+      {% else %}
+      <a href="{{ pay_url }}" class="mt-3 block w-full rounded-xl bg-white py-3 text-center text-sm font-semibold text-ink-900">Pay {{ total }} securely</a>
+      {% endif %}
+    </div>
+  </section>
+</main>
+
+{# --- Enrolled: paid ---------------------------------------------------------------- #}
+{% elif state == 'enrolled' %}
+<main class="mx-auto max-w-xl px-4 py-8 md:py-12" data-sft-enrolled>
+  <div class="overflow-hidden rounded-2xl border border-mist-200 bg-white shadow-card">
+    <div class="bg-gradient-to-b from-herb-500/10 to-white px-6 pb-4 pt-8 text-center">
+      <span class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-herb-600 text-white shadow-lg shadow-herb-600/30">
+        <svg class="h-8 w-8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+      </span>
+      <h1 class="mt-4 text-2xl font-bold">You're enrolled{% if first %}, {{ first }}{% endif %}! 🎉</h1>
+      <p class="mt-1 text-sm text-stone-600">Welcome to Shero Food Training.{% if amount %} Your payment of <b>{{ amount }}</b> is confirmed.{% endif %}</p>
+      {% if test %}<p class="mx-auto mt-3 inline-block rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">Test payment: nobody was charged</p>{% endif %}
+    </div>
+
+    <dl class="mx-6 divide-y divide-mist-200 rounded-xl border border-mist-200 text-sm">
+      <div class="flex justify-between gap-3 px-4 py-2.5"><dt class="text-stone-500">Receipt no.</dt><dd class="font-semibold">{{ number }}</dd></div>
+      <div class="flex justify-between gap-3 px-4 py-2.5"><dt class="text-stone-500">Date paid</dt><dd>{{ paid_on }}</dd></div>
+      {% if amount %}<div class="flex justify-between gap-3 px-4 py-2.5"><dt class="text-stone-500">Amount paid</dt><dd class="font-semibold">{{ amount }}</dd></div>{% endif %}
+      {% if offer_name %}<div class="flex justify-between gap-3 px-4 py-2.5"><dt class="text-stone-500">Offer</dt><dd class="text-herb-700">{{ offer_name }}</dd></div>{% endif %}
+      <div class="flex justify-between gap-3 px-4 py-2.5"><dt class="text-stone-500">Payment</dt><dd>{{ 'Test (no charge)' if test else 'Card, through Stripe' }}</dd></div>
+    </dl>
+
+    <div class="grid gap-2 px-6 py-5">
+      {% if course_url %}
+      <a href="{{ course_url }}" class="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[15px] font-semibold text-white shadow-sm hover:bg-brand-700">Open your course →</a>
+      {% endif %}
+      <a href="{{ receipt_url }}" target="_blank" rel="noopener" data-sft-receipt
+         class="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-semibold text-ink-800 ring-1 ring-mist-200 hover:bg-mist-50">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        Download your receipt (PDF)
+      </a>
+      <p class="text-center text-[11px] text-stone-500">We've also sent the receipt to your WhatsApp{% if masked %} ({{ masked }}){% endif %}.</p>
+    </div>
+  </div>
+
+  <div class="mt-5 rounded-2xl border border-mist-200 bg-white p-6 shadow-card">
+    <h2 class="text-base font-semibold">What happens next</h2>
+    <ol class="mt-3 space-y-3 text-sm">
+      {% for step in [('Open your course', 'Use the button above' if course_url else 'Our team sends your course access on WhatsApp shortly'),
+                      ('Start Day 1', 'Work through the 5 days in order: videos, then quizzes'),
+                      ('Prepare and upload', 'Cook your assigned items with the standard recipe and upload photos'),
+                      ('Get certified', 'Your certificate is issued once Shero approves them')] %}
+      <li class="flex gap-3">
+        <span class="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-brand-50 text-xs font-bold text-brand-700">{{ loop.index }}</span>
+        <div><p class="font-medium">{{ step[0] }}</p><p class="text-xs text-stone-500">{{ step[1] }}</p></div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% if contact %}<a href="{{ contact }}" class="mt-4 inline-block text-sm font-semibold text-brand-700">Need help? Message us on WhatsApp →</a>{% endif %}
+  </div>
+</main>
+
+{# --- Confirming, and plain messages ------------------------------------------------ #}
+{% else %}
+<main class="flex min-h-[70vh] items-center justify-center px-4 py-10">
+  <div class="w-full max-w-sm rounded-2xl border border-mist-200 bg-white p-8 text-center shadow-card">
+    {% if state == 'pending' %}
+    <span class="mx-auto block h-12 w-12 animate-spin rounded-full border-4 border-brand-100 border-t-brand-600"></span>
+    {% else %}
+    <img src="/static/brand/shero-logo-192.png" alt="Shero Home Food" width="56" height="56" class="mx-auto h-14 w-14 rounded-xl">
+    {% endif %}
+    <h1 class="mt-4 text-lg font-semibold">{{ title }}</h1>
+    <p class="mt-2 text-sm text-stone-600">{{ message }}</p>
+    {% if contact %}<a href="{{ contact }}" class="mt-5 inline-flex items-center justify-center rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">Message us on WhatsApp</a>{% endif %}
+  </div>
+</main>
+{% endif %}
+
+<footer class="px-4 pb-8 text-center text-[11px] text-stone-400">
+  &copy; Shero Home Food &middot; Shero Food Training (SFT)
+</footer>
 </body>
 </html>
