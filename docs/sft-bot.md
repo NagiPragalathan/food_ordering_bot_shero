@@ -219,11 +219,19 @@ the bot sends next and when.
 3. **Settings**: the course link (sent after paying) and the team's WhatsApp
    numbers. **Bot replies**: the test numbers, and SFT's own channel id if it
    has one.
-4. **Nudges → WhatsApp templates** → *Submit the missing ones to WhatsApp* (7 templates:
+4. **Nudges → WhatsApp templates** → *Submit the missing ones to WhatsApp* (9 templates:
    `sft_followup_1..3`, `sft_payment_reminder`, `sft_course_check`,
-   `sft_nurture`, `sft_team_alert`). Until Meta approves them, a follow-up
-   goes as an ordinary message inside the 24-hour window and is skipped
-   outside it.
+   `sft_nurture`, `sft_team_alert`, `sft_enrolled`, `sft_payment_failed`).
+   Until Meta approves them, a follow-up goes as an ordinary message inside
+   the 24-hour window and is skipped outside it.
+   * `sft_enrolled`: the payment confirmation when they pay after the 24-hour
+     window (amount, receipt number); its **Get my course** brings the course
+     link and the receipt PDF. Not approved yet: the team gets a task.
+   * `sft_payment_failed`: a failed payment after the window; **Complete
+     enrollment** sends the checkout link again.
+   The other `sft_*` templates in Gallabox (`sft_lead_welcome`,
+   `sft_create_interest`, `sft_explain_outcome`, `sft_handle_decision`,
+   `sft_not_interested`) belong to the Gallabox SFT flow, not this bot.
 5. **Settings** → *Prepare Zoho*.
 6. On **Bot replies** switch to **Test** and try it from a listed phone, then **Live**.
 

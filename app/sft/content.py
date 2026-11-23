@@ -101,6 +101,7 @@ WHEN_BUTTONS = (Button(B_WEEK, "In a week"), Button(B_MONTH, "In a month"),
 WHY_BUTTONS = tuple(Button(i, t) for i, t in WHY_IDS.items())
 PAY_BUTTON = "Pay {fee} to enroll"
 COURSE_BUTTON = "Open your course"
+GET_COURSE = "Get my course"          # sft_enrolled's quick reply
 
 # What a tap on a template's quick reply (or a typed label) means.
 LABELS: dict[str, str] = {
@@ -111,6 +112,9 @@ LABELS: dict[str, str] = {
     "maybe later": B_MAYBE, "not right now": B_LATER,
     "not interested": B_NO,
     "yes i m in": B_ACCESS_OK, "i need help": B_ACCESS_HELP,
+    # sft_enrolled: a paid lead gets the course and the receipt (an unpaid
+    # one the checkout), as Enroll now does.
+    "get my course": B_ENROL,
     "start food business": B_BUSINESS, "start a food business": B_BUSINESS,
     "improve my skills": B_SKILLS,
     "in a week": B_WEEK, "in a month": B_MONTH, "i ll message you": B_THEM,
@@ -348,8 +352,30 @@ TEAM_ALERT = TemplateSpec(
                  "Gallabox."),
     button_kind="none")
 
+# Paying or failing to pay after WhatsApp's 24-hour window: the confirmation
+# (and the failure) can only go as templates. A tap on their button opens the
+# window again, and the bot answers it with the course and the receipt PDF
+# (or the checkout link again).
+ENROLLED_TEMPLATE = TemplateSpec(
+    name="sft_enrolled", category="UTILITY",
+    trigger="SFT: payment confirmed outside WhatsApp's 24-hour window",
+    params=("first_name", "amount", "receipt_number"),
+    sample_body=("Hi {{1}}, your payment of {{2}} for Shero Food Training is confirmed "
+                 "(receipt no. {{3}}). Welcome to SFT! Tap Get my course for your course access "
+                 "and your receipt."),
+    button_kind="none", quick_replies=(GET_COURSE,))
+PAYMENT_FAILED_TEMPLATE = TemplateSpec(
+    name="sft_payment_failed", category="UTILITY",
+    trigger="SFT: payment failed outside WhatsApp's 24-hour window",
+    params=("first_name",),
+    sample_body=("Hi {{1}}, your payment for Shero Food Training didn't go through, so you "
+                 "haven't been charged. Tap Complete enrollment to get your secure checkout "
+                 "link again."),
+    button_kind="none", quick_replies=("Complete enrollment", "Ask a question"))
+
 TEMPLATES: tuple[TemplateSpec, ...] = (FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3, PAYMENT_REMINDER,
-                                       COURSE_CHECK, NURTURE_TEMPLATE, TEAM_ALERT)
+                                       COURSE_CHECK, NURTURE_TEMPLATE, TEAM_ALERT,
+                                       ENROLLED_TEMPLATE, PAYMENT_FAILED_TEMPLATE)
 FOLLOWUPS: tuple[TemplateSpec, ...] = (FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3)
 
 

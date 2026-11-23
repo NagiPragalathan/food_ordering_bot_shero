@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import PaymentError
 from app.core.logging import get_logger
-from app.db.models import SftLead
+from app.db.models import SftLead, SftOffer
 from app.integrations.stripe_gw import checkout
 from app.sft import content as c
 from app.sft import leads, offers, receipt, sending
@@ -141,6 +141,20 @@ async def mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
         await leads.resolve(session, lead, "paid", by="the bot")
     lead.step = c.IDLE
     first = leads.first(lead)
+    offer_title = price.offer.title if price.offer else None
+    if not sending.in_window(lead):
+        # Only a template can reach them now: sft_enrolled, whose Get my course
+        # opens the chat again for the course and the receipt PDF.
+        _save_receipt(lead, cfg, offer_title)
+        went = await sending.template(session, lead, cfg, c.ENROLLED_TEMPLATE, first,
+                                      amount_text, receipt.number(lead))
+        if not cfg.course_url or not went:
+            await leads.raise_attention(
+                session, lead, "course_link",
+                detail="" if went else "Paid outside WhatsApp's 24-hour window and the "
+                "confirmation could not go (sft_enrolled not approved): send the course access")
+        log.info("sft_paid", lead_id=str(lead.id), test=test, outside_window=True)
+        return True
     if cfg.course_url:
         note = f"\n\n{cfg.course_access_note}" if cfg.course_access_note else ""
         await sending.link(session, lead, cfg,
@@ -152,25 +166,41 @@ async def mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
                            c.say(cfg, "paid_no_link", first=first, amount=amount_text),
                            what="paid")
         await leads.raise_attention(session, lead, "course_link")
-    await _send_receipt(session, lead, cfg, price.offer.title if price.offer else None)
-    if not sending.in_window(lead):
-        await leads.raise_attention(
-            session, lead, "course_link",
-            detail="Paid outside WhatsApp's 24-hour window, so the confirmation may not have "
-                   "reached them: send the course access")
+    await _send_receipt(session, lead, cfg, offer_title)
     log.info("sft_paid", lead_id=str(lead.id), test=test)
     return True
+
+
+def _save_receipt(lead: SftLead, cfg: SftConfig, offer_title: str | None) -> str:
+    """Draw and keep the receipt; '' when it worked, else why not."""
+    try:
+        receipt.save(lead, cfg, offer_title=offer_title)
+    except Exception as exc:  # noqa: BLE001 - the payment stands whatever the PDF does
+        log.error("sft_receipt_failed", lead_id=str(lead.id), error=str(exc))
+        return str(exc) or "could not be drawn"
+    return ""
+
+
+async def send_receipt(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> bool:
+    """The receipt PDF again (a paid lead asking for their course)."""
+    if lead.paid_at is None:
+        return False
+    if receipt.stored(lead.pay_token, receipt.filename(lead)) is None:
+        offer = await session.get(SftOffer, lead.offer_id) if lead.offer_id else None
+        return await _send_receipt(session, lead, cfg, offer.title if offer else None)
+    return await sending.document(
+        session, lead, cfg, url=receipt.url(lead), filename=receipt.filename(lead),
+        caption=c.RECEIPT_CAPTION.format(number=receipt.number(lead)),
+        what="receipt", label="Open the receipt")
 
 
 async def _send_receipt(session: AsyncSession, lead: SftLead, cfg: SftConfig,
                         offer_title: str | None) -> bool:
     """The enrollment receipt, as a PDF in their WhatsApp chat. Best effort:
     a receipt that can't be drawn or sent never undoes the payment."""
-    try:
-        receipt.save(lead, cfg, offer_title=offer_title)
-    except Exception as exc:  # noqa: BLE001 - the payment stands whatever the PDF does
-        log.error("sft_receipt_failed", lead_id=str(lead.id), error=str(exc))
-        await event(session, lead, "send_failed", f"receipt: {exc}"[:300],
+    why = _save_receipt(lead, cfg, offer_title)
+    if why:
+        await event(session, lead, "send_failed", f"receipt: {why}"[:300],
                     data={"what": "receipt"})
         return False
     return await sending.document(
@@ -189,6 +219,9 @@ async def failed(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> None:
         await sending.link(session, lead, cfg,
                            c.say(cfg, "payment_failed", first=leads.first(lead)),
                            url=enrol_url(lead), label="Try again", what="payment_failed")
+    else:
+        # Complete enrollment (its quick reply) sends the checkout link again.
+        await sending.template(session, lead, cfg, c.PAYMENT_FAILED_TEMPLATE, leads.first(lead))
 
 
 async def handle_stripe(session: AsyncSession, event_type: str, obj: dict) -> dict:

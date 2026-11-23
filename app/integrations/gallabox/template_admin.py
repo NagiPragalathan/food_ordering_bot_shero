@@ -42,6 +42,9 @@ EXAMPLES = {
     "delivery": "Wed 23 Sep, 7:00 PM - 8:00 PM",
     "kitchen": "Shero Elkridge",
     "address": "6360 Lawyers Hill Road, Apt 4, 21075",
+    # Shero Food Training (app/sft/).
+    "first_name": "Asha",
+    "receipt_number": "SFT-20261123-A1B2C3",
 }
 
 # DST India's reviewer sees Indian examples: rupees, a PIN code, a +91 number.

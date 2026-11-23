@@ -212,3 +212,81 @@ async def test_the_stripe_webhook_hands_sft_checkouts_over(session, monkeypatch)
     result = await webhooks_stripe.stripe_webhook(FakeRequest(), session=session,
                                                   stripe_signature="sig")
     assert result["sft"] and seen == ["checkout.session.completed"]
+
+
+# --- Paying outside WhatsApp's 24-hour window: templates ----------------------------------
+def _approve(monkeypatch, answer: bool):
+    from app.integrations.gallabox import template_status
+
+    async def approved(name):
+        return answer
+
+    monkeypatch.setattr(template_status, "is_approved", approved)
+    from app.sft import sending
+    sending.clear_cache()
+
+
+async def _quiet(session, cfg, lead):
+    from datetime import timedelta
+
+    lead.last_inbound_at = leads.now() - timedelta(hours=30)       # the window has closed
+
+
+async def test_paid_outside_the_window_goes_as_sft_enrolled(session, rec, monkeypatch):
+    from app.sft import receipt
+
+    _approve(monkeypatch, True)
+    cfg = await config.save(session, {"mode": "live", "course_url": COURSE}, "t")
+    lead = await _wants_to_pay(session, cfg)
+    await _quiet(session, cfg, lead)
+    rec.clear()
+    await payments.mark_paid(session, lead, cfg, amount=Decimal("99"), currency="usd")
+    assert rec.sent == [("template", "sft_enrolled", ("Priya", "$99", receipt.number(lead)))]
+    assert receipt.stored(lead.pay_token, receipt.filename(lead)) is not None
+    assert not lead.needs_attention                       # it reached them; the tap gets the rest
+    # Their tap on Get my course: the course and the receipt PDF.
+    rec.clear()
+    await say(session, cfg, "Get my course")
+    assert rec.kinds() == ["link", "document"]
+    assert rec.sent[0][2][0] == COURSE and rec.receipts()
+
+
+async def test_paid_outside_the_window_unapproved_tells_the_team(session, rec, monkeypatch):
+    _approve(monkeypatch, False)
+    cfg = await config.save(session, {"mode": "live", "course_url": COURSE}, "t")
+    lead = await _wants_to_pay(session, cfg)
+    await _quiet(session, cfg, lead)
+    rec.clear()
+    await payments.mark_paid(session, lead, cfg, amount=Decimal("99"), currency="usd")
+    assert rec.sent == []
+    assert lead.needs_attention and lead.attention_stage == "course_link"
+    from sqlalchemy import select
+
+    from app.db.models import SftEvent
+
+    task = (await session.execute(select(SftEvent).where(
+        SftEvent.lead_id == lead.id, SftEvent.kind == "attention"))).scalars().all()[-1]
+    assert "sft_enrolled not approved" in task.detail
+
+
+async def test_a_failed_payment_outside_the_window_goes_as_sft_payment_failed(session, cfg, rec,
+                                                                             monkeypatch):
+    _approve(monkeypatch, True)
+    lead = await _wants_to_pay(session, cfg)
+    await _quiet(session, cfg, lead)
+    rec.clear()
+    await payments.handle_stripe(session, "payment_intent.payment_failed",
+                                 {"metadata": {"kind": "sft", "sft_token": lead.pay_token}})
+    assert rec.sent == [("template", "sft_payment_failed", ("Priya",))]
+    rec.clear()
+    await say(session, cfg, "Complete enrollment")        # its quick reply: the checkout again
+    assert rec.last()[0] == "link" and "/sft/enrol/" in rec.last()[2][0]
+
+
+def test_every_template_sft_needs_is_listed():
+    names = [t.name for t in c.TEMPLATES]
+    assert names == ["sft_followup_1", "sft_followup_2", "sft_followup_3", "sft_payment_reminder",
+                     "sft_course_check", "sft_nurture", "sft_team_alert", "sft_enrolled",
+                     "sft_payment_failed"]
+    for spec in c.TEMPLATES:
+        assert not spec.sample_body.rstrip(".").endswith("}}"), spec.name   # Meta's rule

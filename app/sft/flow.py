@@ -316,6 +316,9 @@ async def _already_paid(session, lead, cfg) -> str:
     else:
         await sending.text(session, lead, cfg, body.split("!")[0] + "! 🎉 Our team will be in "
                            "touch with your course access.", what="already_paid")
+    from app.sft import payments
+
+    await payments.send_receipt(session, lead, cfg)
     return "already enrolled"
 
 
