@@ -431,6 +431,24 @@ TEXTS: dict[str, Text] = {t.key: t for t in (
     Text("stopped", "STOP", "8 · Stop", STOPPED),
     Text("tap_below", "Please tap an option", "Any step", TAP_BELOW),
 )}
+# The buttons each message goes out with (shown with it on Bot replies).
+TEXT_BUTTONS: dict[str, tuple[str, ...]] = {
+    "welcome": tuple(b.title for b in GOAL_BUTTONS),
+    "interest_business": tuple(b.title for b in DETAIL_BUTTONS),
+    "interest_skills": tuple(b.title for b in DETAIL_BUTTONS),
+    "brochure": tuple(b.title for b in DECIDE_BUTTONS),
+    "faq_prompt": (FAQ_BUTTON,),
+    **{key: tuple(b.title for b in AFTER_FAQ_BUTTONS)
+       for key in ("faq_learn", "faq_cert", "faq_partner", "faq_cost")},
+    "enrol": (PAY_BUTTON.format(fee="{fee}"),),
+    "pay_reminder": (PAY_BUTTON.format(fee="{fee}"),),
+    "payment_failed": ("Try again",),
+    "paid": (COURSE_BUTTON,),
+    "already_paid": (COURSE_BUTTON,),
+    "later": tuple(b.title for b in WHEN_BUTTONS),
+    "not_interested": tuple(b.title for b in WHY_BUTTONS),
+}
+
 FAQ_TEXTS = {"sft:faq:learn": "faq_learn", "sft:faq:cert": "faq_cert",
              "sft:faq:partner": "faq_partner", "sft:faq:cost": "faq_cost"}
 

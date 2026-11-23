@@ -32,7 +32,6 @@
   ('Leads & sales', [
     ('overview', 'Overview', 'M3 3v18h18M7 15l4-4 3 3 5-6'),
     ('leads', 'Leads', 'M17 20h5v-2a4 4 0 00-5-3.9M9 20H4v-2a4 4 0 015-3.9m8-6.1a4 4 0 11-8 0 4 4 0 018 0z'),
-    ('payments', 'Payments', 'M3 6h18v12H3zM3 10h18M7 15h3'),
     ('customers', 'Customers', 'M12 14l9-5-9-5-9 5 9 5zm0 0v6m-6-9v5c0 1 3 3 6 3s6-2 6-3v-5'),
   ]),
   ('Engage', [
@@ -41,14 +40,13 @@
     ('replies', 'Bot replies', 'M21 12a8 8 0 01-11.6 7.1L3 21l1.9-6.4A8 8 0 1121 12zM9 12l2 2 4-4'),
   ]),
   ('Set up', [
-    ('journey', 'Journey', 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01'),
     ('chat', 'Test chat', 'M21 12a8 8 0 01-11.6 7.1L3 21l1.9-6.4A8 8 0 1121 12z'),
     ('settings', 'Settings', 'M10.3 4.3a2 2 0 013.4 0l.5.9a2 2 0 002 1l1 .1a2 2 0 011.7 2.9l-.5.9a2 2 0 000 2l.5.9a2 2 0 01-1.7 2.9l-1 .1a2 2 0 00-2 1l-.5.9a2 2 0 01-3.4 0l-.5-.9a2 2 0 00-2-1l-1-.1a2 2 0 01-1.7-2.9l.5-.9a2 2 0 000-2l-.5-.9A2 2 0 015.8 6.3l1-.1a2 2 0 002-1zM12 14a2 2 0 100-4 2 2 0 000 4z'),
   ]),
 ] %}
 {# The chosen dates go along to the other dated pages. #}
 {% set carry = keep if keep is defined else '' %}
-{% set dated = ('overview', 'leads', 'payments', 'customers', 'nudges') %}
+{% set dated = ('overview', 'leads', 'customers', 'nudges') %}
 {% set badges = {'overview': attention_count if attention_count is defined else 0} %}
 {% set mode = cfg.mode if cfg is defined else 'off' %}
 {# The WhatsApp number SFT runs on: its own channel, or Shero US's number. #}

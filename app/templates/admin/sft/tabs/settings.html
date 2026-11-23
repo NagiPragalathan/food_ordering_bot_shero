@@ -47,7 +47,7 @@
         {% if stripe_live %}{{ ui.badge('Stripe connected', 'good') }}<span class="text-stone-600">Real checkouts; SFT's are marked "Shero Food Training (SFT)".</span>
         {% else %}{{ ui.badge('No Stripe key', 'warn') }}<span class="text-stone-600">Every pay link opens a test checkout that charges nobody.</span>{% endif %}
       </div>
-      <p class="mt-2 text-[11px] text-stone-500">In Test mode the test numbers always get the test checkout. See every payment in <a class="font-semibold text-brand-700" href="{{ url('payments') }}">Payments</a>.</p>
+      <p class="mt-2 text-[11px] text-stone-500">In Test mode the test numbers always get the test checkout. See every payment in <a class="font-semibold text-brand-700" href="{{ url('customers') }}">Customers</a>.</p>
     {% endcall %}
 
     {% call ui.card('The team') %}

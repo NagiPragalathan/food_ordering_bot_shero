@@ -27,8 +27,7 @@ def admin(session):
     return TestClient(app, follow_redirects=False)
 
 
-TABS = ["overview", "leads", "payments", "customers", "nudges", "offers", "replies", "journey",
-        "chat", "settings"]
+TABS = ["overview", "leads", "customers", "nudges", "offers", "replies", "chat", "settings"]
 
 
 @pytest.mark.parametrize("tab", TABS)
@@ -70,11 +69,20 @@ def test_off_by_default_says_so(admin):
     assert "SFT is <b>off</b>" in admin.get("/admin/sft").text
 
 
-def test_the_journey_shows_the_new_messages(admin):
-    page = admin.get("/admin/sft?tab=journey").text
+@pytest.mark.parametrize("old, now", [("payments", "customers"), ("journey", "replies"),
+                                      ("templates", "nudges")])
+def test_folded_tabs_open_where_they_went(admin, old, now):
+    """Payments is part of Customers, the Journey's messages are in Bot replies."""
+    page = admin.get(f"/admin/sft?tab={old}").text
+    assert f'href="http://testserver/admin/sft?tab={now}" aria-current="page"' in page
+    assert f"?tab={old}\"" not in page                   # not in the sidebar any more
+
+
+def test_the_bots_messages_are_all_on_bot_replies(admin):
+    page = admin.get("/admin/sft?tab=replies").text
     assert "Yes, enroll me" in page and "Not right now" in page
     assert "transferring you to a member of our team" in page
-    assert "Start food business" in page and "Course details</span>" not in page
+    assert "Start food business" in page
 
 
 async def test_the_test_chat_walks_the_journey(admin, session):

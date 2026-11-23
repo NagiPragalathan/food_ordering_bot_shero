@@ -4,12 +4,10 @@
 {% set intro = {
   'overview': 'How the course\'s WhatsApp leads are doing, and who is waiting for the team.',
   'leads': 'Everyone who started the SFT journey, and where each one is.',
-  'payments': 'Enrollments paid, revenue and refunds, and who is still to pay.',
-  'customers': 'Your students: everyone who paid, and whether they got into the course.',
+  'customers': 'Everyone who paid: revenue, each payment and receipt, course access, and who is still to pay.',
   'nudges': 'The automated WhatsApp follow-ups: when they go, who is in which flow, what was sent.',
   'offers': 'Codes and launch prices for the course. A lead pays the best offer that applies.',
   'replies': 'Who SFT answers, what starts it, and everything the bot says.',
-  'journey': 'Every message and button the lead sees, stage by stage.',
   'chat': 'Try the journey as a lead would. Nothing is sent on WhatsApp.',
   'settings': 'The course, the team\'s numbers and Zoho.',
 } %}
@@ -19,7 +17,7 @@
   <p class="text-xs text-stone-500">{{ intro[tab] }}</p>
 {% endblock %}
 {% block actions %}
-  {% if tab in ('leads', 'payments', 'customers') %}
+  {% if tab in ('leads', 'customers') %}
   {% set export_q = {'what': tab} %}
   {% for k in ('view', 'q', 'source') if q.get(k) %}{% set _ = export_q.update({k: q.get(k)}) %}{% endfor %}
   {% set _ = export_q.update(rng.query()) %}

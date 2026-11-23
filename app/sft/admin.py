@@ -61,18 +61,19 @@ def us_only() -> None:
 
 router = APIRouter(prefix="/sft", tags=["admin"], dependencies=[Depends(us_only)])
 
-TABS = {"overview": "Overview", "leads": "Leads", "payments": "Payments",
-        "customers": "Customers", "nudges": "Nudges", "offers": "Offers",
-        "replies": "Bot replies", "journey": "Journey", "chat": "Test chat",
+TABS = {"overview": "Overview", "leads": "Leads", "customers": "Customers",
+        "nudges": "Nudges", "offers": "Offers", "replies": "Bot replies", "chat": "Test chat",
         "settings": "Settings"}
+# Tabs folded into others: Payments is part of Customers, the Journey's
+# messages are Bot replies' "What the bot says", Templates is in Nudges.
+MOVED = {"payments": "customers", "journey": "replies", "templates": "nudges"}
 # The tabs with a date range, and the range each starts on.
-RANGED = {"overview": "30", "leads": "all", "payments": "30", "customers": "all",
-          "nudges": "all"}
+RANGED = {"overview": "30", "leads": "all", "customers": "all", "nudges": "all"}
 NUDGE_SECTIONS = {"rules": "Rules", "flows": "Leads by flow", "sent": "Messages sent",
                   "templates": "WhatsApp templates"}
 VIEWS = {"": "All", "attention": "Needs the team", "team": "With the team",
          **{k: v for k, v in c.STAGES.items()}, "test": "Test chat leads"}
-ACCESS_VIEWS = {"": "All students", "opened": "Opened the course", "waiting": "Not confirmed yet",
+ACCESS_VIEWS = {"": "All customers", "opened": "Opened the course", "waiting": "Not confirmed yet",
                 "help": "Needs the team", "refunded": "Refunded"}
 PAGE_SIZE = 50
 BOARD_CARDS = 25
@@ -106,8 +107,7 @@ async def sft_page(request: Request, tab: str = "overview", page: int | str | No
                    session: AsyncSession = Depends(get_session),
                    current_user: AdminUser = Depends(require_admin)):
     q = request.query_params
-    if tab == "templates":                      # the old Templates tab lives in Nudges
-        tab = "nudges"
+    tab = MOVED.get(tab, tab)
     tab = tab if tab in TABS else "overview"
     cfg = await config.load(session, fresh=True)
     rng = _range(request, cfg, tab)
@@ -126,7 +126,7 @@ async def sft_page(request: Request, tab: str = "overview", page: int | str | No
         "team_count": await _count(session, SftLead.with_team.is_(True)),
         "q": q,
     }
-    build = {"overview": _overview, "leads": _leads, "payments": _payments,
+    build = {"overview": _overview, "leads": _leads,
              "customers": _customers, "nudges": _nudges, "offers": _offers,
              "replies": _replies, "chat": _chat, "settings": _settings}.get(tab)
     if build is not None:
@@ -210,13 +210,10 @@ async def _leads(request, session, cfg, rng, page, url) -> dict:
     return out
 
 
-# --- Payments ------------------------------------------------------------------------
-async def _payments(request, session, cfg, rng, page, url) -> dict:
+# --- Customers: the money ----------------------------------------------------------
+async def _payment_figures(session, cfg, rng) -> dict:
+    """Revenue, link-to-paid, discounts, refunds, revenue by day, who is waiting."""
     base = [SftLead.source != TEST_SOURCE, SftLead.paid_at.is_not(None), *rng.where(SftLead.paid_at)]
-    total = await session.scalar(select(func.count()).select_from(SftLead).where(*base)) or 0
-    paged = listing.Page.of(page, PAGE_SIZE, total)
-    rows = (await session.execute(select(SftLead).where(*base).order_by(SftLead.paid_at.desc())
-                                  .offset(paged.offset).limit(PAGE_SIZE))).scalars().all()
     every = (await session.execute(select(SftLead).where(*base))).scalars().all()
     real = [r for r in every if not r.test_payment]
     revenue = sum((Decimal(r.amount_paid or 0) for r in real), Decimal(0))
@@ -237,14 +234,12 @@ async def _payments(request, session, cfg, rng, page, url) -> dict:
         day = rng.day_of(r.paid_at)
         per_day[day] = per_day.get(day, Decimal(0)) + Decimal(r.amount_paid or 0)
     daily = [(d, per_day.get(d, Decimal(0))) for d in days]
-    offer_names = await _offer_names(session, {r.offer_id for r in rows if r.offer_id})
-    return {"payments": rows, "page": paged, "url_with": lambda **kw: url("payments", **kw),
-            "paid_count": len(real), "revenue": revenue, "discounts": discounts,
+    return {"paid_count": len(real), "revenue": revenue, "discounts": discounts,
             "average": (revenue / len(real)) if real else Decimal(0),
             "test_count": len(every) - len(real), "refunds": refunds, "links": links,
             "waiting": waiting, "daily": daily,
             "daily_top": max([v for _, v in daily] or [Decimal(0)]) or Decimal(1),
-            "offer_names": offer_names, "payment_state": views.payment_state}
+            "payment_state": views.payment_state}
 
 
 async def _offer_names(session, ids) -> dict:
@@ -255,8 +250,16 @@ async def _offer_names(session, ids) -> dict:
     return {o.id: (o.code or o.title) for o in rows}
 
 
-# --- Customers -----------------------------------------------------------------------
+# --- Customers: who paid --------------------------------------------------------------
 async def _customers(request, session, cfg, rng, page, url) -> dict:
+    """Everyone who paid (with their payment, receipt and course access), and
+    the money: one page instead of Payments and Customers side by side."""
+    out = await _payment_figures(session, cfg, rng)
+    out.update(await _students(request, session, cfg, rng, page, url))
+    return out
+
+
+async def _students(request, session, cfg, rng, page, url) -> dict:
     qp = request.query_params
     access = qp.get("access", "") if qp.get("access", "") in ACCESS_VIEWS else ""
     q = qp.get("q", "")
@@ -279,6 +282,7 @@ async def _customers(request, session, cfg, rng, page, url) -> dict:
     rows = every[paged.offset:paged.offset + PAGE_SIZE]
     return {"students": rows, "page": paged, "access": access, "access_views": ACCESS_VIEWS,
             "access_counts": counts, "search": q, "course_state": views.course_state,
+            "receipt_url": lambda lead: f"/sft/receipt/{lead.pay_token}/{receipt.filename(lead)}",
             "url_with": lambda **kw: url("customers", access=access, q=q, **kw),
             "offer_names": await _offer_names(session, {r.offer_id for r in rows})}
 

@@ -19,16 +19,17 @@ it is off, nothing changes for anyone.
 |---|---|
 | Overview | KPIs, a daily chart of leads and enrollments, the funnel (click a stage), sources, goals, who needs the team |
 | Leads | every lead as a list or a **board by stage**, each with its flow and what the bot does next; search, source, stage; CSV |
-| Payments | paid enrollments, revenue, link-to-paid, discounts, refunds, a daily revenue chart, each payment (opens in Stripe), who is waiting to pay; CSV |
-| Customers | the students (everyone who paid) and their course access: opened, not confirmed yet, needs the team; CSV |
+| Customers | everyone who paid, with the money on top: paying customers, revenue, link-to-paid, discounts, refunds; each customer's payment (Stripe, **receipt**) and course access (opened, not confirmed yet, needs the team); who is waiting to pay; revenue by day; CSV |
 | Nudges | **Rules** (on/off, send hours, each follow-up's wait and switch, the payment reminder, Maybe later check-ins, the course check, when the team takes over), **Leads by flow**, **Messages sent**, **WhatsApp templates** |
 | Offers | codes and launch prices (below) |
-| Bot replies | who SFT answers (Off / Test / Live, test numbers), what starts it (keywords, source codes, ad ids, own number), **Check a message**, and **every message the bot says, editable** |
-| Journey | every message and button, with the current wording |
+| Bot replies | who SFT answers (Off / Test / Live, test numbers), what starts it (keywords, source codes, ad ids, own number), **Check a message**, and **every message the bot says, with its buttons, editable** |
 | Test chat | the journey without WhatsApp, with time travel for the nudges |
 | Settings | the course (fee, links), Stripe's status, the team's numbers, Zoho |
 
-Overview, Leads, Payments, Customers and the Nudges' lists take a **date
+Payments and Journey used to be tabs of their own; they are now part of
+Customers and Bot replies (old links open there).
+
+Overview, Leads, Customers and the Nudges' lists take a **date
 range**: Today, Yesterday, Last 7 / 30 / 90 days, This month, Last month,
 All time, or a custom From-To (in SFT's timezone). The range stays as you move
 between them.

@@ -29,10 +29,10 @@ async def test_payments_shows_what_was_paid_and_who_is_waiting(admin, session, c
     await say(session, cfg, "SFT", number="15551230002")
     await say(session, cfg, "Meena", number="15551230002")
     await say(session, cfg, button=c.B_ENROL, title="Enroll now", number="15551230002")
-    page = admin.get("/admin/sft?tab=payments").text
-    assert "Paid enrollments" in page and "$99" in page and "Priya" in page
-    assert "dashboard.stripe.com/payments/pi_123" in page
-    assert "Waiting to pay now" in page and "Meena" in page
+    page = admin.get("/admin/sft?tab=customers").text
+    assert "Paying customers" in page and "$99" in page and "Priya" in page
+    assert "dashboard.stripe.com/payments/pi_123" in page and "data-sft-receipt-link" in page
+    assert "Waiting to pay now" in page and "Meena" in page and "Revenue by day" in page
 
 
 async def test_customers_lists_the_students_and_their_course_access(admin, session, cfg, rec):
@@ -70,7 +70,7 @@ async def test_a_custom_date_range_filters_the_leads(admin, session, cfg, rec):
                     f"{(leads.now() - timedelta(days=35)).date()}").text
     assert "+15551230001" in old
     # The sidebar keeps the chosen dates on the other dated pages.
-    assert "tab=payments&amp;range=custom" in old or "tab=payments&range=custom" in old
+    assert "tab=customers&amp;range=custom" in old or "tab=customers&range=custom" in old
 
 
 async def test_nudges_show_who_is_in_which_flow_and_what_was_sent(admin, session, rec):
@@ -126,7 +126,7 @@ async def test_the_bots_wording_is_edited_and_put_back(admin, session):
     admin.post("/admin/sft/texts", data={"key": "welcome", "text": "Hello {first}! {fee} only."})
     cfg = await config.load(session, fresh=True)
     assert cfg.texts["welcome"] == "Hello {first}! {fee} only."
-    assert "Hello Priya! $99 only." in admin.get("/admin/sft?tab=journey").text
+    assert "Hello {first}! {fee} only." in admin.get("/admin/sft?tab=replies").text
     bad = admin.post("/admin/sft/texts", data={"key": "welcome", "text": "Hi {price}"})
     assert "can't be filled in" in bad.cookies.get("shero_flash", "")
     admin.post("/admin/sft/texts", data={"key": "welcome", "action": "reset"})
