@@ -51,6 +51,10 @@
 {% set dated = ('overview', 'leads', 'payments', 'customers', 'nudges') %}
 {% set badges = {'overview': attention_count if attention_count is defined else 0} %}
 {% set mode = cfg.mode if cfg is defined else 'off' %}
+{# The WhatsApp number SFT runs on: its own channel, or Shero US's number. #}
+{% set own_channel = cfg.channel_id if cfg is defined and cfg.channel_id else '' %}
+{% set wa_number = settings.whatsapp_business_number if settings is defined else '' %}
+{% set wa_channel = own_channel or (settings.gallabox_channel_id if settings is defined else '') %}
 {% set sign_out = url_for('admin_logout') ~ '?next=' ~ (home.path | urlencode) %}
 
 <div class="flex min-h-full">
@@ -95,6 +99,10 @@
       <span class="flex-1">
         <span class="block font-semibold">{{ {'live': 'Live', 'test': 'Test mode'}.get(mode, 'Off') }}</span>
         <span class="block text-white/60">{{ {'live': 'Answering every SFT lead', 'test': 'Answering the test numbers only'}.get(mode, 'Answering nobody yet') }}</span>
+        <span class="mt-1 block border-t border-white/10 pt-1 text-white/80" data-sft-number>
+          {% if own_channel %}On SFT's own number{% else %}On {{ ('+' ~ wa_number) if wa_number else "Shero US's number" }}{% endif %}
+          {% if wa_channel %}<span class="block truncate font-mono text-[10px] text-white/50" title="Gallabox channel id">channel {{ wa_channel }}</span>{% endif %}
+        </span>
       </span>
     </a>
 
