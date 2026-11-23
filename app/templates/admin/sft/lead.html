@@ -131,6 +131,22 @@
         <textarea name="notes" rows="4" placeholder="Notes for the team" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm">{{ lead.notes or '' }}</textarea>
         <button class="mt-2 rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white">Save notes</button></form>
     {% endcall %}
+
+    <details class="rounded-2xl border border-red-200 bg-white px-5 py-4" data-sft-forget>
+      <summary class="cursor-pointer list-none text-sm font-semibold text-red-700">Delete this lead and start over…</summary>
+      <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}" class="mt-3 space-y-3">
+        <input type="hidden" name="action" value="forget">
+        <p class="text-xs leading-relaxed text-stone-600">Removes {{ lead.name or lead.profile_name or 'this lead' }}, their timeline and receipt from the SFT dashboard, and stops their follow-ups. The bot forgets the number: when they send <b>SFT</b> again it starts from the beginning (their name, then the welcome).</p>
+        <p class="text-[11px] text-stone-500">Their Zoho record and notes stay in Zoho. The ordering bot's data is not touched.</p>
+        {% if lead.paid_at and not lead.test_payment %}
+        <label class="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+          <input type="checkbox" name="confirm_paid" class="mt-0.5 rounded border-red-300 text-red-600">
+          <span>They paid {{ cfg.money(lead.amount_paid) }} for real. Also remove this payment from the dashboard (Stripe keeps it).</span>
+        </label>
+        {% endif %}
+        <button class="w-full rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700">Delete {{ lead.name or lead.profile_name or 'lead' }}</button>
+      </form>
+    </details>
   </div>
 </div>
 {% endblock %}

@@ -26,6 +26,11 @@ it is off, nothing changes for anyone.
 | Test chat | the journey without WhatsApp, with time travel for the nudges |
 | Settings | the course (fee, links), Stripe's status, the team's numbers, Zoho |
 
+A lead's page has **Delete this lead and start over**: the lead, its
+timeline and receipt go, its follow-ups stop, and the bot forgets the number
+(its next "SFT" starts with the name). Zoho keeps its record; a real Stripe
+payment needs a tick to confirm. Handy for testing from your own phone.
+
 Payments and Journey used to be tabs of their own; they are now part of
 Customers and Bot replies (old links open there).
 

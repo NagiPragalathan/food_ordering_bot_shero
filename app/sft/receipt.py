@@ -78,6 +78,19 @@ def save(lead: SftLead, cfg: SftConfig, *, offer_title: str | None = None) -> Pa
     return target
 
 
+def forget(token: str) -> None:
+    """Remove a deleted lead's saved receipts."""
+    folder = _folder(token)
+    if folder is None or not folder.is_dir():
+        return
+    for item in folder.glob("*.pdf"):
+        item.unlink(missing_ok=True)
+    try:
+        folder.rmdir()
+    except OSError:
+        pass
+
+
 def stored(token: str, name: str) -> Path | None:
     """The saved receipt `name` for this pay token, when there is one."""
     folder = _folder(token)

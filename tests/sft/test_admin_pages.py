@@ -263,3 +263,41 @@ def test_a_document_goes_in_gallaboxs_shape():
     assert block == {"type": "document", "document": {
         "path": "https://x.example/a/Brochure.pdf", "mimeType": "application/pdf",
         "caption": "The brochure"}}
+
+
+# --- Delete a lead: the bot forgets the number ----------------------------------------
+async def test_deleting_a_lead_lets_the_number_start_over(admin, session, cfg, rec, media_dir):
+    from app.db.models import SftEvent, SftLead
+
+    lead = await _enrolled(session, cfg)               # paid (not a test) - needs the tick
+    lead.test_payment = True                          # as a test payment, no tick needed
+    lead_id, token = lead.id, lead.pay_token
+    assert any((media_dir / "sft" / "receipts" / token).glob("*.pdf"))
+    page = admin.get(f"/admin/sft/leads/{lead_id}").text
+    assert "data-sft-forget" in page and "Delete this lead and start over" in page
+
+    gone = admin.post(f"/admin/sft/leads/{lead_id}/action", data={"action": "forget"})
+    assert gone.status_code == 303 and "tab=leads" in gone.headers["location"]
+    assert await session.get(SftLead, lead_id) is None
+    left = (await session.execute(select(SftEvent).where(SftEvent.lead_id == lead_id))).all()
+    assert left == [] and not (media_dir / "sft" / "receipts" / token).exists()
+
+    rec.clear()
+    await say(session, cfg, "SFT")                     # a new lead: the name first
+    assert rec.last()[1] == c.say(cfg, "ask_name")
+    fresh = await leads.get(session, NUMBER)
+    assert fresh.id != lead_id and fresh.paid_at is None
+
+
+async def test_a_real_payment_needs_a_tick_to_delete(admin, session, cfg, rec):
+    from app.db.models import SftLead
+
+    lead = await _enrolled(session, cfg)
+    page = admin.get(f"/admin/sft/leads/{lead.id}").text
+    assert 'name="confirm_paid"' in page
+    refused = admin.post(f"/admin/sft/leads/{lead.id}/action", data={"action": "forget"})
+    assert "tick the box" in refused.cookies.get("shero_flash", "")
+    assert await session.get(SftLead, lead.id) is not None
+    admin.post(f"/admin/sft/leads/{lead.id}/action",
+               data={"action": "forget", "confirm_paid": "on"})
+    assert await session.get(SftLead, lead.id) is None

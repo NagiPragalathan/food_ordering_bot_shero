@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import listing
@@ -559,10 +559,30 @@ async def lead_action(lead_id: str, request: Request,
         lead.crm_next_try_at = None
         lead.crm_attempts = 0
         message = "It goes to Zoho within a minute."
+    elif action == "forget":
+        return await _forget(request, session, lead, form, who, here)
     else:
         return redirect(here, flash=("error", "Unknown action."))
     lead.crm_dirty = True
     return redirect(here, flash=("success", message))
+
+
+async def _forget(request, session, lead: SftLead, form, who: str, here: str):
+    """Delete the lead, its timeline and its receipt: the bot forgets the
+    number, so its next "SFT" starts the journey from the beginning. Zoho
+    keeps its record; the ordering bot's own data is not touched."""
+    if lead.paid_at and not lead.test_payment and form.get("confirm_paid") != "on":
+        return redirect(here, flash=("error", "This lead paid for real: tick the box to confirm "
+                                              "you want their payment off the dashboard too."))
+    label, token, tail = leads.label(lead), lead.pay_token, lead.whatsapp_number[-4:]
+    await session.execute(delete(SftEvent).where(SftEvent.lead_id == lead.id))
+    await session.delete(lead)
+    await session.flush()
+    receipt.forget(token)
+    log.info("sft_lead_deleted", by=who, number_tail=tail)
+    return redirect(_url(request, "leads"), flash=(
+        "success", f"Deleted {label}. If they message SFT again, the bot starts from the "
+                   "beginning (their name first). Their Zoho record stays in Zoho."))
 
 
 # --- test chat ------------------------------------------------------------------------
