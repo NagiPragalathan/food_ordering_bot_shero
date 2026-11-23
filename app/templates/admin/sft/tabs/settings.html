@@ -1,0 +1,49 @@
+{% import "admin/_macros.html" as ui %}
+{% import "admin/sft/_bits.html" as sft %}
+<form method="post" action="{{ url_for('admin_sft_settings') }}" class="grid gap-5 lg:grid-cols-2" data-sft-settings>
+  {% call ui.card('The course') %}
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        {{ sft.field('Course fee', 'course_fee', cfg.course_fee, 'Before any offer (Offers).', 'number') }}
+        {{ sft.field('Currency', 'currency', cfg.currency) }}
+      </div>
+      {{ sft.field('Course link (sent after paying)', 'course_url', cfg.course_url, 'The learning platform. Empty: the team gets a task to send access by hand.', 'url', 'https://') }}
+      {{ sft.area('Course access note', 'course_access_note', cfg.course_access_note, 'Optional line under the payment confirmation (e.g. how to sign in).', 2) }}
+      {{ sft.field('Brochure link', 'brochure_url', cfg.brochure_url, 'Empty: the brochure this server serves: ' ~ cfg.brochure_link(), 'url', 'https://') }}
+      <a href="{{ cfg.brochure_link() }}" target="_blank" rel="noopener" class="inline-block text-xs font-semibold text-brand-700">Open the brochure ↗</a>
+    </div>
+  {% endcall %}
+
+  <div class="space-y-5">
+    {% call ui.card('Payments', 'Shero US\'s Stripe account and webhook') %}
+      <div class="flex items-center gap-2 text-sm">
+        {% if stripe_live %}{{ ui.badge('Stripe connected', 'good') }}<span class="text-stone-600">Real checkouts; SFT's are marked "Shero Food Training (SFT)".</span>
+        {% else %}{{ ui.badge('No Stripe key', 'warn') }}<span class="text-stone-600">Every pay link opens a test checkout that charges nobody.</span>{% endif %}
+      </div>
+      <p class="mt-2 text-[11px] text-stone-500">In Test mode the test numbers always get the test checkout. See every payment in <a class="font-semibold text-brand-700" href="{{ url('payments') }}">Payments</a>.</p>
+    {% endcall %}
+
+    {% call ui.card('The team') %}
+      {{ sft.area('Team WhatsApp numbers', 'team_numbers', cfg.team_numbers | join(', '), 'Told when a lead asks a person (template sft_team_alert). Optional.', 2) }}
+      <p class="mt-2 text-[11px] text-stone-500">When the team takes over at each stage is on the <a class="font-semibold text-brand-700" href="{{ url('nudges') }}">Nudges</a> page.</p>
+    {% endcall %}
+
+    {% call ui.card('Zoho CRM', 'Shero US\'s Zoho: ' ~ ('connected' if zoho_connected else 'not connected')) %}
+      <div class="space-y-3">
+        <input type="hidden" name="has_zoho_sync" value="1"><input type="hidden" name="has_zoho_tasks" value="1">
+        {{ sft.check('Sync SFT leads to Zoho', 'zoho_sync', cfg.zoho_sync, 'Lead Source "SFT - <source>", tags (SFT, the stage, the goal, the source), and the timeline as notes.') }}
+        {{ sft.check('Create a Zoho Task when the team should act', 'zoho_tasks', cfg.zoho_tasks) }}
+      </div>
+    {% endcall %}
+  </div>
+
+  <div class="flex justify-end lg:col-span-2">
+    <button class="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">Save settings</button>
+  </div>
+</form>
+<div class="mt-5 flex flex-wrap gap-3">
+  <form method="post" action="{{ url_for('admin_sft_zoho') }}"><input type="hidden" name="action" value="prepare">
+    <button class="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">Prepare Zoho (add the SFT Lead Sources)</button></form>
+  <form method="post" action="{{ url_for('admin_sft_zoho') }}"><input type="hidden" name="action" value="sync">
+    <button class="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">Sync to Zoho now</button></form>
+</div>

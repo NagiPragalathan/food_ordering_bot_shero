@@ -23,7 +23,7 @@ from app.core.logging import get_logger
 from app.db.models import SftLead
 from app.integrations.gallabox import channel
 from app.schemas.inbound import InboundEvent
-from app.sft import config, content as c, flow, leads, matching
+from app.sft import config, content as c, flow, leads, matching, offers
 from app.sft.config import SftConfig
 
 log = get_logger(__name__)
@@ -64,7 +64,7 @@ async def route(session: AsyncSession, event: InboundEvent) -> dict | None:
         return None
 
     lead = await leads.get(session, event.whatsapp_number)
-    if not own_number and not _wants_sft(event, lead, cfg):
+    if not own_number and not _wants_sft(event, lead, cfg) and             not await _has_code(session, event, cfg):
         return None
     try:
         outcome = await flow.handle(session, event, cfg, lead)
@@ -104,6 +104,66 @@ def _wants_sft(event: InboundEvent, lead: SftLead | None, cfg: SftConfig) -> boo
         # question), unless it is one of the ordering bot's own keywords.
         return not _for_the_ordering_bot(event)
     return False
+
+
+async def _has_code(session: AsyncSession, event: InboundEvent, cfg: SftConfig) -> bool:
+    """A running offer's code ("SFT50" from an ad) starts the journey too."""
+    if not (event.text or "").strip():
+        return False
+    return offers.find_code(event.text, await offers.live_codes(session, cfg)) is not None
+
+
+async def explain(session: AsyncSession, number: str, text: str,
+                  cfg: SftConfig) -> tuple[bool, list[str]]:
+    """Would SFT take this message from this number on Shero US's number, and
+    why: the Bot replies page's "Check a message"."""
+    from app.schemas.inbound import InboundKind
+
+    why: list[str] = []
+    digits = leads.digits(number)
+    if not cfg.is_on:
+        why.append("SFT is off, so the ordering bot answers every message. Below is what "
+                   "would happen once SFT is on.")
+    if cfg.channel_id:
+        why.append("SFT has its own WhatsApp number: every message on it is SFT's, and "
+                   "nothing on Shero US's number is.")
+    if digits and cfg.mode == config.TEST and not cfg.answers(digits):
+        why.append(f"Test mode: +{digits} is not on the test list, so the ordering bot "
+                   "answers it.")
+        return False, why
+    event = InboundEvent(whatsapp_number=digits or "0", kind=InboundKind.TEXT, text=text,
+                         message_id="check")
+    lead = await leads.get(session, digits) if digits else None
+    code = offers.find_code(text, await offers.live_codes(session, cfg))
+    if matching.has_keyword(text, cfg):
+        hit = next(k for k in cfg.keywords if matching.has_keyword(text, cfg.model_copy(
+            update={"keywords": [k]})))
+        why.append(f'It has the keyword "{hit}": SFT answers it.')
+        return True, why
+    if code:
+        why.append(f"It carries the offer code {code}: SFT answers it, at the offer's price.")
+        return True, why
+    if matching.is_sft_label(event):
+        why.append("It is one of SFT's button labels (a follow-up's quick reply).")
+        taken = lead is not None and _wants_sft(event, lead, cfg)
+        why.append("This number had SFT messages recently, so SFT answers it." if taken else
+                   "But this number has no recent SFT messages, so the ordering bot answers.")
+        return taken, why
+    if lead is not None and _wants_sft(event, lead, cfg):
+        if lead.with_team:
+            why.append("This lead is with the team: SFT keeps their messages (the bot stays "
+                       "silent) for the team to answer.")
+        else:
+            waiting = c.STEP_LABELS.get(lead.step) or lead.step
+            why.append(f"This lead is part-way through the journey (the bot is waiting for "
+                       f"{waiting}), so SFT answers.")
+        return True, why
+    if lead is not None and _for_the_ordering_bot(event):
+        why.append("It is one of the ordering bot's own keywords, so the ordering bot answers.")
+        return False, why
+    why.append("No SFT keyword, code or button, and the number is not part-way through the "
+               "journey: the ordering bot answers it.")
+    return False, why
 
 
 def _for_the_ordering_bot(event: InboundEvent) -> bool:

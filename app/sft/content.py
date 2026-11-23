@@ -177,7 +177,7 @@ ACCESS_OK = ("Great to hear, {first}! 🙌 Enjoy Day 1. Complete the lessons and
 ACCESS_HELP = ("Sorry about that, {first}! We're transferring you to a member of our team, who "
                "will help you get into the course here shortly.")
 
-LATER = ("No problem, {first}! 👍 When would be a good time for us to check back?")
+LATER_TEXT = ("No problem, {first}! 👍 When would be a good time for us to check back?")
 LATER_SET = ("Done! We'll check in {when}. Whenever you're ready, just reply *SFT* here to "
              "pick up where you left off.")
 LATER_THEM = ("Sure! We won't chase you. Whenever you're ready, just reply *SFT* here to pick "
@@ -354,3 +354,118 @@ FOLLOWUPS: tuple[TemplateSpec, ...] = (FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3)
 def first_name(name: str | None, fallback: str = "there") -> str:
     parts = (name or "").split()
     return parts[0][:40] if parts else fallback
+
+
+OFFER_APPLIED = ("🎉 Code *{code}* applied, {first}! Your course fee is now *{fee}* (was {was}).")
+
+# What the bot is waiting for, as the admin pages say it.
+STEP_LABELS: dict[str, str] = {
+    ASK_NAME: "their name", GOAL: "a goal", DETAILS: "course details or a question",
+    FAQ: "a question from the list", DECIDE: "a decision after the brochure",
+    QUESTION: "their question", PAY: "payment", LATER: "when to check back",
+    ACCESS: "course access", LOST_REASON: "why not", WITH_TEAM: "the team", IDLE: "",
+}
+
+
+# --- The bot's wording, editable on the Bot replies page ----------------------------
+@dataclass(frozen=True)
+class Text:
+    key: str
+    label: str
+    group: str
+    default: str
+    # The {placeholders} it may use; each is filled in for the lead.
+    fields: tuple[str, ...] = ()
+    note: str = ""
+
+
+# Interactive messages carry at most 1024 characters.
+TEXT_LIMIT = 1024
+FIELD_HELP = {"first": "their first name", "fee": "the course fee (with any offer)",
+              "amount": "what they paid", "note": "the course access note (Settings)",
+              "when": "in a week / in a month", "code": "the offer code",
+              "was": "the fee before the offer"}
+
+TEXTS: dict[str, Text] = {t.key: t for t in (
+    Text("ask_name", "Ask their name", "1 · Lead enters", ASK_NAME_TEXT),
+    Text("ask_name_again", "Name not understood", "1 · Lead enters", ASK_NAME_AGAIN),
+    Text("welcome", "Welcome (with the goal buttons)", "1 · Lead enters", WELCOME,
+         ("first", "fee")),
+    Text("welcome_back", "Welcome back", "1 · Lead enters", WELCOME_BACK, ("first",)),
+    Text("interest_business", "Goal: start a food business", "2 · Choose interest",
+         INTEREST["business"], ("first",)),
+    Text("interest_skills", "Goal: improve my skills", "2 · Choose interest",
+         INTEREST["skills"], ("first",)),
+    Text("brochure", "After the brochure (Yes / Not right now / Ask)", "3 · Brochure",
+         BROCHURE, ("fee",), "The PDF's link is added under it."),
+    Text("not_now", "Not right now", "3 · Brochure", NOT_NOW, ("first",)),
+    Text("ask_question", "Ask a question: type it", "3 · Brochure", ASK_QUESTION, ("first",)),
+    Text("handed_over", "Transferring to the team", "3 · Brochure", HANDED_OVER, ("first",)),
+    Text("faq_prompt", "The questions list", "4 · Questions", FAQ_PROMPT, ("first",)),
+    Text("faq_learn", "What will I learn?", "4 · Questions", FAQ_ANSWERS["sft:faq:learn"]),
+    Text("faq_cert", "Do I get a certificate?", "4 · Questions", FAQ_ANSWERS["sft:faq:cert"]),
+    Text("faq_partner", "Kitchen Partner pathway", "4 · Questions",
+         FAQ_ANSWERS["sft:faq:partner"]),
+    Text("faq_cost", "How much does it cost?", "4 · Questions", FAQ_ANSWERS["sft:faq:cost"],
+         ("fee",)),
+    Text("enrol", "Enroll: the payment link", "5 · Payment", ENROL, ("first", "fee")),
+    Text("pay_reminder", "Payment link again (a nudge)", "5 · Payment", PAY_REMINDER,
+         ("first",)),
+    Text("payment_failed", "Payment failed", "5 · Payment", PAYMENT_FAILED, ("first",)),
+    Text("offer_applied", "Offer code applied", "5 · Payment", OFFER_APPLIED,
+         ("first", "code", "fee", "was")),
+    Text("paid", "Payment confirmed (with the course button)", "6 · Paid", PAID,
+         ("first", "amount", "note")),
+    Text("paid_no_link", "Payment confirmed (no course link set)", "6 · Paid", PAID_NO_LINK,
+         ("first", "amount")),
+    Text("already_paid", "Already enrolled", "6 · Paid", ALREADY_PAID, ("first",)),
+    Text("access_ok", "Opened the course", "6 · Paid", ACCESS_OK, ("first",)),
+    Text("access_help", "Needs help opening the course", "6 · Paid", ACCESS_HELP, ("first",)),
+    Text("later", "Maybe later: when?", "7 · Follow-ups", LATER_TEXT, ("first",)),
+    Text("later_set", "Check back set", "7 · Follow-ups", LATER_SET, ("when",)),
+    Text("later_them", "They will message us", "7 · Follow-ups", LATER_THEM),
+    Text("not_interested", "Not interested (asks why)", "8 · Stop", NOT_INTERESTED, ("first",)),
+    Text("lost_thanks", "Thanks for the reason", "8 · Stop", LOST_THANKS),
+    Text("stopped", "STOP", "8 · Stop", STOPPED),
+    Text("tap_below", "Please tap an option", "Any step", TAP_BELOW),
+)}
+FAQ_TEXTS = {"sft:faq:learn": "faq_learn", "sft:faq:cert": "faq_cert",
+             "sft:faq:partner": "faq_partner", "sft:faq:cost": "faq_cost"}
+
+
+def say(cfg, key: str, **values) -> str:
+    """The bot's text `key` (edited on the Bot replies page, or the default),
+    filled in. An edit that can't be filled in falls back to the default."""
+    spec = TEXTS[key]
+    edited = (getattr(cfg, "texts", None) or {}).get(key)
+    for raw in (edited, spec.default):
+        if not raw:
+            continue
+        try:
+            return raw.format(**values)
+        except (KeyError, IndexError, ValueError, AttributeError):
+            continue
+    return spec.default
+
+
+def check_text(key: str, value: str) -> str | None:
+    """Why an edited text can't be saved, or None."""
+    import string
+
+    spec = TEXTS.get(key)
+    if spec is None:
+        return "unknown message"
+    if not value.strip():
+        return "the message can't be empty"
+    if len(value) > TEXT_LIMIT:
+        return f"at most {TEXT_LIMIT} characters (this one has {len(value)})"
+    try:
+        used = {name for _, name, _, _ in string.Formatter().parse(value) if name is not None}
+    except ValueError:
+        return "a { or } is not closed: write {first}, {fee}… exactly, or leave braces out"
+    unknown = sorted(n for n in used if n not in spec.fields)
+    if unknown:
+        allowed = ", ".join("{" + f + "}" for f in spec.fields) or "none"
+        return (f"{', '.join('{' + n + '}' for n in unknown)} can't be filled in here "
+                f"(this message can use: {allowed})")
+    return None

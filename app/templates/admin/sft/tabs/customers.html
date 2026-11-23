@@ -1,0 +1,55 @@
+{% import "admin/_macros.html" as ui %}
+{% import "admin/sft/_bits.html" as sft %}
+{% set range_q = rng.query() %}
+
+<div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4" data-sft-student-stats>
+  {{ ui.stat('Students', access_counts[''], 'enrolled · ' ~ rng.label | lower, 'good', icon='M12 14l9-5-9-5-9 5 9 5zm0 0v6m-6-9v5c0 1 3 3 6 3s6-2 6-3v-5') }}
+  {{ ui.stat('Opened the course', access_counts['opened'], 'said "Yes, I\'m in"', icon='M20 6L9 17l-5-5') }}
+  {{ ui.stat('Not confirmed yet', access_counts['waiting'], 'asked, or not asked yet', 'warn' if access_counts['waiting'] else 'default', icon='M12 8v4l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z') }}
+  {{ ui.stat('Needs help', access_counts['help'], 'could not get in', 'warn' if access_counts['help'] else 'default', icon='M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z') }}
+</div>
+
+<form method="get" class="mb-4 mt-6 flex flex-wrap items-center gap-2">
+  <input type="hidden" name="tab" value="customers">
+  <input type="hidden" name="access" value="{{ access }}">
+  {% for k, v in range_q.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  {{ ui.search('q', search, 'Name, number, email or source') }}
+</form>
+{% set chips = [] %}
+{% for key, label in access_views.items() %}
+  {% set _ = chips.append((label, access_counts.get(key, 0), url('customers', access=key, q=search), access == key, 'warn' if key in ('waiting', 'help') else 'default')) %}
+{% endfor %}
+<div class="mb-4">{{ ui.tabs(chips) }}</div>
+
+<section class="overflow-hidden rounded-2xl border border-stone-200/70 bg-white shadow-card">
+  {% if students %}
+  <div class="overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="bg-stone-50 text-left text-xs text-stone-500">
+      <tr><th class="px-4 py-2.5 font-medium">Student</th><th class="px-3 font-medium">Email</th><th class="px-3 font-medium">Enrolled</th><th class="px-3 text-right font-medium">Paid</th><th class="px-3 font-medium">Course</th><th class="px-3 font-medium">Goal · source</th><th class="px-3 font-medium">Zoho</th></tr>
+    </thead>
+    <tbody class="divide-y divide-stone-100">
+    {% for lead in students %}
+      {% set state, tone = course_state(lead) %}
+      <tr class="hover:bg-stone-50/70">
+        <td class="px-4 py-2.5">
+          <a href="{{ url_for('admin_sft_lead', lead_id=lead.id) }}" class="flex items-center gap-3">
+            {{ ui.avatar(lead.name or lead.profile_name, lead.whatsapp_number) }}
+            <span class="min-w-0"><span class="block truncate font-medium text-stone-900">{{ lead.name or lead.profile_name or 'Unknown' }}</span>
+            <span class="block text-xs text-stone-500">+{{ lead.whatsapp_number }}</span></span>
+          </a>
+        </td>
+        <td class="px-3 py-2.5 text-xs text-stone-600">{{ lead.email or '-' }}</td>
+        <td class="whitespace-nowrap px-3 py-2.5 text-xs text-stone-600">{{ local(lead.paid_at) }}</td>
+        <td class="px-3 py-2.5 text-right tabular-nums">{{ money(lead.amount_paid) }}{% if lead.offer_id %}<div class="text-[11px] text-brand-700">{{ offer_names.get(lead.offer_id, lead.offer_code or 'offer') }}</div>{% endif %}{% if lead.test_payment %}<div class="text-[11px] text-amber-700">test</div>{% endif %}</td>
+        <td class="px-3 py-2.5 text-xs">{{ ui.badge(state, tone) }}{% if lead.access_confirmed_at %}<div class="mt-0.5 text-[11px] text-stone-500">{{ local(lead.access_confirmed_at) }}</div>{% endif %}</td>
+        <td class="px-3 py-2.5 text-xs text-stone-600">{{ c.GOALS.get(lead.goal or '', '-') }}<div class="text-stone-400">{{ lead.source }}</div></td>
+        <td class="px-3 py-2.5 text-xs">{% if lead.crm_error %}<span class="text-red-600">Error</span>{% elif lead.zoho_id %}<span class="text-emerald-700">Synced</span>{% else %}<span class="text-stone-400">Waiting</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ ui.pager(page, url_with) }}
+  {% else %}{{ ui.empty('No students here yet.' ~ (' Try "All time" in the dates above.' if rng.key != 'all' else '')) }}{% endif %}
+</section>

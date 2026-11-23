@@ -48,6 +48,15 @@ class SftConfigError(ValueError):
     pass
 
 
+# The automated nudges, each of which can be switched off on the Nudges page.
+NUDGES: dict[str, str] = {
+    "followup_1": "Follow-up 1", "followup_2": "Follow-up 2", "followup_3": "Follow-up 3",
+    "followup_4": "Follow-up 4", "followup_5": "Follow-up 5",
+    "payment_reminder": "Payment link again", "nurture": "Maybe later check-in",
+    "course_check": "Course check after paying",
+}
+
+
 class SftConfig(BaseModel):
     mode: Literal["off", "test", "live"] = OFF
     test_numbers: list[str] = Field(default_factory=list)
@@ -91,6 +100,16 @@ class SftConfig(BaseModel):
     timezone: str = "America/New_York"
     send_from_hour: int = Field(default=9, ge=0, le=23)
     send_until_hour: int = Field(default=20, ge=1, le=24)
+
+    # The automated WhatsApp nudges (Nudges page): all of them, and each one
+    # (NUDGES keys) switched off on its own. The team's tasks are not nudges:
+    # they are raised either way (0 hours turns one off).
+    nudges_on: bool = True
+    nudges_off: list[str] = Field(default_factory=list)
+
+    # The bot's own wording, edited on the Bot replies page: {key: text}.
+    # A key that is not here says app/sft/content.py's default.
+    texts: dict[str, str] = Field(default_factory=dict)
 
     # WhatsApp numbers told when a lead asks for a person.
     team_numbers: list[str] = Field(default_factory=list)
@@ -159,6 +178,16 @@ class SftConfig(BaseModel):
             raise ValueError("at most 5")
         return numbers
 
+    @field_validator("nudges_off", mode="before")
+    @classmethod
+    def _nudges(cls, value):
+        return [k for k in dict.fromkeys(value or []) if k in NUDGES]
+
+    @field_validator("texts", mode="before")
+    @classmethod
+    def _texts(cls, value):
+        return {str(k): str(v).strip() for k, v in (value or {}).items() if str(v or "").strip()}
+
     @field_validator("currency")
     @classmethod
     def _currency(cls, value):
@@ -201,8 +230,15 @@ class SftConfig(BaseModel):
         return False
 
     def fee_label(self) -> str:
-        amount = f"{self.course_fee:,.2f}".removesuffix(".00")
-        return f"${amount}" if self.currency == "usd" else f"{amount} {self.currency.upper()}"
+        return self.money(self.course_fee)
+
+    def money(self, amount) -> str:
+        text = f"{Decimal(amount or 0):,.2f}".removesuffix(".00")
+        return f"${text}" if self.currency == "usd" else f"{text} {self.currency.upper()}"
+
+    def nudge_on(self, key: str) -> bool:
+        """Is this automated nudge (NUDGES) sending?"""
+        return self.nudges_on and key not in self.nudges_off
 
     def brochure_link(self) -> str:
         if self.brochure_url:

@@ -1,0 +1,131 @@
+{% import "admin/_macros.html" as ui %}
+{% import "admin/sft/_bits.html" as sft %}
+{% set r = report %}
+<div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+  {{ ui.stat('Leads', r.leads, 'came in · ' ~ rng.label | lower, icon='M17 20h5v-2a4 4 0 00-5-3.9M9 20H4v-2a4 4 0 015-3.9m8-6.1a4 4 0 11-8 0 4 4 0 018 0z') }}
+  {{ ui.stat('Enrolled', r.paid, 'paid · revenue ' ~ r.revenue, 'good', icon='M20 6L9 17l-5-5') }}
+  {{ ui.stat('Needs the team', attention_count, 'drop-offs and questions', 'warn' if attention_count else 'default', icon='M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z') }}
+  {{ ui.stat('With the team', team_count, 'bot silent for them', 'accent', icon='M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z') }}
+</div>
+
+<div class="mt-6">
+{% call ui.card('Leads and enrollments by day', 'Leads by the day they came in, enrollments by the day they paid') %}
+  {% if r.daily %}
+  <div class="flex h-40 items-end gap-[3px] overflow-x-auto pb-1" data-sft-daily role="img"
+       aria-label="Leads and enrollments per day">
+    {% for day, came, paid in r.daily %}
+    <div class="group relative flex h-full min-w-[10px] flex-1 flex-col justify-end"
+         title="{{ day.strftime('%a %d %b') }}: {{ came }} lead{{ 's' if came != 1 }}, {{ paid }} enrolled">
+      <div class="flex h-full items-end gap-px">
+        <div class="w-1/2 rounded-t bg-brand-300 group-hover:bg-brand-400" style="height: {{ (100 * came / chart_top) | round(1) }}%"></div>
+        <div class="w-1/2 rounded-t bg-emerald-500 group-hover:bg-emerald-600" style="height: {{ (100 * paid / chart_top) | round(1) }}%"></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="mt-1 flex justify-between text-[10px] text-stone-400">
+    <span>{{ r.daily[0][0].strftime('%d %b') }}</span><span>{{ r.daily[-1][0].strftime('%d %b') }}</span>
+  </div>
+  <div class="mt-2 flex gap-4 text-[11px] text-stone-600">
+    <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-brand-300"></span>Leads</span>
+    <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-emerald-500"></span>Enrolled</span>
+  </div>
+  {% else %}{{ ui.empty('Nothing in these dates.') }}{% endif %}
+{% endcall %}
+</div>
+
+<div class="mt-6 grid gap-5 lg:grid-cols-3">
+  <div class="space-y-5 lg:col-span-2">
+    {% call ui.card('Key numbers', 'Of the leads who came in during these dates') %}
+      <div class="grid gap-3 sm:grid-cols-2">
+        {% for rate in r.rates + ([r.recovered] if r.recovered else []) %}
+        <div class="rounded-xl bg-stone-50 px-4 py-3">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="text-sm font-medium text-stone-700">{{ rate.label }}</span>
+            <span class="text-lg font-semibold tabular-nums text-stone-900">{{ rate.percent }}</span>
+          </div>
+          <div class="mt-0.5 text-[11px] text-stone-500">{{ rate.part }} of {{ rate.whole }}: {{ rate.hint }}</div>
+        </div>
+        {% else %}
+        <p class="text-sm text-stone-500">No leads came in during these dates.</p>
+        {% endfor %}
+        {% if r.leads %}
+        <div class="rounded-xl bg-stone-50 px-4 py-3">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="text-sm font-medium text-stone-700">Team response time</span>
+            <span class="text-lg font-semibold tabular-nums text-stone-900">{{ (r.team_minutes ~ ' min') if r.team_minutes is not none else '-' }}</span>
+          </div>
+          <div class="mt-0.5 text-[11px] text-stone-500">average, task raised to task closed</div>
+        </div>
+        {% endif %}
+      </div>
+    {% endcall %}
+
+    {% call ui.card('Funnel', 'How many reached each stage · click a stage to see them') %}
+      {% set top = (r.funnel[0][1] if r.funnel else 0) or 1 %}
+      <div class="space-y-2" data-sft-funnel>
+        {% for name, reached in r.funnel %}
+        {% set key = c.FUNNEL[loop.index0] %}
+        <a href="{{ url('leads', view=key) }}" class="block rounded-lg px-1 py-0.5 hover:bg-stone-50">
+          <div class="flex justify-between text-xs text-stone-600"><span>{{ name }}</span>
+            <span class="tabular-nums">{{ reached }}{% if loop.index0 %} · {{ ((100 * reached / top) | round | int) }}%{% endif %}</span></div>
+          <div class="mt-1 h-2 rounded-full bg-stone-100"><div class="h-2 rounded-full bg-brand-500" style="width: {{ (100 * reached / top) | round(1) }}%"></div></div>
+        </a>
+        {% endfor %}
+      </div>
+      <div class="mt-4 flex flex-wrap gap-2 text-xs">
+        <span class="text-stone-500">Sitting at each stage now:</span>
+        {% for name, n in r.now_at %}<span class="rounded-full bg-stone-100 px-2.5 py-1 text-stone-600">{{ name }}: <b class="tabular-nums">{{ n }}</b></span>{% endfor %}
+      </div>
+    {% endcall %}
+
+    {% call ui.card('By source', 'Zoho Lead Source "SFT - <source>" and tag "SFT via <source>"') %}
+      {% if r.sources %}
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-xs text-stone-500"><th class="py-1.5 pr-3 font-medium">Source</th><th class="pr-3 font-medium">Leads</th><th class="pr-3 font-medium">Brochure</th><th class="pr-3 font-medium">Pay link</th><th class="pr-3 font-medium">Enrolled</th><th class="font-medium">Conversion</th></tr></thead>
+        <tbody class="divide-y divide-stone-100">
+        {% for s in r.sources %}
+          <tr><td class="py-2 pr-3"><a class="font-medium text-stone-800 hover:text-brand-700" href="{{ url('leads', source=s.source) }}">{{ s.source }}</a></td><td class="pr-3 tabular-nums">{{ s.leads }}</td><td class="pr-3 tabular-nums">{{ s.brochure }}</td><td class="pr-3 tabular-nums">{{ s.links }}</td><td class="pr-3 tabular-nums">{{ s.paid }}</td><td class="tabular-nums">{{ s.rate }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}{{ ui.empty('No leads in these dates.') }}{% endif %}
+    {% endcall %}
+  </div>
+
+  <div class="space-y-5">
+    {% call ui.card('For the team now', 'Questions, drop-offs and payment help') %}
+      {% if queue %}
+      <ul class="-my-2 divide-y divide-stone-100">
+        {% for lead in queue %}
+        <li class="py-2.5">
+          <a href="{{ url_for('admin_sft_lead', lead_id=lead.id) }}" class="group flex items-start gap-3">
+            {{ ui.avatar(lead.name or lead.profile_name, lead.whatsapp_number) }}
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center justify-between gap-2">
+                <span class="truncate text-sm font-medium text-stone-900 group-hover:text-brand-700">{{ lead.name or lead.profile_name or ('+' ~ lead.whatsapp_number) }}</span>
+                <span class="shrink-0 text-[11px] text-stone-400">{{ local(lead.attention_since or lead.handed_over_at) }}</span>
+              </div>
+              <div class="truncate text-xs text-stone-500">{{ lead.attention_reason or 'With the team' }}</div>
+              <div class="mt-1 flex flex-wrap gap-1">{{ sft.flags(lead) }}</div>
+            </div>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ ui.empty('Nobody is waiting for the team.') }}{% endif %}
+    {% endcall %}
+
+    {% call ui.card('Goals') %}
+      {% for name, n in r.goals %}<div class="flex justify-between py-1 text-sm"><span class="text-stone-600">{{ name }}</span><b class="tabular-nums">{{ n }}</b></div>
+      {% else %}<p class="text-sm text-stone-500">No goals chosen yet.</p>{% endfor %}
+    {% endcall %}
+    {% if r.lost_reasons %}
+    {% call ui.card('Why not', 'From leads who said Not interested') %}
+      {% for reason, n in r.lost_reasons %}<div class="flex justify-between py-1 text-sm"><span class="text-stone-600">{{ reason }}</span><b class="tabular-nums">{{ n }}</b></div>{% endfor %}
+    {% endcall %}
+    {% endif %}
+  </div>
+</div>

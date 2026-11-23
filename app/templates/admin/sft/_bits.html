@@ -44,6 +44,63 @@
 </label>
 {% endmacro %}
 
+{# The date range: preset chips, or From-To. Other filters ride along as hidden fields. #}
+{% macro range_bar(rng, presets, tab, keep_fields={}) %}
+<form method="get" class="mb-5 rounded-2xl border border-stone-200/70 bg-white px-4 py-3 shadow-card" data-sft-range>
+  <input type="hidden" name="tab" value="{{ tab }}">
+  {% for k, v in keep_fields.items() if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <div class="flex flex-wrap items-center gap-1.5">
+    <span class="mr-1 inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z"/></svg>Dates</span>
+    {% for key, label in presets.items() %}
+      <button name="range" value="{{ key }}" {% if rng.key == key %}aria-pressed="true"{% endif %}
+              class="rounded-full px-3 py-1 text-xs font-semibold transition
+                     {{ 'bg-brand-600 text-white shadow-sm' if rng.key == key else 'bg-stone-100 text-stone-600 hover:bg-stone-200' }}">{{ label }}</button>
+    {% endfor %}
+    <span class="flex flex-wrap items-center gap-1.5 sm:ml-auto">
+      <input type="date" name="from" value="{{ rng.first.isoformat() if rng.first else '' }}" aria-label="From"
+             class="rounded-lg border border-stone-300 px-2 py-1 text-xs {{ 'ring-2 ring-brand-500/40' if rng.key == 'custom' else '' }}">
+      <span class="text-xs text-stone-400">to</span>
+      <input type="date" name="to" value="{{ rng.last.isoformat() if rng.last else '' }}" aria-label="To"
+             class="rounded-lg border border-stone-300 px-2 py-1 text-xs {{ 'ring-2 ring-brand-500/40' if rng.key == 'custom' else '' }}">
+      <button name="range" value="custom" class="rounded-lg bg-stone-900 px-3 py-1 text-xs font-semibold text-white hover:bg-stone-700">Apply</button>
+    </span>
+  </div>
+  <p class="mt-1.5 text-[11px] text-stone-500">Showing <b class="text-stone-700">{{ rng.label }}</b>{% if rng.first and rng.key not in ('custom',) %} · {{ rng.first.strftime('%d %b') }}{% if rng.last != rng.first %} – {{ rng.last.strftime('%d %b %Y') }}{% else %} {{ rng.first.strftime('%Y') }}{% endif %}{% endif %} ({{ rng.tz.split('/')[-1] | replace('_', ' ') }} time)</p>
+</form>
+{% endmacro %}
+
+{# Where a lead is in SFT's flows, and what comes next (app/sft/views.py). #}
+{% macro flow(f, local) %}
+<div class="min-w-0">
+  <div class="text-xs font-semibold text-stone-800">{{ f.name }}</div>
+  <div class="truncate text-[11px] text-stone-500">{{ f.now }}</div>
+  {% if f.next %}
+  <div class="mt-0.5 text-[11px] {{ 'text-stone-400 line-through' if f.paused else 'text-brand-700' }}">
+    Next: {{ f.next }}{% if f.at %} · {{ local(f.at) }}{% endif %}</div>
+  {% if f.paused %}<div class="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Switched off</div>{% endif %}
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# A WhatsApp template's approval, as Gallabox reports it. #}
+{% macro wa_status(status) %}
+  {% if status == 'approved' %}{{ ui.badge('Approved', 'good') }}
+  {% elif status in ('rejected', 'error', 'paused', 'disabled') %}{{ ui.badge(status | title, 'bad') }}
+  {% elif status == 'not submitted' %}{{ ui.badge('Not submitted', 'warn') }}
+  {% elif status == 'unknown' %}{{ ui.badge('Status unknown') }}
+  {% else %}{{ ui.badge(status | title, 'warn') }}{% endif %}
+{% endmacro %}
+
+{# An on/off switch for a form. #}
+{% macro switch(name, on, label='On') %}
+<label class="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-700">
+  <input type="checkbox" name="{{ name }}" {% if on %}checked{% endif %} class="peer sr-only">
+  <span class="relative h-5 w-9 rounded-full bg-stone-300 transition after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow after:transition peer-checked:bg-brand-600 peer-checked:after:translate-x-4 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500/40"></span>
+  <span>{{ label }}</span>
+</label>
+{% endmacro %}
+
 {# One chat bubble: theirs on the left, the bot's on the right. #}
 {% macro bubble(e, local) %}
 {% set mine = e.kind == 'inbound' %}

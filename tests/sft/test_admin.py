@@ -27,12 +27,22 @@ def admin(session):
     return TestClient(app, follow_redirects=False)
 
 
-@pytest.mark.parametrize("tab", ["overview", "leads", "chat", "journey", "settings", "templates"])
+TABS = ["overview", "leads", "payments", "customers", "nudges", "offers", "replies", "journey",
+        "chat", "settings"]
+
+
+@pytest.mark.parametrize("tab", TABS)
 def test_every_tab_opens(admin, tab):
     page = admin.get(f"/admin/sft?tab={tab}")
     assert page.status_code == 200, page.text[:500]
     assert "Shero Food Training" in page.text and "data-sft-sidebar" in page.text
     assert f'href="http://testserver/admin/sft?tab={tab}" aria-current="page"' in page.text
+
+
+def test_the_old_templates_tab_opens_nudges(admin):
+    page = admin.get("/admin/sft?tab=templates").text
+    assert 'href="http://testserver/admin/sft?tab=nudges" aria-current="page"' in page
+    assert "Submit the missing ones to WhatsApp" in page
 
 
 @pytest.mark.parametrize("path", ["/admin/sft", "/admin/sft?tab=settings", "lead"])
@@ -41,10 +51,10 @@ async def test_sft_has_its_own_menu_not_the_food_dashboards(admin, session, cfg,
         await say(session, cfg, "SFT")
         path = f"/admin/sft/leads/{(await leads.get(session, NUMBER)).id}"
     page = admin.get(path).text
-    for key in ("overview", "leads", "chat", "journey", "settings", "templates"):
+    for key in TABS:
         assert f"/admin/sft?tab={key}" in page, key
-    for food in ("Kitchens", "Uber queue", "Payouts", "Loyalty", "Bot replies", "DST India",
-                 "data-business-tabs", "admin/menu"):
+    for food in ("Kitchens", "Uber queue", "Payouts", "Loyalty", "DST India",
+                 "data-business-tabs", "admin/menu", "admin/bot-replies", "admin/orders"):
         assert food not in page, food
 
 
@@ -116,20 +126,49 @@ async def test_closing_as_lost_and_nurturing(admin, session, cfg, rec):
     assert lead.stage == c.LOST and lead.opted_out and lead.lost_reason == "Too far"
 
 
-async def test_settings_are_saved_and_checked(admin, session):
-    saved = admin.post("/admin/sft/settings", data={
+async def test_who_sft_answers_is_saved_on_bot_replies(admin, session):
+    saved = admin.post("/admin/sft/replies", data={
         "mode": "test", "test_numbers": "+1 555 123 0001", "keywords": "sft, food course",
-        "course_url": "https://learn.example/sft", "followup_hours": "24, 72, 144",
-        "attention_brochure_sent": "12", "ask_name": "on", "zoho_sync": "on"})
+        "has_ask_name": "1"})
     assert saved.status_code == 303
     cfg = await config.load(session, fresh=True)
     assert cfg.mode == "test" and cfg.test_numbers == ["15551230001"]
-    assert cfg.keywords == ["sft", "food course"] and cfg.followup_hours == [24, 72, 144]
-    assert cfg.attention_hours["brochure_sent"] == 12 and not cfg.zoho_tasks
+    assert cfg.keywords == ["sft", "food course"] and not cfg.ask_name
+    bad = admin.post("/admin/sft/replies", data={"keywords": ""})
+    assert "keyword" in bad.cookies.get("shero_flash", "")
+    assert (await config.load(session, fresh=True)).keywords == ["sft", "food course"]
 
-    bad = admin.post("/admin/sft/settings", data={"followup_hours": "72, 24"})
-    assert "shortest to longest" in bad.cookies.get("shero_flash", "") or bad.status_code == 303
-    assert (await config.load(session, fresh=True)).followup_hours == [24, 72, 144]
+
+async def test_settings_are_saved_and_checked(admin, session):
+    saved = admin.post("/admin/sft/settings", data={
+        "course_url": "https://learn.example/sft", "has_zoho_sync": "1", "has_zoho_tasks": "1",
+        "zoho_sync": "on"})
+    assert saved.status_code == 303
+    cfg = await config.load(session, fresh=True)
+    assert cfg.course_url == "https://learn.example/sft" and cfg.zoho_sync and not cfg.zoho_tasks
     insecure = admin.post("/admin/sft/settings", data={"course_url": "http://x.example"})
     assert insecure.status_code == 303
     assert (await config.load(session, fresh=True)).course_url == "https://learn.example/sft"
+
+
+async def test_nudges_are_saved_and_checked(admin, session):
+    saved = admin.post("/admin/sft/nudges", data={
+        "nudges_on": "on", "followup_1_hours": "24", "followup_1_on": "on",
+        "followup_2_hours": "72", "followup_3_hours": "144", "followup_3_on": "on",
+        "payment_reminder_minutes": "90", "payment_reminder_on": "on", "nurture_days": "14, 30",
+        "access_check_hours": "12", "attention_brochure_sent": "12", "send_from_hour": "8",
+        "send_until_hour": "21", "timezone": "America/Chicago"})
+    assert saved.status_code == 303
+    cfg = await config.load(session, fresh=True)
+    assert cfg.followup_hours == [24, 72, 144] and cfg.nudges_on
+    # Follow-up 2, the check-in and the course check were left unticked: off.
+    assert set(cfg.nudges_off) == {"followup_2", "nurture", "course_check"}
+    assert cfg.payment_reminder_minutes == 90 and cfg.nurture_days == [14, 30]
+    assert cfg.attention_hours["brochure_sent"] == 12 and cfg.access_check_hours == 12
+    assert (cfg.send_from_hour, cfg.send_until_hour, cfg.timezone) == (8, 21, "America/Chicago")
+
+    bad = admin.post("/admin/sft/nudges", data={"followup_1_hours": "72", "followup_2_hours": "24"})
+    assert "shortest to longest" in bad.cookies.get("shero_flash", "")
+    assert (await config.load(session, fresh=True)).followup_hours == [24, 72, 144]
+    none = admin.post("/admin/sft/nudges", data={"nudges_on": "on"})
+    assert "at least one follow-up" in none.cookies.get("shero_flash", "")

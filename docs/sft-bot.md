@@ -5,11 +5,33 @@ kept separate from it. It has its own leads, follow-ups, team hand-overs and
 Zoho sync, and its own admin page at **`/admin/sft`**.
 
 That page is **not in the dashboard menu yet**: open it by its address (same
-login). To add it to the menu later, add one link to the sidebar in
-`app/templates/admin/base.html` pointing at `url_for('admin_sft')`.
+login; signing in from the address brings you back to it). It has its own
+layout with only SFT's sections. To add it to the dashboard's menu later, add
+one link to the sidebar in `app/templates/admin/base.html` pointing at
+`url_for('admin_sft')`.
 
-SFT is **off** until it is switched on in **Settings** on that page. While it
-is off, nothing changes for anyone.
+SFT is **off** until it is switched on in **Bot replies** on that page. While
+it is off, nothing changes for anyone.
+
+## The admin page
+
+| Section | What it shows |
+|---|---|
+| Overview | KPIs, a daily chart of leads and enrollments, the funnel (click a stage), sources, goals, who needs the team |
+| Leads | every lead as a list or a **board by stage**, each with its flow and what the bot does next; search, source, stage; CSV |
+| Payments | paid enrollments, revenue, link-to-paid, discounts, refunds, a daily revenue chart, each payment (opens in Stripe), who is waiting to pay; CSV |
+| Customers | the students (everyone who paid) and their course access: opened, not confirmed yet, needs the team; CSV |
+| Nudges | **Rules** (on/off, send hours, each follow-up's wait and switch, the payment reminder, Maybe later check-ins, the course check, when the team takes over), **Leads by flow**, **Messages sent**, **WhatsApp templates** |
+| Offers | codes and launch prices (below) |
+| Bot replies | who SFT answers (Off / Test / Live, test numbers), what starts it (keywords, source codes, ad ids, own number), **Check a message**, and **every message the bot says, editable** |
+| Journey | every message and button, with the current wording |
+| Test chat | the journey without WhatsApp, with time travel for the nudges |
+| Settings | the course (fee, links), Stripe's status, the team's numbers, Zoho |
+
+Overview, Leads, Payments, Customers and the Nudges' lists take a **date
+range**: Today, Yesterday, Last 7 / 30 / 90 days, This month, Last month,
+All time, or a custom From-To (in SFT's timezone). The range stays as you move
+between them.
 
 ## The journey
 
@@ -32,13 +54,30 @@ Free text a lead types where the bot expected a tap is read sensibly: "yes"
 after the brochure enrolls them, a question ("Is it in English?") goes to the
 team, and "ok" or "hi" gets the options again. STOP opts out.
 
-Every message and button is on the page's **Journey** tab, and the wording is
-in `app/sft/content.py`.
+Every message and button is on the page's **Journey** tab. The wording is
+edited on **Bot replies** (each message lists the placeholders it can use,
+such as `{first}` and `{fee}`; "Default" puts the original back); the
+defaults are in `app/sft/content.py`. The buttons keep their words, since the
+bot reads the lead's taps by them.
+
+## Offers
+
+* **Code**: the lead sends it on WhatsApp ("SFT20", or "SFT SFT20" from an
+  ad). The bot confirms the new fee and carries on where they were; a code
+  starts the journey even on Shero US's shared number.
+* **Automatic** (no code): covers everyone, or the sources ticked, between
+  its dates, such as a launch price.
+
+Each is a percent off, an amount off or a fixed price, with optional dates
+and a limit on enrollments. A lead pays the lowest price that applies (never
+below Stripe's $0.50); it shows in the welcome, the brochure, the FAQ, the
+Pay button and Stripe's checkout, and an open checkout at an old price is
+replaced. The approved follow-up templates keep saying the full fee.
 
 ## When the team takes over
 
 A lead who stops at a stage for too long becomes a task for the team (once per
-stage), with a suggested message. The waits are set on the Settings tab:
+stage), with a suggested message. The waits are set on **Nudges → Rules**:
 
 | Stage | Task after | Suggested message |
 |---|---|---|
@@ -109,20 +148,33 @@ bot at stage 3. It is printed from `docs/sft-brochure/brochure.html`:
 Its facts match the bot's FAQ answers (`app/sft/content.py`); change both
 together. A different brochure can be used by putting its link in Settings.
 
+## The nudges
+
+On **Nudges → Rules**: all of them on or off (off: nothing is sent, they
+wait), the hours they may go out, and each one with its wait and its own
+switch (a follow-up switched off is skipped and the next follows on time).
+Two follow-ups are at least a day apart, so a lead quiet for a long time is
+not sent them back to back. **Leads by flow** shows every lead in its flow
+(in the journey, follow-ups running, follow-ups finished, waiting to pay,
+maybe later, paid: course check, with the team, finished, stopped) with what
+the bot sends next and when.
+
 ## Going live
 
-1. Deploy. Migration `0025_sft` adds the two tables (`sft_leads`, `sft_events`).
+1. Deploy. Migrations `0025_sft` (`sft_leads`, `sft_events`) and
+   `0026_sft_offers` (`sft_offers`, and a lead's offer and last nudge).
 2. On `/admin/sft` → **Test chat**, walk the journey (it sends nothing on
    WhatsApp). Use *Time travel* to see the follow-ups.
-3. **Settings**: the course link (sent after paying), the test numbers, the
-   team's WhatsApp numbers, and SFT's own channel id if it has one.
-4. **Templates** → *Submit the missing ones to WhatsApp* (7 templates:
+3. **Settings**: the course link (sent after paying) and the team's WhatsApp
+   numbers. **Bot replies**: the test numbers, and SFT's own channel id if it
+   has one.
+4. **Nudges → WhatsApp templates** → *Submit the missing ones to WhatsApp* (7 templates:
    `sft_followup_1..3`, `sft_payment_reminder`, `sft_course_check`,
    `sft_nurture`, `sft_team_alert`). Until Meta approves them, a follow-up
    goes as an ordinary message inside the 24-hour window and is skipped
    outside it.
 5. **Settings** → *Prepare Zoho*.
-6. Switch to **Test** and try it from a listed phone, then **Live**.
+6. On **Bot replies** switch to **Test** and try it from a listed phone, then **Live**.
 
 Payments use Shero US's Stripe account and its existing webhook
 (`/webhooks/stripe`); SFT's checkouts are told apart by their metadata.

@@ -1,23 +1,26 @@
 """The SFT numbers the admin page shows (the KPI list in the journey design).
 
-Computed from the leads that entered in the period (created_at), so every
-rate compares like with like: of the leads who came in, how many got how far.
+Computed from the leads that came in during the chosen date range
+(created_at), so every rate compares like with like: of the leads who came
+in, how many got how far. The daily chart counts leads by the day they came
+in and enrollments by the day they paid.
 """
 
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import SftEvent, SftLead
 from app.sft import content as c
-from app.sft.leads import now
+from app.sft.periods import Range
 
-PERIODS = {"7": "Last 7 days", "30": "Last 30 days", "90": "Last 90 days", "all": "All time"}
+TEST_SOURCE = "Test chat"
 
 
 @dataclass
@@ -46,20 +49,31 @@ class Report:
     revenue: str = "-"
     with_team: int = 0
     needs_attention: int = 0
+    paid: int = 0
+    # (day, leads who came in, enrollments paid) for the chart.
+    daily: list[tuple[date, int, int]] = field(default_factory=list)
+    offers_used: int = 0
 
 
-def since(period: str) -> datetime | None:
-    return None if period == "all" else now() - timedelta(days=int(period))
-
-
-async def report(session: AsyncSession, period: str = "30") -> Report:
-    start = since(period if period in PERIODS else "30")
-    query = select(SftLead).where(SftLead.source != "Test chat")
-    if start is not None:
-        query = query.where(SftLead.created_at >= start)
+async def report(session: AsyncSession, rng: Range, money=None) -> Report:
+    money = money or (lambda amount: f"${Decimal(amount or 0):,.2f}".removesuffix(".00"))
+    query = select(SftLead).where(SftLead.source != TEST_SOURCE, *rng.where(SftLead.created_at))
     rows = (await session.execute(query)).scalars().all()
     out = Report(leads=len(rows))
+    paid_query = select(SftLead).where(SftLead.source != TEST_SOURCE,
+                                       SftLead.paid_at.is_not(None), *rng.where(SftLead.paid_at))
+    paid_in_range = (await session.execute(paid_query)).scalars().all()
+    days = rng.days(earliest=min((rng.day_of(r.created_at) for r in rows), default=None))
+    came = Counter(rng.day_of(r.created_at) for r in rows)
+    enrolled = Counter(rng.day_of(r.paid_at) for r in paid_in_range)
+    out.daily = [(d, came.get(d, 0), enrolled.get(d, 0)) for d in days]
+    real = [r for r in paid_in_range if not r.test_payment]
+    out.paid = len(real)
+    out.revenue = money(sum((r.amount_paid or 0) for r in real)) if real else money(0)
+    out.offers_used = sum(1 for r in real if r.offer_id)
     if not rows:
+        out.now_at = [(c.STAGES[s], 0) for s in c.STAGES]
+        out.funnel = [(c.STAGES[s], 0) for s in c.FUNNEL]
         return out
 
     def got(stage: str) -> int:
@@ -73,7 +87,6 @@ async def report(session: AsyncSession, period: str = "30") -> Report:
         or r.with_team or r.question))
     links = sum(1 for r in rows if r.link_sent_at)
     clicked = sum(1 for r in rows if r.link_clicked_at)
-    paid = [r for r in rows if r.paid_at and not r.test_payment]
     paid_all = [r for r in rows if r.paid_at]
     accessed = sum(1 for r in paid_all if r.access_confirmed_at)
 
@@ -94,8 +107,6 @@ async def report(session: AsyncSession, period: str = "30") -> Report:
     out.lost_reasons = Counter(r.lost_reason for r in rows if r.lost_reason).most_common(6)
     out.with_team = sum(1 for r in rows if r.with_team)
     out.needs_attention = sum(1 for r in rows if r.needs_attention)
-    total = sum((r.amount_paid or 0) for r in paid)
-    out.revenue = f"${total:,.2f}".removesuffix(".00") if paid else "$0"
 
     by_source: dict[str, dict] = {}
     for r in rows:

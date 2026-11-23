@@ -1,0 +1,134 @@
+{% import "admin/_macros.html" as ui %}
+{% import "admin/sft/_bits.html" as sft %}
+{% set field = 'mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20' %}
+{% set o = editing %}
+
+<div class="grid gap-5 lg:grid-cols-[24rem_1fr]">
+  <form method="post" action="{{ url_for('admin_sft_offer_save') }}" data-sft-offer-form
+        class="self-start rounded-2xl border border-stone-200/70 bg-white p-5 shadow-card lg:sticky lg:top-24">
+    <div class="flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-stone-900">{{ 'Edit ' ~ (o.code or o.title) if o else 'New offer' }}</h2>
+      {% if o %}<a href="{{ url('offers') }}" class="text-xs font-semibold text-brand-700">+ New offer</a>{% endif %}
+    </div>
+    {% if o %}<input type="hidden" name="offer_id" value="{{ o.id }}">{% endif %}
+    <label class="mt-4 block text-xs font-medium text-stone-600">Name (for you)
+      <input name="title" required maxlength="80" value="{{ o.title if o else '' }}" placeholder="Launch week" class="{{ field }}"></label>
+    <label class="mt-3 block text-xs font-medium text-stone-600">Code
+      <input name="code" maxlength="20" value="{{ o.code if o and o.code else '' }}" placeholder="SFT20 (leave empty for an automatic offer)" class="{{ field }} font-mono uppercase placeholder:font-sans placeholder:normal-case" data-offer-code></label>
+    <p class="mt-1 text-[11px] text-stone-500">With a code, a lead gets the offer by sending the code on WhatsApp (put "Message SFT20" in your ad or post). Without one, it applies to everyone it covers while it runs.</p>
+
+    <div class="mt-3 grid grid-cols-[1fr_7rem] gap-2">
+      <label class="block text-xs font-medium text-stone-600">Discount
+        <select name="kind" class="{{ field }}" data-offer-kind>
+          <option value="percent" {% if not o or o.kind == 'percent' %}selected{% endif %}>Percent off</option>
+          <option value="amount" {% if o and o.kind == 'amount' %}selected{% endif %}>Amount off</option>
+          <option value="price" {% if o and o.kind == 'price' %}selected{% endif %}>Fixed price</option>
+        </select></label>
+      <label class="block text-xs font-medium text-stone-600">Value
+        <input name="value" type="number" min="0.01" step="0.01" required value="{{ o.value | float if o else '' }}" placeholder="20" class="{{ field }} tabular-nums" data-offer-value></label>
+    </div>
+    <div class="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-offer-preview data-fee="{{ cfg.course_fee }}" data-symbol="{{ '$' if cfg.currency == 'usd' else '' }}">
+      The lead sees: <b>Course fee: <span data-offer-price>…</span></b>
+    </div>
+
+    <div class="mt-3 grid grid-cols-2 gap-2">
+      <label class="block text-xs font-medium text-stone-600">Starts
+        <input name="starts_on" type="date" value="{{ o.starts_on.isoformat() if o and o.starts_on else '' }}" class="{{ field }}"></label>
+      <label class="block text-xs font-medium text-stone-600">Ends (included)
+        <input name="ends_on" type="date" value="{{ o.ends_on.isoformat() if o and o.ends_on else '' }}" class="{{ field }}"></label>
+    </div>
+    <label class="mt-3 block text-xs font-medium text-stone-600">Limit (enrollments)
+      <input name="usage_limit" type="number" min="1" value="{{ o.usage_limit if o and o.usage_limit else '' }}" placeholder="No limit" class="{{ field }}"></label>
+
+    <fieldset class="mt-3">
+      <legend class="text-xs font-medium text-stone-600">For leads from <span class="font-normal text-stone-400">(none ticked: everyone)</span></legend>
+      <div class="mt-1 flex flex-wrap gap-1.5">
+        {% for s in source_names %}
+        <label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-700 has-[:checked]:bg-brand-600 has-[:checked]:text-white">
+          <input type="checkbox" name="sources" value="{{ s }}" class="sr-only" {% if o and s in o.sources %}checked{% endif %}>{{ s }}</label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <label class="mt-3 block text-xs font-medium text-stone-600">Note (for you)
+      <input name="note" maxlength="255" value="{{ o.note if o and o.note else '' }}" placeholder="Instagram campaign, November" class="{{ field }}"></label>
+    <div class="mt-4 flex items-center justify-between">
+      {{ sft.switch('active', o.active if o else true, 'On') }}
+      <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">{{ 'Save offer' if o else 'Create offer' }}</button>
+    </div>
+  </form>
+
+  <div class="min-w-0 space-y-5">
+    <section class="rounded-2xl border border-stone-200/70 bg-white shadow-card">
+      <header class="border-b border-stone-100 px-5 py-4">
+        <h2 class="text-sm font-semibold text-stone-900">Offers{% if offers %} <span class="font-normal text-stone-500">· {{ offers | length }}</span>{% endif %}</h2>
+        <p class="mt-0.5 text-xs text-stone-500">Course fee {{ cfg.fee_label() }}. A lead pays the lowest price of the offers that apply to them; the price shows in the welcome, the brochure, the Pay button and Stripe's checkout.</p>
+      </header>
+      {% if offers %}
+      <ul class="divide-y divide-stone-100" data-sft-offers>
+        {% for offer in offers %}{% set s = offer_stats[offer.id] %}{% set label, tone = s.status %}
+        <li class="flex flex-wrap items-start gap-4 px-5 py-4 {{ 'bg-brand-50/40' if o and o.id == offer.id else '' }}">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              {% if offer.code %}<span class="rounded-md bg-stone-900 px-2 py-0.5 font-mono text-xs font-semibold text-white">{{ offer.code }}</span>{% else %}{{ ui.badge('Automatic', 'info') }}{% endif %}
+              <span class="text-sm font-semibold text-stone-900">{{ offer.title }}</span>
+              {{ ui.badge(label, tone) }}
+            </div>
+            <div class="mt-1 text-sm text-stone-700"><b>{{ s.describe }}</b> → {{ money(s.price) }} <span class="text-stone-400 line-through">{{ cfg.fee_label() }}</span></div>
+            <div class="mt-1 text-xs text-stone-500">
+              {% if offer.starts_on or offer.ends_on %}{{ offer.starts_on.strftime('%d %b %Y') if offer.starts_on else 'Now' }} – {{ offer.ends_on.strftime('%d %b %Y') if offer.ends_on else 'no end' }}{% else %}No end date{% endif %}
+              · {{ offer.sources | join(', ') if offer.sources else 'every source' }}
+              {% if offer.usage_limit %} · limit {{ offer.usage_limit }}{% endif %}
+              {% if offer.note %} · {{ offer.note }}{% endif %}
+            </div>
+            <div class="mt-2 flex flex-wrap gap-2 text-xs">
+              <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-stone-600">Leads with it: <b class="tabular-nums">{{ s.applied }}</b></span>
+              <span class="rounded-full bg-emerald-50 px-2.5 py-0.5 text-emerald-800">Enrolled: <b class="tabular-nums">{{ s.paid }}{% if offer.usage_limit %}/{{ offer.usage_limit }}{% endif %}</b></span>
+              <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-stone-600">Revenue: <b>{{ money(s.revenue) }}</b></span>
+              <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-stone-600">Discount given: <b>{{ money(s.discount) }}</b></span>
+            </div>
+          </div>
+          <div class="flex shrink-0 flex-wrap gap-1.5">
+            <a href="{{ url('offers', offer=offer.id) }}" class="rounded-lg px-3 py-1.5 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-200 hover:bg-brand-50">Edit</a>
+            <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=offer.id, action='toggle') }}">
+              <button class="rounded-lg px-3 py-1.5 text-xs font-medium text-stone-700 ring-1 ring-inset ring-stone-200 hover:bg-stone-50">{{ 'Turn off' if offer.active else 'Turn on' }}</button></form>
+            {% if not s.applied %}
+            <form method="post" action="{{ url_for('admin_sft_offer_action', offer_id=offer.id, action='delete') }}" onsubmit="return confirm('Delete this offer?')">
+              <button class="rounded-lg px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-50">Delete</button></form>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ ui.empty('No offers yet. Create the first one on the left.') }}{% endif %}
+    </section>
+
+    {% call ui.card('How offers reach a lead') %}
+      <ol class="list-decimal space-y-1.5 pl-4 text-xs text-stone-600">
+        <li><b>Code:</b> the lead sends the code on WhatsApp, alone or with SFT ("SFT20" or "SFT SFT20"). The bot confirms the new fee and carries on where they were. A code starts the journey even on Shero US's shared number.</li>
+        <li><b>Automatic:</b> no code; it covers everyone (or the sources ticked) between its dates. Good for a launch price.</li>
+        <li>The lowest price wins, never below Stripe's minimum. A checkout already open at the old price is replaced at the new one.</li>
+        <li>The follow-up templates are approved by WhatsApp with fixed words, so they keep saying the full fee; the lead sees their price when they tap Enroll.</li>
+      </ol>
+    {% endcall %}
+  </div>
+</div>
+
+<script>
+  // The price the lead will see, as the offer is typed.
+  (function () {
+    var box = document.querySelector('[data-offer-preview]'); if (!box) return;
+    var fee = parseFloat(box.dataset.fee), sym = box.dataset.symbol;
+    var kind = document.querySelector('[data-offer-kind]'), value = document.querySelector('[data-offer-value]');
+    var out = box.querySelector('[data-offer-price]');
+    function money(n) { var t = n.toFixed(2).replace(/\.00$/, ''); return sym ? sym + t : t; }
+    function show() {
+      var v = parseFloat(value.value), p = fee;
+      if (!isNaN(v) && v > 0) {
+        p = kind.value === 'percent' ? fee * (100 - Math.min(v, 100)) / 100 : kind.value === 'amount' ? fee - v : v;
+        p = Math.min(fee, Math.max(0.5, Math.round(p * 100) / 100));
+      }
+      out.textContent = p < fee ? money(p) + ' (was ' + money(fee) + ')' : money(fee);
+    }
+    kind.addEventListener('change', show); value.addEventListener('input', show); show();
+  })();
+</script>

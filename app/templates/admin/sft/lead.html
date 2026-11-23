@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="flex flex-wrap items-center gap-1.5">{{ sft.stage(c, lead.stage) }}{{ sft.flags(lead) }}</div>
+<div class="flex flex-wrap items-center gap-1.5">{{ sft.stage(c, lead.stage) }}{{ sft.flags(lead) }}{% if lead.offer_code %}{{ ui.badge('Offer ' ~ lead.offer_code, 'info') }}{% endif %}</div>
 
 <div class="mt-5 grid gap-5 lg:grid-cols-3">
   <div class="space-y-5 lg:col-span-2">
@@ -50,7 +50,7 @@
           <span class="absolute -left-[26px] top-1 h-2.5 w-2.5 rounded-full ring-4 ring-white
             {% if e.kind == 'inbound' %}bg-sky-500{% elif e.kind == 'sent' %}bg-emerald-500{% elif e.kind in ('attention', 'handover') %}bg-amber-500{% elif e.kind in ('send_failed', 'not_sent') %}bg-red-500{% elif e.kind == 'payment' %}bg-brand-600{% else %}bg-stone-400{% endif %}"></span>
           <div class="flex flex-wrap items-baseline gap-x-2">
-            <span class="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{{ {'inbound': 'They said', 'sent': 'Bot sent', 'stage': 'Stage', 'attention': 'Team task', 'resolved': 'Task closed', 'handover': 'Hand-over', 'followup': 'Follow-up', 'payment': 'Payment', 'team': 'Team', 'send_failed': 'Not delivered', 'not_sent': 'Not sent'}.get(e.kind, e.kind | replace('_', ' ') | title) }}</span>
+            <span class="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{{ {'inbound': 'They said', 'sent': 'Bot sent', 'stage': 'Stage', 'attention': 'Team task', 'resolved': 'Task closed', 'handover': 'Hand-over', 'followup': 'Follow-up', 'payment': 'Payment', 'team': 'Team', 'send_failed': 'Not delivered', 'not_sent': 'Not sent', 'nudge_skip': 'Nudge skipped', 'offer': 'Offer'}.get(e.kind, e.kind | replace('_', ' ') | title) }}</span>
             <span class="text-[11px] text-stone-400">{{ local(e.at) }}</span>
           </div>
           <div class="mt-0.5 whitespace-pre-line break-words text-sm {{ 'text-stone-900' if e.kind in ('inbound', 'stage', 'attention', 'payment') else 'text-stone-600' }}">{{ e.detail | whatsapp }}</div>
@@ -61,6 +61,11 @@
   </div>
 
   <div class="space-y-5">
+    {% call ui.card('Flow', 'Where they are, and what the bot does next') %}
+      <div data-sft-lead-flow>{{ sft.flow(flow_state, local) }}</div>
+      <p class="mt-2 text-[11px] text-stone-500">Timings and on/off are on the <a class="font-semibold text-brand-700" href="{{ url_for('admin_sft') }}?tab=nudges">Nudges</a> page.</p>
+    {% endcall %}
+
     {% call ui.card('Lead') %}
       <dl class="space-y-2 text-sm">
         {% for label, value in [('Name', lead.name), ('WhatsApp name', lead.profile_name), ('Email', lead.email), ('Goal', c.GOALS.get(lead.goal)), ('Source', lead.source ~ ((' · ' ~ lead.source_detail) if lead.source_detail else '')), ('Ad / campaign', ((lead.ad_id or '') ~ (' / ' ~ lead.campaign_id if lead.campaign_id else '')) or None), ('First message', lead.first_message), ('Waiting for', lead.step | replace('_', ' ')), ('Follow-ups sent', lead.followups_sent), ('Next check-in', local(lead.nurture_until) if lead.nurture_until else None), ('Lost reason', lead.lost_reason)] %}
@@ -71,6 +76,7 @@
 
     {% call ui.card('Payment') %}
       <dl class="space-y-2 text-sm">
+        <div class="flex justify-between gap-3"><dt class="text-stone-500">Their price</dt><dd class="text-right">{% if lead.paid_at %}{{ cfg.money(lead.amount_paid) }}{% else %}{{ price_text }}{% endif %}{% if price.offer and not lead.paid_at %}<div class="text-[11px] text-brand-700">{{ price.offer.code or price.offer.title }}</div>{% elif lead.offer_code %}<div class="text-[11px] text-brand-700">{{ lead.offer_code }}</div>{% endif %}</dd></div>
         <div class="flex justify-between"><dt class="text-stone-500">Link sent</dt><dd>{{ local(lead.link_sent_at) or '-' }}</dd></div>
         <div class="flex justify-between"><dt class="text-stone-500">Link opened</dt><dd>{{ local(lead.link_clicked_at) or '-' }}</dd></div>
         <div class="flex justify-between"><dt class="text-stone-500">Paid</dt><dd>{% if lead.paid_at %}{{ lead.amount_paid }} {{ lead.currency }} · {{ local(lead.paid_at) }}{% else %}-{% endif %}</dd></div>

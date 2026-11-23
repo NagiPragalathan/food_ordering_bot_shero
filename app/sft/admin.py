@@ -1,40 +1,53 @@
-"""SFT's admin page: /admin/sft (Shero US). Not in the dashboard's menu yet:
-open it by its address. One login with the rest of the dashboard.
+"""SFT's admin pages: /admin/sft (Shero US). Not in the dashboard's menu yet:
+open it by its address. One login with the rest of the dashboard; its own
+layout (admin/sft/base.html) with only SFT's sections.
 
-    Overview    the KPIs, the funnel, sources, and who needs the team now
-    Leads       every lead by stage; each lead's timeline and the team's actions
-    Test chat   walk the journey as a lead would, without WhatsApp
-    Journey     every message and button the bot sends, in order
-    Settings    on/off/test, number, keywords, links, timings, team numbers
-    Templates   the follow-up templates on WhatsApp, and submitting them
+    Overview     the KPIs, the funnel and a daily chart for the chosen dates
+    Leads        every lead: a list, or a board by stage; each lead's page
+    Payments     the enrollments paid, revenue, refunds, and who is waiting to pay
+    Customers    the students (everyone who paid) and their course access
+    Nudges       the automated follow-ups: rules, who is in which flow, what was
+                 sent, and the WhatsApp templates
+    Offers       codes and launch prices for the course
+    Bot replies  who SFT answers, what starts it, and everything it says
+    Journey      every message and button, stage by stage
+    Test chat    walk the journey as a lead would, without WhatsApp
+    Settings     the course, the team's numbers, Zoho
+
+The Overview, Leads, Payments, Customers and Nudges take a date range
+(app/sft/periods.py), kept as the sidebar moves between them.
 """
 
 from __future__ import annotations
 
+import csv
+import io
 import uuid
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import listing
 from app.admin.deps import redirect, render, require_admin
 from app.core import tenants
-from app.core.config import settings
+from app.core.config import is_unset, settings
 from app.core.exceptions import ConfigurationError, IntegrationError
 from app.core.logging import get_logger
-from app.db.models import AdminUser, SftEvent, SftLead
+from app.db.models import AdminUser, SftEvent, SftLead, SftOffer
 from app.db.session import get_session
 from app.integrations.gallabox.client import use_channel
 from app.integrations.gallabox.sender import use_sender
 from app.schemas.inbound import InboundEvent, InboundKind
-from app.sft import analytics, config, content as c, crm, flow, leads, nudges, payments
+from app.sft import analytics, config, content as c, crm, flow, leads, nudges, offers, payments
+from app.sft import periods, sending, views
 from app.sft import router as sft_router
-from app.sft import sending
-from app.sft.config import MODES, SftConfigError
+from app.sft.config import MODES, NUDGES, SftConfigError
 
 log = get_logger(__name__)
 
@@ -47,11 +60,21 @@ def us_only() -> None:
 
 router = APIRouter(prefix="/sft", tags=["admin"], dependencies=[Depends(us_only)])
 
-TABS = {"overview": "Overview", "leads": "Leads", "chat": "Test chat", "journey": "Journey",
-        "settings": "Settings", "templates": "Templates"}
+TABS = {"overview": "Overview", "leads": "Leads", "payments": "Payments",
+        "customers": "Customers", "nudges": "Nudges", "offers": "Offers",
+        "replies": "Bot replies", "journey": "Journey", "chat": "Test chat",
+        "settings": "Settings"}
+# The tabs with a date range, and the range each starts on.
+RANGED = {"overview": "30", "leads": "all", "payments": "30", "customers": "all",
+          "nudges": "all"}
+NUDGE_SECTIONS = {"rules": "Rules", "flows": "Leads by flow", "sent": "Messages sent",
+                  "templates": "WhatsApp templates"}
 VIEWS = {"": "All", "attention": "Needs the team", "team": "With the team",
          **{k: v for k, v in c.STAGES.items()}, "test": "Test chat leads"}
+ACCESS_VIEWS = {"": "All students", "opened": "Opened the course", "waiting": "Not confirmed yet",
+                "help": "Needs the team", "refunded": "Refunded"}
 PAGE_SIZE = 50
+BOARD_CARDS = 25
 TEST_SOURCE = "Test chat"
 
 
@@ -67,83 +90,253 @@ def _local(cfg, when) -> str:
     return when.astimezone(ZoneInfo(cfg.timezone)).strftime("%d %b, %I:%M %p")
 
 
+def _range(request: Request, cfg, tab: str) -> periods.Range:
+    q = request.query_params
+    return periods.resolve(q.get("range"), q.get("from"), q.get("to"), tz=cfg.timezone,
+                           default=RANGED.get(tab, "30"))
+
+
+async def _count(session, *conditions) -> int:
+    return await session.scalar(select(func.count()).select_from(SftLead).where(*conditions)) or 0
+
+
 @router.get("", name="admin_sft")
-async def sft_page(request: Request, tab: str = "overview", period: str = "30",
-                   view: str = "", q: str = "", page: int | str | None = None,
-                   number: str = "", session: AsyncSession = Depends(get_session),
+async def sft_page(request: Request, tab: str = "overview", page: int | str | None = None,
+                   session: AsyncSession = Depends(get_session),
                    current_user: AdminUser = Depends(require_admin)):
+    q = request.query_params
+    if tab == "templates":                      # the old Templates tab lives in Nudges
+        tab = "nudges"
     tab = tab if tab in TABS else "overview"
     cfg = await config.load(session, fresh=True)
-    context: dict = {"current_user": current_user, "tab": tab, "tabs": TABS, "cfg": cfg,
-                     "modes": MODES, "c": c, "url": lambda t, **kw: _url(request, t, **kw),
-                     "local": lambda when: _local(cfg, when), "missing": sft_router.ready(),
-                     "zoho_connected": crm.connected(), "views": VIEWS}
-    counts = dict((await session.execute(
-        select(SftLead.stage, func.count()).where(SftLead.source != TEST_SOURCE)
-        .group_by(SftLead.stage))).all())
-    context["counts"] = counts
-    context["attention_count"] = await _count(session, SftLead.needs_attention.is_(True))
-    context["team_count"] = await _count(session, SftLead.with_team.is_(True))
+    rng = _range(request, cfg, tab)
+    keep = rng.query() if "range" in q else {}
 
-    if tab == "overview":
-        context["period"] = period if period in analytics.PERIODS else "30"
-        context["periods"] = analytics.PERIODS
-        context["report"] = await analytics.report(session, context["period"])
-        context["queue"] = (await session.execute(
-            select(SftLead).where(or_(SftLead.needs_attention.is_(True),
-                                      SftLead.with_team.is_(True)))
-            .order_by(SftLead.attention_priority.desc(), SftLead.attention_since)
-            .limit(25))).scalars().all()
-    elif tab == "leads":
-        query = select(SftLead).where(SftLead.source != TEST_SOURCE) if view != "test"             else select(SftLead).where(SftLead.source == TEST_SOURCE)
-        if view == "attention":
-            query = query.where(SftLead.needs_attention.is_(True))
-        elif view == "team":
-            query = query.where(SftLead.with_team.is_(True))
-        elif view in c.STAGES:
-            query = query.where(SftLead.stage == view)
-        if q.strip():
-            term = f"%{q.strip()}%"
-            query = query.where(or_(SftLead.name.ilike(term), SftLead.profile_name.ilike(term),
-                                    SftLead.whatsapp_number.like(term),
-                                    SftLead.source.ilike(term)))
-        total = await session.scalar(select(func.count()).select_from(query.subquery())) or 0
-        paged = listing.Page.of(page, PAGE_SIZE, total)
-        context["leads"] = (await session.execute(
-            query.order_by(SftLead.last_activity_at.desc()).offset(paged.offset)
-            .limit(PAGE_SIZE))).scalars().all()
-        context.update(view=view, q=q, page=paged,
-                       url_with=lambda **kw: _url(request, "leads", view=view, q=q, **kw))
-    elif tab == "chat":
-        number = leads.digits(number) or "15550000001"
-        lead = await leads.get(session, number)
-        context.update(number=number, lead=lead,
-                       chat=await _timeline(session, lead, kinds=("inbound", "sent",
-                                                                  "send_failed", "not_sent"))
-                       if lead else [],
-                       last_buttons=await _last_buttons(session, lead) if lead else [])
-    elif tab == "templates":
-        context["templates"] = await _template_rows(cfg)
+    def url(t: str, **kw) -> str:
+        return _url(request, t, **{**keep, **kw})
+
+    context: dict = {
+        "current_user": current_user, "tab": tab, "tabs": TABS, "cfg": cfg, "c": c,
+        "modes": MODES, "url": url, "local": lambda when: _local(cfg, when),
+        "missing": sft_router.ready(), "zoho_connected": crm.connected(), "rng": rng,
+        "presets": periods.PRESETS, "ranged": tab in RANGED,
+        "keep": ("&" + urlencode(keep)) if keep else "", "money": cfg.money,
+        "attention_count": await _count(session, SftLead.needs_attention.is_(True)),
+        "team_count": await _count(session, SftLead.with_team.is_(True)),
+        "q": q,
+    }
+    build = {"overview": _overview, "leads": _leads, "payments": _payments,
+             "customers": _customers, "nudges": _nudges, "offers": _offers,
+             "replies": _replies, "chat": _chat, "settings": _settings}.get(tab)
+    if build is not None:
+        context.update(await build(request, session, cfg, rng, page, url))
     return render(request, "admin/sft/page.html", context)
 
 
-async def _count(session, condition) -> int:
-    return await session.scalar(select(func.count()).select_from(SftLead).where(condition)) or 0
+# --- Overview ----------------------------------------------------------------------
+async def _overview(request, session, cfg, rng, page, url) -> dict:
+    report = await analytics.report(session, rng, money=cfg.money)
+    queue = (await session.execute(
+        select(SftLead).where(or_(SftLead.needs_attention.is_(True), SftLead.with_team.is_(True)))
+        .order_by(SftLead.attention_priority.desc(), SftLead.attention_since)
+        .limit(25))).scalars().all()
+    top = max([max(n, p) for _, n, p in report.daily] or [0]) or 1
+    return {"report": report, "queue": queue, "chart_top": top}
 
 
-async def _timeline(session, lead, kinds: tuple[str, ...] | None = None, limit: int = 300):
-    query = select(SftEvent).where(SftEvent.lead_id == lead.id)
-    if kinds:
-        query = query.where(SftEvent.kind.in_(kinds))
-    rows = (await session.execute(query.order_by(SftEvent.at.desc()).limit(limit))).scalars().all()
-    return list(reversed(rows))
+# --- Leads -------------------------------------------------------------------------
+def _lead_filters(rng, view: str, q: str, source: str) -> list:
+    where = [SftLead.source == TEST_SOURCE] if view == "test" else [SftLead.source != TEST_SOURCE]
+    where += rng.where(SftLead.created_at)
+    if view == "attention":
+        where.append(SftLead.needs_attention.is_(True))
+    elif view == "team":
+        where.append(SftLead.with_team.is_(True))
+    elif view in c.STAGES:
+        where.append(SftLead.stage == view)
+    if source:
+        where.append(SftLead.source == source)
+    if q.strip():
+        term = f"%{q.strip()}%"
+        where.append(or_(SftLead.name.ilike(term), SftLead.profile_name.ilike(term),
+                         SftLead.whatsapp_number.like(term), SftLead.source.ilike(term),
+                         SftLead.email.ilike(term)))
+    return where
 
 
-async def _last_buttons(session, lead) -> list[list[str]]:
-    row = (await session.execute(
-        select(SftEvent).where(SftEvent.lead_id == lead.id, SftEvent.kind == "sent")
-        .order_by(SftEvent.at.desc()).limit(1))).scalar_one_or_none()
-    return list((row.data or {}).get("buttons") or []) if row else []
+async def _leads(request, session, cfg, rng, page, url) -> dict:
+    qp = request.query_params
+    view = qp.get("view", "") if qp.get("view", "") in VIEWS else ""
+    q, source = qp.get("q", ""), qp.get("source", "")
+    layout = "board" if qp.get("layout") == "board" else "list"
+    where = _lead_filters(rng, view, q, source)
+    sources = (await session.execute(
+        select(SftLead.source).where(SftLead.source != TEST_SOURCE).distinct()
+        .order_by(SftLead.source))).scalars().all()
+    by_stage = dict((await session.execute(
+        select(SftLead.stage, func.count()).where(*_lead_filters(rng, "", q, source)
+                                                  if view not in c.STAGES else where)
+        .group_by(SftLead.stage))).all())
+    out = {"view": view, "views": VIEWS, "search": q, "source": source, "sources": sources,
+           "layout": layout, "by_stage": by_stage}
+
+    def url_with(**kw):
+        return url("leads", view=view, q=q, source=source, layout=layout, **kw)
+
+    out["url_with"] = url_with
+    if layout == "board":
+        rows = (await session.execute(select(SftLead).where(*where)
+                                      .order_by(SftLead.last_activity_at.desc())
+                                      .limit(1500))).scalars().all()
+        last = await views.last_nudges(session, [r.id for r in rows])
+        columns = []
+        for stage in (*c.FUNNEL, c.NURTURE, c.LOST):
+            cards = [r for r in rows if r.stage == stage]
+            columns.append({"stage": stage, "label": c.STAGES[stage],
+                            "count": by_stage.get(stage, 0) if not view and len(rows) >= 1500
+                            else len(cards),
+                            "cards": [(r, views.flow_of(r, cfg, last.get(r.id)))
+                                      for r in cards[:BOARD_CARDS]]})
+        out["columns"] = columns
+        return out
+    total = await session.scalar(select(func.count()).select_from(SftLead).where(*where)) or 0
+    paged = listing.Page.of(page, PAGE_SIZE, total)
+    rows = (await session.execute(select(SftLead).where(*where)
+                                  .order_by(SftLead.last_activity_at.desc())
+                                  .offset(paged.offset).limit(PAGE_SIZE))).scalars().all()
+    last = await views.last_nudges(session, [r.id for r in rows])
+    out.update(page=paged, leads=[(r, views.flow_of(r, cfg, last.get(r.id))) for r in rows])
+    return out
+
+
+# --- Payments ------------------------------------------------------------------------
+async def _payments(request, session, cfg, rng, page, url) -> dict:
+    base = [SftLead.source != TEST_SOURCE, SftLead.paid_at.is_not(None), *rng.where(SftLead.paid_at)]
+    total = await session.scalar(select(func.count()).select_from(SftLead).where(*base)) or 0
+    paged = listing.Page.of(page, PAGE_SIZE, total)
+    rows = (await session.execute(select(SftLead).where(*base).order_by(SftLead.paid_at.desc())
+                                  .offset(paged.offset).limit(PAGE_SIZE))).scalars().all()
+    every = (await session.execute(select(SftLead).where(*base))).scalars().all()
+    real = [r for r in every if not r.test_payment]
+    revenue = sum((Decimal(r.amount_paid or 0) for r in real), Decimal(0))
+    fee = Decimal(cfg.course_fee)
+    discounts = sum((max(Decimal(0), fee - Decimal(r.amount_paid or 0)) for r in real
+                     if r.offer_id), Decimal(0))
+    refunds = await _count(session, SftLead.source != TEST_SOURCE, SftLead.refunded_at.is_not(None),
+                           *rng.where(SftLead.refunded_at))
+    links = await _count(session, SftLead.source != TEST_SOURCE,
+                         SftLead.link_sent_at.is_not(None), *rng.where(SftLead.link_sent_at))
+    waiting = (await session.execute(
+        select(SftLead).where(SftLead.source != TEST_SOURCE, SftLead.stage == c.PAYMENT_PENDING,
+                              SftLead.paid_at.is_(None), SftLead.opted_out.is_(False))
+        .order_by(SftLead.link_sent_at.desc()).limit(50))).scalars().all()
+    days = rng.days(earliest=min((rng.day_of(r.paid_at) for r in every), default=None))
+    per_day: dict = {}
+    for r in real:
+        day = rng.day_of(r.paid_at)
+        per_day[day] = per_day.get(day, Decimal(0)) + Decimal(r.amount_paid or 0)
+    daily = [(d, per_day.get(d, Decimal(0))) for d in days]
+    offer_names = await _offer_names(session, {r.offer_id for r in rows if r.offer_id})
+    return {"payments": rows, "page": paged, "url_with": lambda **kw: url("payments", **kw),
+            "paid_count": len(real), "revenue": revenue, "discounts": discounts,
+            "average": (revenue / len(real)) if real else Decimal(0),
+            "test_count": len(every) - len(real), "refunds": refunds, "links": links,
+            "waiting": waiting, "daily": daily,
+            "daily_top": max([v for _, v in daily] or [Decimal(0)]) or Decimal(1),
+            "offer_names": offer_names, "payment_state": views.payment_state}
+
+
+async def _offer_names(session, ids) -> dict:
+    ids = [i for i in ids if i]
+    if not ids:
+        return {}
+    rows = (await session.execute(select(SftOffer).where(SftOffer.id.in_(ids)))).scalars()
+    return {o.id: (o.code or o.title) for o in rows}
+
+
+# --- Customers -----------------------------------------------------------------------
+async def _customers(request, session, cfg, rng, page, url) -> dict:
+    qp = request.query_params
+    access = qp.get("access", "") if qp.get("access", "") in ACCESS_VIEWS else ""
+    q = qp.get("q", "")
+    where = [SftLead.source != TEST_SOURCE, SftLead.paid_at.is_not(None),
+             *rng.where(SftLead.paid_at)]
+    every = (await session.execute(select(SftLead).where(*where))).scalars().all()
+    counts = {"": len(every)}
+    for key in ACCESS_VIEWS:
+        if key:
+            counts[key] = sum(1 for r in every if _access_key(r) == key)
+    if access:
+        every = [r for r in every if _access_key(r) == access]
+    if q.strip():
+        term = q.strip().lower()
+        every = [r for r in every if term in " ".join(
+            str(x or "") for x in (r.name, r.profile_name, r.whatsapp_number, r.email,
+                                   r.source)).lower()]
+    every.sort(key=lambda r: leads.aware(r.paid_at), reverse=True)
+    paged = listing.Page.of(page, PAGE_SIZE, len(every))
+    rows = every[paged.offset:paged.offset + PAGE_SIZE]
+    return {"students": rows, "page": paged, "access": access, "access_views": ACCESS_VIEWS,
+            "access_counts": counts, "search": q, "course_state": views.course_state,
+            "url_with": lambda **kw: url("customers", access=access, q=q, **kw),
+            "offer_names": await _offer_names(session, {r.offer_id for r in rows})}
+
+
+def _access_key(lead: SftLead) -> str:
+    label, _ = views.course_state(lead)
+    return {"Opened the course": "opened", "Needs help": "help", "Team to send access": "help",
+            "Refunded": "refunded"}.get(label, "waiting")
+
+
+# --- Nudges --------------------------------------------------------------------------
+async def _nudges(request, session, cfg, rng, page, url) -> dict:
+    qp = request.query_params
+    section = qp.get("section", "rules")
+    if request.query_params.get("tab") == "templates":
+        section = "templates"
+    section = section if section in NUDGE_SECTIONS else "rules"
+    out: dict = {"section": section, "nudge_sections": NUDGE_SECTIONS, "nudge_names": NUDGES,
+                 "flows": views.FLOWS, "hours": range(0, 25)}
+    if section in ("rules", "templates"):
+        out["templates"] = await _template_rows(cfg)
+        out["template_status"] = {row["spec"].name: row["status"] for row in out["templates"]}
+    if section == "flows":
+        chosen = qp.get("flow", "")
+        rows = (await session.execute(
+            select(SftLead).where(SftLead.source != TEST_SOURCE, *rng.where(SftLead.created_at))
+            .order_by(SftLead.last_activity_at.desc()).limit(3000))).scalars().all()
+        last = await views.last_nudges(session, [r.id for r in rows])
+        states = [(r, views.flow_of(r, cfg, last.get(r.id))) for r in rows]
+        counts = {k: 0 for k in views.FLOWS}
+        for _, f in states:
+            counts[f.key] += 1
+        if chosen in views.FLOWS:
+            states = [s for s in states if s[1].key == chosen]
+        states.sort(key=lambda s: (s[1].at is None, leads.aware(s[1].at) or leads.now()))
+        paged = listing.Page.of(page, PAGE_SIZE, len(states))
+        out.update(flow=chosen, flow_counts=counts, page=paged,
+                   flow_rows=states[paged.offset:paged.offset + PAGE_SIZE],
+                   url_with=lambda **kw: url("nudges", section="flows", flow=chosen, **kw))
+    if section == "sent":
+        where = [SftEvent.kind.in_(("followup", "nudge_skip")), *rng.where(SftEvent.at),
+                 SftLead.source != TEST_SOURCE]
+        total = await session.scalar(select(func.count()).select_from(SftEvent)
+                                     .join(SftLead, SftLead.id == SftEvent.lead_id)
+                                     .where(*where)) or 0
+        paged = listing.Page.of(page, 100, total)
+        sends = (await session.execute(
+            select(SftEvent, SftLead).join(SftLead, SftLead.id == SftEvent.lead_id).where(*where)
+            .order_by(SftEvent.at.desc()).offset(paged.offset).limit(100))).all()
+        by_kind: dict[str, int] = {}
+        for data in (await session.execute(
+                select(SftEvent.data).join(SftLead, SftLead.id == SftEvent.lead_id)
+                .where(SftEvent.kind == "followup", *rng.where(SftEvent.at),
+                       SftLead.source != TEST_SOURCE))).scalars():
+            name = (data or {}).get("template") or "payment link again"
+            by_kind[name] = by_kind.get(name, 0) + 1
+        out.update(sends=sends, page=paged, sent_by=by_kind,
+                   url_with=lambda **kw: url("nudges", section="sent", **kw))
+    return out
 
 
 async def _template_rows(cfg) -> list[dict]:
@@ -167,6 +360,82 @@ async def _template_rows(cfg) -> list[dict]:
     return rows
 
 
+# --- Offers --------------------------------------------------------------------------
+async def _offers(request, session, cfg, rng, page, url) -> dict:
+    rows = (await session.execute(select(SftOffer).order_by(SftOffer.created_at.desc())))\
+        .scalars().all()
+    used = await offers.uses(session)
+    stats = {}
+    for offer in rows:
+        leads_with = (await session.execute(select(SftLead).where(
+            SftLead.offer_id == offer.id, SftLead.source != TEST_SOURCE))).scalars().all()
+        paid = [r for r in leads_with if r.paid_at and not r.test_payment]
+        revenue = sum((Decimal(r.amount_paid or 0) for r in paid), Decimal(0))
+        stats[offer.id] = {"applied": len(leads_with), "paid": len(paid), "revenue": revenue,
+                           "discount": sum((max(Decimal(0), Decimal(cfg.course_fee)
+                                                - Decimal(r.amount_paid or 0)) for r in paid),
+                                           Decimal(0)),
+                           "status": offers.status(offer, cfg, used),
+                           "price": offers.price_after(Decimal(cfg.course_fee), offer),
+                           "describe": offers.describe(offer, cfg)}
+    editing = None
+    wanted = request.query_params.get("offer", "")
+    if wanted:
+        try:
+            editing = await session.get(SftOffer, uuid.UUID(wanted))
+        except ValueError:
+            editing = None
+    source_names = sorted({*cfg.source_codes.values(), "Meta Ad", "WhatsApp"})
+    return {"offers": rows, "offer_stats": stats, "editing": editing, "kinds": offers.KINDS,
+            "source_names": source_names, "today": offers.today(cfg)}
+
+
+# --- Bot replies -------------------------------------------------------------------
+async def _replies(request, session, cfg, rng, page, url) -> dict:
+    qp = request.query_params
+    check_number, check_text = qp.get("number", ""), qp.get("message", "")
+    result = None
+    if check_text.strip():
+        result = await sft_router.explain(session, check_number, check_text, cfg)
+    groups: dict[str, list] = {}
+    for spec in c.TEXTS.values():
+        groups.setdefault(spec.group, []).append(spec)
+    sample = {"first": "Priya", "fee": cfg.fee_label(), "amount": cfg.fee_label(),
+              "note": "", "when": "in a week", "code": "SFT20",
+              "was": cfg.fee_label()}
+    return {"text_groups": groups, "sample": sample, "check_number": check_number,
+            "check_text": check_text, "check": result, "field_help": c.FIELD_HELP,
+            "edited": set(cfg.texts)}
+
+
+async def _chat(request, session, cfg, rng, page, url) -> dict:
+    number = leads.digits(request.query_params.get("number", "")) or "15550000001"
+    lead = await leads.get(session, number)
+    return {"number": number, "lead": lead,
+            "chat": await _timeline(session, lead, kinds=("inbound", "sent", "send_failed",
+                                                           "not_sent")) if lead else [],
+            "last_buttons": await _last_buttons(session, lead) if lead else []}
+
+
+async def _settings(request, session, cfg, rng, page, url) -> dict:
+    return {"stripe_live": not is_unset(settings.stripe_secret_key)}
+
+
+async def _timeline(session, lead, kinds: tuple[str, ...] | None = None, limit: int = 300):
+    query = select(SftEvent).where(SftEvent.lead_id == lead.id)
+    if kinds:
+        query = query.where(SftEvent.kind.in_(kinds))
+    rows = (await session.execute(query.order_by(SftEvent.at.desc()).limit(limit))).scalars().all()
+    return list(reversed(rows))
+
+
+async def _last_buttons(session, lead) -> list[list[str]]:
+    row = (await session.execute(
+        select(SftEvent).where(SftEvent.lead_id == lead.id, SftEvent.kind == "sent")
+        .order_by(SftEvent.at.desc()).limit(1))).scalar_one_or_none()
+    return list((row.data or {}).get("buttons") or []) if row else []
+
+
 # --- one lead -------------------------------------------------------------------------
 async def _lead(session, lead_id: str) -> SftLead:
     try:
@@ -186,12 +455,16 @@ async def lead_page(lead_id: str, request: Request, session: AsyncSession = Depe
     drop = c.DROPS.get(lead.attention_stage or "")
     script = drop.script.format(first=leads.first(lead),
                                 goal=c.GOALS.get(lead.goal or "", "SFT").lower()) if drop else ""
+    last = await views.last_nudges(session, [lead.id])
+    price = await offers.price(session, lead, cfg)
     return render(request, "admin/sft/lead.html", {
         "current_user": current_user, "lead": lead, "cfg": cfg, "c": c,
         "events": await _timeline(session, lead), "drop": drop, "script": script,
         "local": lambda when: _local(cfg, when),
         "enrol_url": flow.enrol_url(lead), "tags": sorted(crm.tags(lead)),
-        "back": _url(request, "leads"),
+        "back": _url(request, "leads"), "flow_state": views.flow_of(lead, cfg, last.get(lead.id)),
+        "price": price, "price_text": offers.fee_text(cfg, price),
+        "attention_count": await _count(session, SftLead.needs_attention.is_(True)),
     })
 
 
@@ -243,8 +516,7 @@ async def lead_action(lead_id: str, request: Request,
             await leads.event(session, lead, "team", f"{who} marked them enrolled (paid outside "
                               "the bot)", crm=True)
             with use_channel(lead.channel_id or cfg.channel_id or None):
-                await payments.mark_paid(session, lead, cfg, amount=cfg.course_fee,
-                                         currency=cfg.currency)
+                await payments.mark_paid(session, lead, cfg, amount=None, currency=cfg.currency)
             lead.with_team = False
         else:
             leads.touch(lead)
@@ -326,38 +598,137 @@ async def test_chat(request: Request, session: AsyncSession = Depends(get_sessio
     return redirect(back)
 
 
-# --- settings, templates, Zoho ------------------------------------------------------
+# --- saving: settings, bot replies, texts, nudges -------------------------------------
+async def _save(request, session, data: dict, who: str, back: str, done: str):
+    try:
+        await config.save(session, data, who)
+    except SftConfigError as exc:
+        return redirect(back, flash=("error", f"Not saved: {exc}"))
+    sending.clear_cache()
+    return redirect(back, flash=("success", done))
+
+
 @router.post("/settings", name="admin_sft_settings")
 async def save_settings(request: Request, session: AsyncSession = Depends(get_session),
                         current_user: AdminUser = Depends(require_admin)):
+    """The course, the team's numbers and Zoho (Settings page)."""
     form = await request.form()
     cfg = await config.load(session, fresh=True)
     data = cfg.model_dump(mode="json")
-    for name in ("mode", "channel_id", "keywords", "ad_ids", "test_numbers", "team_numbers",
-                 "brochure_url", "course_url", "course_access_note", "course_fee", "currency",
-                 "followup_hours", "nurture_days", "payment_reminder_minutes",
-                 "access_check_hours", "timezone", "send_from_hour", "send_until_hour",
-                 "source_codes"):
+    for name in ("brochure_url", "course_url", "course_access_note", "course_fee", "currency",
+                 "team_numbers"):
         if name in form:
             data[name] = str(form.get(name) or "").strip()
-    for flag in ("ask_name", "zoho_sync", "zoho_tasks"):
-        data[flag] = form.get(flag) == "on"
-    attention = dict(cfg.attention_hours)
-    for key in attention:
-        raw = str(form.get(f"attention_{key}") or "").strip()
-        if raw:
-            try:
-                attention[key] = max(0.0, float(raw))
-            except ValueError:
-                return redirect(_url(request, "settings"),
-                                flash=("error", f"Team hand-off for {key}: {raw!r} is not a number"))
-    data["attention_hours"] = attention
+    for flag in ("zoho_sync", "zoho_tasks"):
+        if f"has_{flag}" in form or flag in form:
+            data[flag] = form.get(flag) == "on"
+    return await _save(request, session, data, current_user.email, _url(request, "settings"),
+                       "SFT settings saved.")
+
+
+@router.post("/replies", name="admin_sft_replies")
+async def save_replies(request: Request, session: AsyncSession = Depends(get_session),
+                       current_user: AdminUser = Depends(require_admin)):
+    """Who SFT answers and what starts it (Bot replies page)."""
+    form = await request.form()
+    cfg = await config.load(session, fresh=True)
+    data = cfg.model_dump(mode="json")
+    for name in ("mode", "test_numbers", "channel_id", "keywords", "ad_ids", "source_codes"):
+        if name in form:
+            data[name] = str(form.get(name) or "").strip()
+    if "has_ask_name" in form:
+        data["ask_name"] = form.get("ask_name") == "on"
+    mode = data.get("mode", cfg.mode)
+    done = {"off": "Saved. SFT is off: it answers nobody.",
+            "test": "Saved. SFT answers only the test numbers.",
+            "live": "Saved. SFT is live."}.get(mode, "Saved.")
+    return await _save(request, session, data, current_user.email, _url(request, "replies"), done)
+
+
+@router.post("/texts", name="admin_sft_texts")
+async def save_text(request: Request, session: AsyncSession = Depends(get_session),
+                    current_user: AdminUser = Depends(require_admin)):
+    """One of the bot's messages, edited or put back to the default."""
+    form = await request.form()
+    key = str(form.get("key") or "")
+    back = _url(request, "replies") + f"#text-{key}"
+    if key not in c.TEXTS:
+        return redirect(back, flash=("error", "Unknown message."))
+    cfg = await config.load(session, fresh=True)
+    texts = dict(cfg.texts)
+    value = str(form.get("text") or "").replace("\r\n", "\n").strip()
+    label = c.TEXTS[key].label
+    if form.get("action") == "reset" or value == c.TEXTS[key].default.strip():
+        texts.pop(key, None)
+        done = f"{label}: back to the default wording."
+    else:
+        problem = c.check_text(key, value)
+        if problem:
+            return redirect(back, flash=("error", f"{label} not saved: {problem}."))
+        texts[key] = value
+        done = f"{label}: saved. The bot says it from the next message."
+    data = cfg.model_dump(mode="json") | {"texts": texts}
+    return await _save(request, session, data, current_user.email, back, done)
+
+
+def _whole(value, default: int | None = None) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return default
     try:
-        await config.save(session, data, current_user.email)
+        return int(float(text))
+    except ValueError:
+        raise SftConfigError(f"{text!r} is not a number") from None
+
+
+@router.post("/nudges", name="admin_sft_nudges")
+async def save_nudges(request: Request, session: AsyncSession = Depends(get_session),
+                      current_user: AdminUser = Depends(require_admin)):
+    """The Nudges page's rules: on/off, send hours, each nudge's wait and switch,
+    and the team's hand-off times."""
+    form = await request.form()
+    cfg = await config.load(session, fresh=True)
+    back = _url(request, "nudges", section="rules")
+    data = cfg.model_dump(mode="json")
+    try:
+        hours = []
+        off = []
+        for n in range(1, 6):
+            wait = _whole(form.get(f"followup_{n}_hours"))
+            if wait:
+                hours.append(wait)
+                if form.get(f"followup_{n}_on") != "on":
+                    off.append(f"followup_{len(hours)}")
+        for key in ("payment_reminder", "nurture", "course_check"):
+            if form.get(f"{key}_on") != "on":
+                off.append(key)
+        data.update(
+            nudges_on=form.get("nudges_on") == "on", nudges_off=off, followup_hours=hours,
+            payment_reminder_minutes=_whole(form.get("payment_reminder_minutes"),
+                                            cfg.payment_reminder_minutes),
+            access_check_hours=_whole(form.get("access_check_hours"), cfg.access_check_hours),
+            nurture_days=str(form.get("nurture_days") or "").strip(),
+            send_from_hour=_whole(form.get("send_from_hour"), cfg.send_from_hour),
+            send_until_hour=_whole(form.get("send_until_hour"), cfg.send_until_hour),
+            timezone=str(form.get("timezone") or cfg.timezone).strip())
+        attention = dict(cfg.attention_hours)
+        for key in attention:
+            raw = str(form.get(f"attention_{key}") or "").strip()
+            if raw:
+                try:
+                    attention[key] = max(0.0, float(raw))
+                except ValueError:
+                    raise SftConfigError(f"team hand-off for {c.DROPS[key].stage_name}: "
+                                         f"{raw!r} is not a number") from None
+        data["attention_hours"] = attention
     except SftConfigError as exc:
-        return redirect(_url(request, "settings"), flash=("error", str(exc)))
-    sending.clear_cache()
-    return redirect(_url(request, "settings"), flash=("success", "SFT settings saved."))
+        return redirect(back, flash=("error", f"Not saved: {exc}"))
+    if not hours:
+        return redirect(back, flash=("error", "Not saved: keep at least one follow-up wait "
+                                              "(switch it off if you don't want it sent)."))
+    done = "Nudges saved." if data["nudges_on"] else \
+        "Nudges saved. They are all off: nothing is sent until you switch them on."
+    return await _save(request, session, data, current_user.email, back, done)
 
 
 @router.post("/templates", name="admin_sft_templates")
@@ -366,7 +737,7 @@ async def submit_templates(request: Request, session: AsyncSession = Depends(get
     from app.integrations.gallabox import template_admin
 
     cfg = await config.load(session, fresh=True)
-    back = _url(request, "templates")
+    back = _url(request, "nudges", section="templates")
     try:
         with use_channel(cfg.channel_id or None):
             existing = {str(r.get("name")) for r in
@@ -384,6 +755,119 @@ async def submit_templates(request: Request, session: AsyncSession = Depends(get
     return redirect(back, flash=("success", message))
 
 
+# --- offers -------------------------------------------------------------------------
+def _offer_from(form, cfg) -> dict:
+    title = str(form.get("title") or "").strip()[:80]
+    if not title:
+        raise SftConfigError("give the offer a name")
+    code = offers.clean_code(form.get("code"))
+    if code and not offers.CODE.match(code):
+        raise SftConfigError("a code is 3 to 20 letters, numbers or dashes, such as SFT20")
+    if code and code.lower() in {k.lower() for k in cfg.keywords}:
+        raise SftConfigError(f"{code} is one of SFT's keywords: choose another code")
+    kind = str(form.get("kind") or "percent")
+    if kind not in offers.KINDS:
+        raise SftConfigError("choose a discount type")
+    try:
+        value = Decimal(str(form.get("value") or "").strip())
+    except InvalidOperation:
+        raise SftConfigError("the discount is not a number") from None
+    fee = Decimal(cfg.course_fee)
+    if value <= 0:
+        raise SftConfigError("the discount must be more than 0")
+    if kind == "percent" and value >= 100:
+        raise SftConfigError("a percent off is less than 100")
+    if kind == "amount" and value >= fee:
+        raise SftConfigError(f"the amount off must be less than the fee ({cfg.money(fee)})")
+    if kind == "price" and value >= fee:
+        raise SftConfigError(f"the offer price must be less than the fee ({cfg.money(fee)})")
+    if kind == "price" and value < offers.MINIMUM:
+        raise SftConfigError(f"Stripe can't charge less than {cfg.money(offers.MINIMUM)}")
+
+    def day(name):
+        raw = str(form.get(name) or "").strip()
+        try:
+            return date.fromisoformat(raw) if raw else None
+        except ValueError:
+            raise SftConfigError(f"{raw!r} is not a date") from None
+
+    starts, ends = day("starts_on"), day("ends_on")
+    if starts and ends and ends < starts:
+        raise SftConfigError("the offer ends before it starts")
+    limit = _whole(form.get("usage_limit"))
+    if limit is not None and limit < 1:
+        raise SftConfigError("the limit is at least 1 enrollment (or leave it empty)")
+    return {"title": title, "code": code, "kind": kind, "value": value.quantize(Decimal("0.01")),
+            "starts_on": starts, "ends_on": ends, "usage_limit": limit,
+            "sources": [s for s in form.getlist("sources") if s][:20],
+            "active": form.get("active") == "on",
+            "note": str(form.get("note") or "").strip()[:255] or None}
+
+
+@router.post("/offers", name="admin_sft_offer_save")
+async def save_offer(request: Request, session: AsyncSession = Depends(get_session),
+                     current_user: AdminUser = Depends(require_admin)):
+    form = await request.form()
+    cfg = await config.load(session, fresh=True)
+    offer_id = str(form.get("offer_id") or "")
+    back = _url(request, "offers", offer=offer_id)
+    try:
+        values = _offer_from(form, cfg)
+    except SftConfigError as exc:
+        return redirect(back, flash=("error", f"Offer not saved: {exc}."))
+    offer = None
+    if offer_id:
+        try:
+            offer = await session.get(SftOffer, uuid.UUID(offer_id))
+        except ValueError:
+            offer = None
+        if offer is None:
+            return redirect(_url(request, "offers"), flash=("error", "That offer is gone."))
+    if values["code"]:
+        clash = (await session.execute(select(SftOffer).where(
+            func.upper(SftOffer.code) == values["code"]))).scalars().all()
+        if any(o.id != (offer.id if offer else None) for o in clash):
+            return redirect(back, flash=("error", f"Offer not saved: another offer already uses "
+                                                  f"the code {values['code']}."))
+    if offer is None:
+        offer = SftOffer(**values)
+        session.add(offer)
+        done = f"Offer {values['code'] or values['title']} created."
+    else:
+        for key, value in values.items():
+            setattr(offer, key, value)
+        done = f"Offer {values['code'] or values['title']} saved."
+    await session.flush()
+    log.info("sft_offer_saved", by=current_user.email, code=values["code"])
+    return redirect(_url(request, "offers"), flash=("success", done))
+
+
+@router.post("/offers/{offer_id}/{action}", name="admin_sft_offer_action")
+async def offer_action(offer_id: str, action: str, request: Request,
+                       session: AsyncSession = Depends(get_session),
+                       current_user: AdminUser = Depends(require_admin)):
+    back = _url(request, "offers")
+    try:
+        offer = await session.get(SftOffer, uuid.UUID(offer_id))
+    except ValueError:
+        offer = None
+    if offer is None:
+        return redirect(back, flash=("error", "That offer is gone."))
+    name = offer.code or offer.title
+    if action == "toggle":
+        offer.active = not offer.active
+        return redirect(back, flash=("success", f"{name} is {'on' if offer.active else 'off'}."))
+    if action == "delete":
+        applied = await _count(session, SftLead.offer_id == offer.id)
+        if applied:
+            return redirect(back, flash=("error", f"{name} is on {applied} lead(s), so it stays "
+                                                  "for the numbers: switch it off instead."))
+        await session.delete(offer)
+        return redirect(back, flash=("success", f"{name} deleted."))
+    return redirect(back, flash=("error", "Unknown action."))
+
+
+# --- Zoho, export -------------------------------------------------------------------
 @router.post("/zoho", name="admin_sft_zoho")
 async def zoho_actions(request: Request, session: AsyncSession = Depends(get_session),
                        current_user: AdminUser = Depends(require_admin)):
@@ -400,3 +884,42 @@ async def zoho_actions(request: Request, session: AsyncSession = Depends(get_ses
     except (IntegrationError, ConfigurationError) as exc:
         return redirect(back, flash=("error", f"Zoho: {exc}"))
     return redirect(back, flash=("success", message))
+
+
+@router.get("/export", name="admin_sft_export")
+async def export(request: Request, what: str = "leads", session: AsyncSession = Depends(get_session),
+                 current_user: AdminUser = Depends(require_admin)):
+    """The leads, payments or students in the chosen dates, as a CSV file."""
+    cfg = await config.load(session)
+    what = what if what in ("leads", "payments", "customers") else "leads"
+    rng = _range(request, cfg, "payments" if what == "payments" else what)
+    qp = request.query_params
+    if what == "leads":
+        where = _lead_filters(rng, qp.get("view", ""), qp.get("q", ""), qp.get("source", ""))
+        order = SftLead.created_at.desc()
+    else:
+        where = [SftLead.source != TEST_SOURCE, SftLead.paid_at.is_not(None),
+                 *rng.where(SftLead.paid_at)]
+        order = SftLead.paid_at.desc()
+    rows = (await session.execute(select(SftLead).where(*where).order_by(order)
+                                  .limit(20000))).scalars().all()
+    names = await _offer_names(session, {r.offer_id for r in rows})
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["Name", "WhatsApp", "Email", "Stage", "Goal", "Source", "Source detail",
+                     "Came in", "Last move", "Paid at", "Amount", "Currency", "Offer",
+                     "Payment", "Course access", "With team", "Needs team", "Zoho id"])
+    for r in rows:
+        writer.writerow([
+            r.name or r.profile_name or "", f"+{r.whatsapp_number}", r.email or "",
+            c.STAGES.get(r.stage, r.stage), c.GOALS.get(r.goal or "", ""), r.source,
+            r.source_detail or "", _local(cfg, r.created_at), _local(cfg, r.last_activity_at),
+            _local(cfg, r.paid_at), str(r.amount_paid or ""), r.currency or "",
+            names.get(r.offer_id, r.offer_code or ""),
+            views.payment_state(r)[0] if r.paid_at else "",
+            views.course_state(r)[0] if r.paid_at else "", "yes" if r.with_team else "",
+            "yes" if r.needs_attention else "", r.zoho_id or ""])
+    stamp = leads.now().astimezone(ZoneInfo(cfg.timezone)).strftime("%Y-%m-%d")
+    return StreamingResponse(
+        iter([out.getvalue()]), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="sft-{what}-{stamp}.csv"'})

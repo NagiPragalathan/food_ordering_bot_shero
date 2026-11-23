@@ -29,7 +29,7 @@ from app.core.logging import get_logger
 from app.db.models import SftLead
 from app.integrations.stripe_gw import checkout
 from app.sft import content as c
-from app.sft import leads, sending
+from app.sft import leads, offers, sending
 from app.sft.config import TEST, SftConfig
 from app.sft.leads import aware, event, move, now
 
@@ -53,9 +53,12 @@ def test_checkout(lead: SftLead, cfg: SftConfig) -> bool:
 
 
 async def checkout_url(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> str:
-    """A live Stripe Checkout for this lead: the open one, or a new one."""
+    """A live Stripe Checkout for this lead at their price: the open one, or a
+    new one (also when an offer changed their price since it was opened)."""
+    price = await offers.price(session, lead, cfg)
     expires = aware(lead.checkout_expires_at)
-    if lead.checkout_url and expires and expires - now() > timedelta(minutes=10):
+    same_price = lead.checkout_amount is None or Decimal(lead.checkout_amount) == price.amount
+    if lead.checkout_url and expires and expires - now() > timedelta(minutes=10) and same_price:
         return lead.checkout_url
     checkout._apply_api_key()
     base = settings.public_base_url.rstrip("/")
@@ -65,14 +68,16 @@ async def checkout_url(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> 
         "line_items": [{
             "price_data": {
                 "currency": cfg.currency,
-                "unit_amount": checkout.to_minor_units(cfg.course_fee),
+                "unit_amount": checkout.to_minor_units(price.amount),
                 "product_data": {"name": PRODUCT, "description": PRODUCT_TEXT},
             },
             "quantity": 1,
         }],
         "client_reference_id": reference(lead),
         "metadata": {"kind": KIND, "sft_lead_id": str(lead.id), "sft_token": lead.pay_token,
-                     "whatsapp_number": lead.whatsapp_number},
+                     "whatsapp_number": lead.whatsapp_number,
+                     "offer_code": (price.offer.code or price.offer.title)[:40]
+                     if price.offer else ""},
         "payment_intent_data": {"metadata": {"kind": KIND, "sft_lead_id": str(lead.id),
                                              "sft_token": lead.pay_token},
                                 "description": PRODUCT},
@@ -90,7 +95,12 @@ async def checkout_url(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> 
     lead.checkout_session_id = created.id
     lead.checkout_url = created.url
     lead.checkout_expires_at = expires_at
-    await event(session, lead, "payment", "Checkout opened", data={"session": created.id})
+    lead.checkout_amount = price.amount
+    if price.offer is not None and lead.offer_id != price.offer.id:
+        lead.offer_id = price.offer.id               # an automatic offer: recorded on the lead
+        lead.offer_code = price.offer.code
+    await event(session, lead, "payment", f"Checkout opened: {cfg.money(price.amount)}",
+                data={"session": created.id, "amount": str(price.amount)})
     return created.url
 
 
@@ -108,8 +118,12 @@ async def mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
     """The lead has paid: enrolled, told, and given the course. Once only."""
     if lead.paid_at is not None:
         return False
+    price = await offers.price(session, lead, cfg)
+    if price.offer is not None and lead.offer_id != price.offer.id:
+        lead.offer_id = price.offer.id
+        lead.offer_code = price.offer.code
     lead.paid_at = now()
-    lead.amount_paid = amount if amount is not None else cfg.course_fee
+    lead.amount_paid = amount if amount is not None else price.amount
     lead.currency = (currency or cfg.currency).upper()[:3]
     lead.payment_intent_id = payment_intent
     lead.test_payment = test
@@ -129,12 +143,12 @@ async def mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
     if cfg.course_url:
         note = f"\n\n{cfg.course_access_note}" if cfg.course_access_note else ""
         await sending.link(session, lead, cfg,
-                           c.PAID.format(first=first, amount=amount_text, note=note),
+                           c.say(cfg, "paid", first=first, amount=amount_text, note=note),
                            url=cfg.course_url, label=c.COURSE_BUTTON, what="paid")
         lead.course_link_sent_at = now()
     else:
-        await sending.text(session, lead, cfg, c.PAID_NO_LINK.format(first=first,
-                                                                     amount=amount_text),
+        await sending.text(session, lead, cfg,
+                           c.say(cfg, "paid_no_link", first=first, amount=amount_text),
                            what="paid")
         await leads.raise_attention(session, lead, "course_link")
     if not sending.in_window(lead):
@@ -153,7 +167,8 @@ async def failed(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> None:
     if sending.in_window(lead):
         from app.sft.flow import enrol_url
 
-        await sending.link(session, lead, cfg, c.PAYMENT_FAILED.format(first=leads.first(lead)),
+        await sending.link(session, lead, cfg,
+                           c.say(cfg, "payment_failed", first=leads.first(lead)),
                            url=enrol_url(lead), label="Try again", what="payment_failed")
 
 

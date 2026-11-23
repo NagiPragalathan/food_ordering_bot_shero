@@ -16,10 +16,10 @@ One lead per WhatsApp number.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -63,6 +63,9 @@ class SftLead(Base, UUIDPrimaryKey, Timestamps):
 
     # Automated follow-ups (app/sft/nudges.py).
     followups_sent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # The last automated nudge (follow-up, reminder, check-in): the next
+    # follow-up keeps its gap from it.
+    nudged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     nurture_sent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Set when they chose "Maybe later": the next check-in date.
     nurture_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -100,6 +103,11 @@ class SftLead(Base, UUIDPrimaryKey, Timestamps):
     payment_intent_id: Mapped[str | None] = mapped_column(String(255))
     test_payment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # An offer (app/sft/offers.py): the code they sent, and the price of the
+    # checkout that is open (a new price opens a new checkout).
+    offer_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    offer_code: Mapped[str | None] = mapped_column(String(32))
+    checkout_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
 
     # After paying: the course link, then "have you been able to open it?".
     course_link_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -124,6 +132,32 @@ class SftLead(Base, UUIDPrimaryKey, Timestamps):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<SftLead ***{self.whatsapp_number[-4:]} {self.stage}/{self.step}>"
+
+
+class SftOffer(Base, UUIDPrimaryKey, Timestamps):
+    """A course offer: a code the lead sends on WhatsApp ("SFT50"), or, with
+    no code, a price for everyone it covers (a launch price)."""
+
+    __tablename__ = "sft_offers"
+
+    title: Mapped[str] = mapped_column(String(80), nullable=False)
+    # Upper case; empty for an automatic offer.
+    code: Mapped[str | None] = mapped_column(String(32), index=True)
+    # "percent" off, "amount" off, or a fixed "price".
+    kind: Mapped[str] = mapped_column(String(10), default="percent", nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    # Local dates (SFT's timezone), both included; empty = open-ended.
+    starts_on: Mapped[date | None] = mapped_column(Date)
+    ends_on: Mapped[date | None] = mapped_column(Date)
+    # Enrollments it may give; empty = no limit.
+    usage_limit: Mapped[int | None] = mapped_column(Integer)
+    # Lead sources it is for (["Instagram", "Meta Ad"]); empty = every source.
+    sources: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(255))
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<SftOffer {self.code or 'auto'} {self.kind} {self.value}>"
 
 
 class SftEvent(Base, UUIDPrimaryKey):

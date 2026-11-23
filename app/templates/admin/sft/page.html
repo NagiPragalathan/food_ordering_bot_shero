@@ -3,11 +3,15 @@
 {% import "admin/sft/_bits.html" as sft %}
 {% set intro = {
   'overview': 'How the course\'s WhatsApp leads are doing, and who is waiting for the team.',
-  'leads': 'Everyone who started the SFT journey on WhatsApp.',
-  'chat': 'Try the journey as a lead would. Nothing is sent on WhatsApp.',
+  'leads': 'Everyone who started the SFT journey, and where each one is.',
+  'payments': 'Enrollments paid, revenue and refunds, and who is still to pay.',
+  'customers': 'Your students: everyone who paid, and whether they got into the course.',
+  'nudges': 'The automated WhatsApp follow-ups: when they go, who is in which flow, what was sent.',
+  'offers': 'Codes and launch prices for the course. A lead pays the best offer that applies.',
+  'replies': 'Who SFT answers, what starts it, and everything the bot says.',
   'journey': 'Every message and button the lead sees, stage by stage.',
-  'settings': 'Who SFT answers, the course, the follow-ups, the team\'s tasks and Zoho.',
-  'templates': 'The WhatsApp templates the follow-ups need outside the 24-hour window.',
+  'chat': 'Try the journey as a lead would. Nothing is sent on WhatsApp.',
+  'settings': 'The course, the team\'s numbers and Zoho.',
 } %}
 {% block title %}{{ tabs[tab] }}{% endblock %}
 {% block heading %}{{ tabs[tab] }}{% endblock %}
@@ -15,414 +19,44 @@
   <p class="text-xs text-stone-500">{{ intro[tab] }}</p>
 {% endblock %}
 {% block actions %}
+  {% if tab in ('leads', 'payments', 'customers') %}
+  {% set export_q = {'what': tab} %}
+  {% for k in ('view', 'q', 'source') if q.get(k) %}{% set _ = export_q.update({k: q.get(k)}) %}{% endfor %}
+  {% set _ = export_q.update(rng.query()) %}
+  <a href="{{ url_for('admin_sft_export') }}?{{ export_q | urlencode }}" data-sft-export
+     class="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">
+    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+    Download CSV</a>
+  {% endif %}
   {% if cfg.mode == 'live' %}{{ ui.badge('SFT live', 'good') }}
   {% elif cfg.mode == 'test' %}{{ ui.badge('SFT test mode', 'warn') }}
   {% else %}{{ ui.badge('SFT off') }}{% endif %}
 {% endblock %}
 
 {% block content %}
-{% set notices = tab in ('overview', 'settings') and (cfg.mode == 'off' or missing) %}
+{% set notices = tab in ('overview', 'settings', 'replies') and (cfg.mode == 'off' or missing) %}
 {% if notices %}<div class="mb-5 space-y-3">{% endif %}
-{% if cfg.mode == 'off' and tab in ('overview', 'settings') %}
+{% if cfg.mode == 'off' and tab in ('overview', 'settings', 'replies') %}
 <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
   SFT is <b>off</b>: it answers nobody, and the ordering bot works exactly as before. Walk the journey in
   <a class="font-semibold underline" href="{{ url('chat') }}">Test chat</a>, then switch it to Test or Live in
-  <a class="font-semibold underline" href="{{ url('settings') }}">Settings</a>.
+  <a class="font-semibold underline" href="{{ url('replies') }}">Bot replies</a>.
 </div>
 {% endif %}
-{% if missing and tab in ('overview', 'settings') %}
+{% if missing and tab in ('overview', 'settings', 'replies') %}
 <div class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-xs text-stone-600">
   Before going live: {{ missing | join('; ') }}.
 </div>
 {% endif %}
 {% if notices %}</div>{% endif %}
 
-<div>
-{# ============================== Overview ============================== #}
-{% if tab == 'overview' %}
-  {% set r = report %}
-  <form method="get" class="mb-4 flex flex-wrap items-center gap-2">
-    <input type="hidden" name="tab" value="overview">
-    {{ ui.select('period', period, periods.items() | list, 'Leads who came in') }}
-  </form>
-  <div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-    {{ ui.stat('Leads', r.leads, periods[period], icon='M17 20h5v-2a4 4 0 00-5-3.9M9 20H4v-2a4 4 0 015-3.9m8-6.1a4 4 0 11-8 0 4 4 0 018 0z') }}
-    {{ ui.stat('Enrolled', r.funnel[-1][1] if r.funnel else 0, 'revenue ' ~ r.revenue, 'good', icon='M20 6L9 17l-5-5') }}
-    {{ ui.stat('Needs the team', attention_count, 'drop-offs and questions', 'warn' if attention_count else 'default', icon='M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z') }}
-    {{ ui.stat('With the team', team_count, 'bot silent for them', 'accent', icon='M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z') }}
-  </div>
-
-  <div class="mt-6 grid gap-5 lg:grid-cols-3">
-    <div class="lg:col-span-2 space-y-5">
-      {% call ui.card('Key numbers', 'Of the leads who came in during the period') %}
-        <div class="grid gap-3 sm:grid-cols-2">
-          {% for rate in r.rates + ([r.recovered] if r.recovered else []) %}
-          <div class="rounded-xl bg-stone-50 px-4 py-3">
-            <div class="flex items-baseline justify-between gap-2">
-              <span class="text-sm font-medium text-stone-700">{{ rate.label }}</span>
-              <span class="text-lg font-semibold tabular-nums text-stone-900">{{ rate.percent }}</span>
-            </div>
-            <div class="mt-0.5 text-[11px] text-stone-500">{{ rate.part }} of {{ rate.whole }}: {{ rate.hint }}</div>
-          </div>
-          {% endfor %}
-          <div class="rounded-xl bg-stone-50 px-4 py-3">
-            <div class="flex items-baseline justify-between gap-2">
-              <span class="text-sm font-medium text-stone-700">Team response time</span>
-              <span class="text-lg font-semibold tabular-nums text-stone-900">{{ (r.team_minutes ~ ' min') if r.team_minutes is not none else '-' }}</span>
-            </div>
-            <div class="mt-0.5 text-[11px] text-stone-500">average, task raised to task closed</div>
-          </div>
-        </div>
-      {% endcall %}
-
-      {% call ui.card('Funnel', 'How many reached each stage, and how many are sitting there now') %}
-        {% set top = (r.funnel[0][1] if r.funnel else 0) or 1 %}
-        <div class="space-y-2">
-          {% for name, reached in r.funnel %}
-          <div>
-            <div class="flex justify-between text-xs text-stone-600"><span>{{ name }}</span>
-              <span class="tabular-nums">{{ reached }}{% if loop.index0 %} · {{ ((100 * reached / top) | round | int) }}%{% endif %}</span></div>
-            <div class="mt-1 h-2 rounded-full bg-stone-100"><div class="h-2 rounded-full bg-brand-500" style="width: {{ (100 * reached / top) | round(1) }}%"></div></div>
-          </div>
-          {% endfor %}
-        </div>
-        <div class="mt-4 flex flex-wrap gap-2 text-xs">
-          {% for name, n in r.now_at %}<span class="rounded-full bg-stone-100 px-2.5 py-1 text-stone-600">{{ name }}: <b class="tabular-nums">{{ n }}</b></span>{% endfor %}
-        </div>
-      {% endcall %}
-
-      {% call ui.card('By source', 'Zoho Lead Source "SFT - <source>" and tag "SFT via <source>"') %}
-        {% if r.sources %}
-        <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead><tr class="text-left text-xs text-stone-500"><th class="py-1.5 pr-3 font-medium">Source</th><th class="pr-3 font-medium">Leads</th><th class="pr-3 font-medium">Brochure</th><th class="pr-3 font-medium">Pay link</th><th class="pr-3 font-medium">Enrolled</th><th class="font-medium">Conversion</th></tr></thead>
-          <tbody class="divide-y divide-stone-100">
-          {% for s in r.sources %}
-            <tr><td class="py-2 pr-3 font-medium text-stone-800">{{ s.source }}</td><td class="pr-3 tabular-nums">{{ s.leads }}</td><td class="pr-3 tabular-nums">{{ s.brochure }}</td><td class="pr-3 tabular-nums">{{ s.links }}</td><td class="pr-3 tabular-nums">{{ s.paid }}</td><td class="tabular-nums">{{ s.rate }}</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-        </div>
-        {% else %}{{ ui.empty('No leads in this period yet.') }}{% endif %}
-      {% endcall %}
-    </div>
-
-    <div class="space-y-5">
-      {% call ui.card('For the team now', 'Questions, drop-offs and payment help') %}
-        {% if queue %}
-        <ul class="-my-2 divide-y divide-stone-100">
-          {% for lead in queue %}
-          <li class="py-2.5">
-            <a href="{{ url_for('admin_sft_lead', lead_id=lead.id) }}" class="group flex items-start gap-3">
-              {{ ui.avatar(lead.name or lead.profile_name, lead.whatsapp_number) }}
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="truncate text-sm font-medium text-stone-900 group-hover:text-brand-700">{{ lead.name or lead.profile_name or ('+' ~ lead.whatsapp_number) }}</span>
-                  <span class="text-[11px] text-stone-400">{{ local(lead.attention_since or lead.handed_over_at) }}</span>
-                </div>
-                <div class="truncate text-xs text-stone-500">{{ lead.attention_reason or 'With the team' }}</div>
-                <div class="mt-1 flex flex-wrap gap-1">{{ sft.flags(lead) }}</div>
-              </div>
-            </a>
-          </li>
-          {% endfor %}
-        </ul>
-        {% else %}{{ ui.empty('Nobody is waiting for the team.') }}{% endif %}
-      {% endcall %}
-
-      {% call ui.card('Goals') %}
-        {% for name, n in r.goals %}<div class="flex justify-between py-1 text-sm"><span class="text-stone-600">{{ name }}</span><b class="tabular-nums">{{ n }}</b></div>{% endfor %}
-      {% endcall %}
-      {% if r.lost_reasons %}
-      {% call ui.card('Why not', 'From leads who said Not interested') %}
-        {% for reason, n in r.lost_reasons %}<div class="flex justify-between py-1 text-sm"><span class="text-stone-600">{{ reason }}</span><b class="tabular-nums">{{ n }}</b></div>{% endfor %}
-      {% endcall %}
-      {% endif %}
-    </div>
-  </div>
-
-{# ============================== Leads ============================== #}
-{% elif tab == 'leads' %}
-  <form method="get" class="mb-4 flex flex-wrap items-center gap-2">
-    <input type="hidden" name="tab" value="leads">
-    {{ ui.search('q', q, 'Name, number or source') }}
-    {{ ui.select('view', view, views.items() | list, 'Show') }}
-  </form>
-  <section class="overflow-hidden rounded-2xl border border-stone-200/70 bg-white shadow-card">
-    {% if leads %}
-    <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead class="bg-stone-50 text-left text-xs text-stone-500">
-        <tr><th class="px-4 py-2.5 font-medium">Lead</th><th class="px-3 font-medium">Stage</th><th class="px-3 font-medium">Goal</th><th class="px-3 font-medium">Source</th><th class="px-3 font-medium">Last move</th><th class="px-3 font-medium">Zoho</th></tr>
-      </thead>
-      <tbody class="divide-y divide-stone-100">
-      {% for lead in leads %}
-        <tr class="hover:bg-stone-50/70">
-          <td class="px-4 py-2.5">
-            <a href="{{ url_for('admin_sft_lead', lead_id=lead.id) }}" class="flex items-center gap-3">
-              {{ ui.avatar(lead.name or lead.profile_name, lead.whatsapp_number) }}
-              <span class="min-w-0"><span class="block truncate font-medium text-stone-900">{{ lead.name or lead.profile_name or 'Unknown' }}</span>
-              <span class="block text-xs text-stone-500">+{{ lead.whatsapp_number }}</span></span>
-            </a>
-          </td>
-          <td class="px-3"><div class="flex flex-wrap gap-1">{{ sft.stage(c, lead.stage) }}{{ sft.flags(lead) }}</div></td>
-          <td class="px-3 text-xs text-stone-600">{{ c.GOALS.get(lead.goal, '') }}</td>
-          <td class="px-3 text-xs text-stone-600">{{ lead.source }}</td>
-          <td class="px-3 text-xs text-stone-500">{{ local(lead.last_activity_at) }}</td>
-          <td class="px-3 text-xs">{% if lead.crm_error %}<span class="text-red-600">Error</span>{% elif lead.zoho_id %}<span class="text-emerald-700">Synced</span>{% elif lead.source == 'Test chat' %}<span class="text-stone-400">Test</span>{% else %}<span class="text-stone-400">Waiting</span>{% endif %}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    {{ ui.pager(page, url_with) }}
-    {% else %}{{ ui.empty('No SFT leads here yet.') }}{% endif %}
-  </section>
-
-{# ============================== Test chat ============================== #}
-{% elif tab == 'chat' %}
-  <div class="grid gap-5 lg:grid-cols-3">
-    <div class="min-w-0 lg:col-span-2">
-      <section class="overflow-hidden rounded-2xl border border-stone-200/70 shadow-card">
-        <header class="flex items-center justify-between gap-3 bg-[#075E54] px-4 py-3 text-white">
-          <div class="text-sm font-semibold">Test lead +{{ number }}</div>
-          {% if lead %}<div class="flex gap-1">{{ sft.stage(c, lead.stage) }}</div>{% endif %}
-        </header>
-        <div class="max-h-[560px] space-y-2 overflow-y-auto bg-[#ECE5DD] p-4" data-sft-chat>
-          {% for e in chat %}{{ sft.bubble(e, local) }}{% else %}
-            <p class="py-10 text-center text-sm text-stone-500">Type SFT below (or anything else) to start the journey as a new lead.</p>
-          {% endfor %}
-        </div>
-        <div class="border-t border-stone-200 bg-white p-3">
-          {% if last_buttons %}
-          <div class="mb-2 flex flex-wrap gap-2" data-sft-quick-replies>
-            {% for id, title in last_buttons %}
-            <form method="post" action="{{ url_for('admin_sft_chat') }}">
-              <input type="hidden" name="number" value="{{ number }}">
-              <input type="hidden" name="button" value="{{ id }}">
-              <input type="hidden" name="title" value="{{ title }}">
-              <button class="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 ring-1 ring-sky-200 hover:bg-sky-100">{{ title }}</button>
-            </form>
-            {% endfor %}
-          </div>
-          {% endif %}
-          <form method="post" action="{{ url_for('admin_sft_chat') }}" class="flex gap-2">
-            <input type="hidden" name="number" value="{{ number }}">
-            <input name="text" autocomplete="off" placeholder="Type a message as the lead…" data-sft-say
-                   class="min-w-0 flex-1 rounded-full border border-stone-300 px-4 py-2 text-sm outline-none focus:border-brand-500">
-            <button class="rounded-full bg-[#25D366] px-4 py-2 text-sm font-semibold text-white">Send</button>
-          </form>
-        </div>
-      </section>
-    </div>
-    <div class="min-w-0 space-y-5">
-      {% call ui.card('How the test chat works') %}
-        <ul class="list-disc space-y-1.5 pl-4 text-xs text-stone-600">
-          <li>It runs the real journey, but nothing is sent on WhatsApp and the lead never goes to Zoho.</li>
-          <li>Tap the buttons under the chat as the lead would. A payment link opens the test checkout.</li>
-          <li>It works while SFT is off, so the journey can be checked before going live.</li>
-        </ul>
-        <form method="get" class="mt-4 flex gap-2">
-          <input type="hidden" name="tab" value="chat">
-          <input name="number" value="{{ number }}" class="min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-1.5 text-sm">
-          <button class="rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-700">Switch lead</button>
-        </form>
-      {% endcall %}
-      {% if lead %}
-      {% call ui.card('Time travel', 'See what the follow-ups would do') %}
-        <form method="post" action="{{ url_for('admin_sft_chat') }}" class="flex items-center gap-2">
-          <input type="hidden" name="number" value="{{ number }}"><input type="hidden" name="action" value="wait">
-          <input name="hours" type="number" min="1" value="25" class="w-20 rounded-lg border border-stone-300 px-2 py-1.5 text-sm">
-          <span class="text-xs text-stone-500">hours pass</span>
-          <button class="ml-auto rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white">Run</button>
-        </form>
-        <p class="mt-2 text-[11px] text-stone-500">Runs the follow-up job as if that long had passed since the lead's last move (follow-ups, the payment reminder, the course check, team tasks).</p>
-        <div class="mt-3 flex items-center justify-between border-t border-stone-100 pt-3">
-          <a href="{{ url_for('admin_sft_lead', lead_id=lead.id) }}" class="text-xs font-semibold text-brand-700">Open the lead's page →</a>
-          <form method="post" action="{{ url_for('admin_sft_chat') }}">
-            <input type="hidden" name="number" value="{{ number }}"><input type="hidden" name="action" value="reset">
-            <button class="text-xs font-semibold text-red-600">Delete and restart</button>
-          </form>
-        </div>
-      {% endcall %}
-      {% endif %}
-    </div>
-  </div>
-
-{# ============================== Journey ============================== #}
-{% elif tab == 'journey' %}
-  {% set first = 'Priya' %}{% set fee = cfg.fee_label() %}
-  {% set steps = [
-    ('1', 'Lead enters', 'They message SFT (keyword, ad or SFT\'s number).', [
-        ('bot', c.ASK_NAME_TEXT, []),
-        ('lead', 'Priya', []),
-        ('bot', c.WELCOME.format(first=first, fee=fee), c.GOAL_BUTTONS)]),
-    ('2', 'Choose interest', 'Their goal decides the next line.', [
-        ('lead', 'Start food business', []),
-        ('bot', c.INTEREST.business.format(first=first), c.DETAIL_BUTTONS)]),
-    ('3', 'Send brochure', 'View course details: the PDF, then the decision.', [
-        ('bot', '📄 ' ~ c.BROCHURE_FILENAME, []),
-        ('bot', c.BROCHURE.format(fee=fee), c.DECIDE_BUTTONS)]),
-    ('3a', 'Yes, enroll me', 'Payment (stage 5).', [
-        ('bot', c.ENROL.format(first=first, fee=fee) ~ '\n\n[' ~ c.PAY_BUTTON.format(fee=fee) ~ ']', [])]),
-    ('3b', 'Not right now', 'Into the automated follow-ups (7).', [
-        ('bot', c.NOT_NOW.format(first=first), [])]),
-    ('3c', 'Ask a question', 'Their own question goes to a person; the bot then stays silent until the team hands the chat back.', [
-        ('bot', c.ASK_QUESTION.format(first=first), []),
-        ('lead', 'Can I do the course from India?', []),
-        ('bot', c.HANDED_OVER.format(first=first), [])]),
-    ('4', 'Questions (before the brochure)', 'Ask a question at stage 2 opens the FAQ list.', [
-        ('bot', c.FAQ_PROMPT.format(first=first) ~ '\n\n' ~ (c.FAQ_ROWS | map(attribute='1') | join(' · ')), []),
-        ('bot', c.FAQ_ANSWERS['sft:faq:cert'], c.AFTER_FAQ_BUTTONS)]),
-    ('6', 'Payment success', 'From Stripe; then a course check a day later.', [
-        ('bot', c.PAID.format(first=first, amount=fee, note='') ~ '\n\n[' ~ c.COURSE_BUTTON ~ ']', []),
-        ('bot', c.ACCESS_CHECK.format(first=first), c.ACCESS_BUTTONS)]),
-    ('7', 'Follow-ups (no answer)', 'Templates at ' ~ (cfg.followup_hours | join(', ')) ~ ' hours of quiet; the team gets the lead a day after the last.', [
-        ('bot', c.FOLLOWUP_1.sample_body.replace('{{1}}', first), []),
-        ('bot', c.FOLLOWUP_2.sample_body.replace('{{1}}', first), []),
-        ('bot', c.FOLLOWUP_3.sample_body.replace('{{1}}', first), [])]),
-    ('8', 'Maybe later', 'They choose when; a check-in that day, then ' ~ (cfg.nurture_days | join(', ')) ~ ' days later.', [
-        ('bot', c.LATER.format(first=first), c.WHEN_BUTTONS)]),
-    ('9', 'Not interested', 'Stopped, and Lost in Zoho.', [
-        ('bot', c.NOT_INTERESTED.format(first=first), c.WHY_BUTTONS)]),
-  ] %}
-  <div class="grid gap-4 lg:grid-cols-2">
-    {% for num, title, note, lines in steps %}
-    <section class="rounded-2xl border border-stone-200/70 bg-white p-4 shadow-card">
-      <div class="flex items-center gap-2">
-        <span class="flex h-7 min-w-7 items-center justify-center rounded-full bg-brand-600 px-2 text-xs font-bold text-white">{{ num }}</span>
-        <h3 class="text-sm font-semibold text-stone-900">{{ title }}</h3>
-      </div>
-      <p class="mt-1 text-xs text-stone-500">{{ note }}</p>
-      <div class="mt-3 space-y-2 rounded-xl bg-[#ECE5DD] p-3">
-        {% for who, body, buttons in lines %}
-        <div class="flex {{ 'justify-start' if who == 'lead' else 'justify-end' }}">
-          <div class="max-w-[90%] rounded-2xl px-3 py-2 text-[13px] shadow-sm {{ 'bg-white' if who == 'lead' else 'bg-[#DCF8C6]' }}">
-            <div class="whitespace-pre-line">{{ body | whatsapp }}</div>
-            {% if buttons %}<div class="mt-2 flex flex-wrap gap-1">{% for b in buttons %}<span class="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-medium text-sky-700 ring-1 ring-stone-200">{{ b.title }}</span>{% endfor %}</div>{% endif %}
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </section>
-    {% endfor %}
-  </div>
-  {% call ui.card('When the team takes over', 'Each raises a task once (and a Zoho Task), with the suggested message') %}
-    <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead><tr class="text-left text-xs text-stone-500"><th class="py-1.5 pr-3 font-medium">Stage</th><th class="pr-3 font-medium">When</th><th class="pr-3 font-medium">Suggested message</th><th class="font-medium">Next action</th></tr></thead>
-      <tbody class="divide-y divide-stone-100">
-      {% for key, d in c.DROPS.items() %}
-        {% set hours = cfg.attention_hours.get(key) %}
-        <tr class="align-top"><td class="py-2 pr-3 font-medium text-stone-800">{{ d.stage_name }}{% if d.priority == 'high' %} {{ ui.badge('High', 'bad') }}{% endif %}</td>
-          <td class="pr-3 text-xs text-stone-600">{{ d.trigger.format(hours=(hours | int if hours is not none else '-')) }}{% if hours == 0 %} <span class="text-stone-400">(off)</span>{% endif %}</td>
-          <td class="pr-3 text-xs text-stone-600">"{{ d.script.format(first=first, goal='starting a food business') }}"</td>
-          <td class="text-xs text-stone-600">{{ d.next_action }}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  {% endcall %}
-
-{# ============================== Settings ============================== #}
-{% elif tab == 'settings' %}
-  <form method="post" action="{{ url_for('admin_sft_settings') }}" class="grid gap-5 lg:grid-cols-2" data-sft-settings>
-    {% call ui.card('Who SFT answers') %}
-      <div class="space-y-4">
-        <div class="space-y-2">
-          {% for key, label in modes.items() %}
-          <label class="flex items-center gap-2.5 text-sm"><input type="radio" name="mode" value="{{ key }}" {% if cfg.mode == key %}checked{% endif %} class="h-4 w-4 text-brand-600 focus:ring-brand-500"> {{ label }}</label>
-          {% endfor %}
-        </div>
-        {{ sft.area('Test numbers', 'test_numbers', cfg.test_numbers | join(', '), 'With the country code, comma-separated (Test mode answers only these).', 2) }}
-        {{ sft.field('SFT\'s own WhatsApp channel id (Gallabox)', 'channel_id', cfg.channel_id, 'Empty: SFT runs on Shero US\'s number, started by the keywords, an SFT ad or an SFT button; every other message stays with the ordering bot.') }}
-        {{ sft.area('Keywords', 'keywords', cfg.keywords | join(', '), 'A message with one of these (whole words) starts the journey. The brochure tells people to reply SFT.', 2) }}
-        {{ sft.area('Source codes', 'source_codes', cfg.source_codes.items() | map('join', '=') | join('\n'), 'code=Source, one per line. "SFT IG" (or a wa.me link with that text) files the lead under Instagram. Ads are filed as Meta Ad.', 5) }}
-        {{ sft.area('SFT ad ids', 'ad_ids', cfg.ad_ids | join(', '), 'Click-to-WhatsApp ads whose chats start the journey (an ad whose headline says SFT does anyway).', 2) }}
-        {{ sft.check('Ask for their name before the welcome', 'ask_name', cfg.ask_name, 'Off: use the name on their WhatsApp profile.') }}
-      </div>
-    {% endcall %}
-
-    {% call ui.card('The course') %}
-      <div class="space-y-4">
-        <div class="grid grid-cols-2 gap-3">
-          {{ sft.field('Course fee', 'course_fee', cfg.course_fee, None, 'number') }}
-          {{ sft.field('Currency', 'currency', cfg.currency) }}
-        </div>
-        {{ sft.field('Course link (sent after paying)', 'course_url', cfg.course_url, 'The learning platform. Empty: the team gets a task to send access by hand.', 'url', 'https://') }}
-        {{ sft.area('Course access note', 'course_access_note', cfg.course_access_note, 'Optional line under the payment confirmation (e.g. how to sign in).', 2) }}
-        {{ sft.field('Brochure link', 'brochure_url', cfg.brochure_url, 'Empty: the brochure this server serves: ' ~ cfg.brochure_link(), 'url', 'https://') }}
-        <a href="{{ cfg.brochure_link() }}" target="_blank" rel="noopener" class="inline-block text-xs font-semibold text-brand-700">Open the brochure ↗</a>
-      </div>
-    {% endcall %}
-
-    {% call ui.card('Follow-ups', 'Hours are counted from the lead\'s last move') %}
-      <div class="space-y-4">
-        {{ sft.field('Follow-ups after (hours of quiet)', 'followup_hours', cfg.followup_hours | join(', '), 'Up to three, shortest first: 24, 60, 144 is a day, 2.5 days and 6 days.') }}
-        {{ sft.field('Maybe later: check in again after (days)', 'nurture_days', cfg.nurture_days | join(', '), 'After the check-in on the day they chose.') }}
-        <div class="grid grid-cols-2 gap-3">
-          {{ sft.field('Payment reminder (minutes)', 'payment_reminder_minutes', cfg.payment_reminder_minutes, None, 'number') }}
-          {{ sft.field('Course check after paying (hours)', 'access_check_hours', cfg.access_check_hours, None, 'number') }}
-        </div>
-        <div class="grid grid-cols-3 gap-3">
-          {{ sft.field('Timezone', 'timezone', cfg.timezone) }}
-          {{ sft.field('Send from (hour)', 'send_from_hour', cfg.send_from_hour, None, 'number') }}
-          {{ sft.field('Until (hour)', 'send_until_hour', cfg.send_until_hour, None, 'number') }}
-        </div>
-      </div>
-    {% endcall %}
-
-    {% call ui.card('When the team takes over', 'Hours stuck at a stage before the lead becomes a task (0 = never)') %}
-      <div class="grid grid-cols-2 gap-3">
-        {% for key, hours in cfg.attention_hours.items() %}
-          {{ sft.field(c.DROPS[key].stage_name ~ (' (' ~ c.STAGES[key] ~ ')' if key in c.STAGES else ''), 'attention_' ~ key, hours | int if hours == hours | int else hours, None, 'number') }}
-        {% endfor %}
-      </div>
-      <div class="mt-4">{{ sft.area('Team WhatsApp numbers', 'team_numbers', cfg.team_numbers | join(', '), 'Told when a lead asks a person (template sft_team_alert). Optional.', 2) }}</div>
-    {% endcall %}
-
-    {% call ui.card('Zoho CRM', 'Shero US\'s Zoho: ' ~ ('connected' if zoho_connected else 'not connected')) %}
-      <div class="space-y-3">
-        {{ sft.check('Sync SFT leads to Zoho', 'zoho_sync', cfg.zoho_sync, 'Lead Source "SFT - <source>", tags (SFT, the stage, the goal, the source), and the timeline as notes.') }}
-        {{ sft.check('Create a Zoho Task when the team should act', 'zoho_tasks', cfg.zoho_tasks) }}
-      </div>
-    {% endcall %}
-
-    <div class="lg:col-span-2 flex justify-end">
-      <button class="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">Save SFT settings</button>
-    </div>
-  </form>
-  <div class="mt-5 flex flex-wrap gap-3">
-    <form method="post" action="{{ url_for('admin_sft_zoho') }}"><input type="hidden" name="action" value="prepare">
-      <button class="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">Prepare Zoho (add the SFT Lead Sources)</button></form>
-    <form method="post" action="{{ url_for('admin_sft_zoho') }}"><input type="hidden" name="action" value="sync">
-      <button class="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">Sync to Zoho now</button></form>
-  </div>
-
-{# ============================== Templates ============================== #}
-{% elif tab == 'templates' %}
-  {% call ui.card('Follow-up templates', 'WhatsApp only delivers these outside the 24-hour window once Meta approves them. Until then a follow-up goes as an ordinary message when the window is open, and is skipped when it is not.') %}
-    {% if templates and templates[0].error %}<p class="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">Could not read Gallabox's list: {{ templates[0].error }}</p>{% endif %}
-    <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead><tr class="text-left text-xs text-stone-500"><th class="py-1.5 pr-3 font-medium">Template</th><th class="pr-3 font-medium">Sent when</th><th class="pr-3 font-medium">Text</th><th class="font-medium">Status</th></tr></thead>
-      <tbody class="divide-y divide-stone-100">
-      {% for row in templates %}
-        <tr class="align-top"><td class="py-2 pr-3 font-mono text-xs text-stone-800">{{ row.spec.name }}<div class="font-sans text-[11px] text-stone-400">{{ row.spec.category | lower }}</div></td>
-          <td class="pr-3 text-xs text-stone-600">{{ row.spec.trigger }}</td>
-          <td class="pr-3 text-xs text-stone-600">{{ row.spec.sample_body }}{% if row.spec.quick_replies %}<div class="mt-1 flex flex-wrap gap-1">{% for q in row.spec.quick_replies %}<span class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px]">{{ q }}</span>{% endfor %}</div>{% endif %}</td>
-          <td class="text-xs">{% if row.status == 'approved' %}{{ ui.badge('Approved', 'good') }}{% elif row.status in ('rejected', 'error') %}{{ ui.badge(row.status | title, 'bad') }}{% if row.reason %}<div class="mt-1 text-[11px] text-red-600">{{ row.reason }}</div>{% endif %}{% elif row.status == 'not submitted' %}{{ ui.badge('Not submitted') }}{% else %}{{ ui.badge(row.status | title, 'warn') }}{% endif %}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    <form method="post" action="{{ url_for('admin_sft_templates') }}" class="mt-4">
-      <button class="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Submit the missing ones to WhatsApp</button>
-      <span class="ml-2 text-xs text-stone-500">On {{ 'SFT\'s own number' if cfg.channel_id else 'Shero US\'s number' }}. Meta usually decides within a day.</span>
-    </form>
-  {% endcall %}
+{% if ranged and not (tab == 'nudges' and q.get('section', 'rules') in ('rules', 'templates')) %}
+  {{ sft.range_bar(rng, presets, tab, {'view': q.get('view', ''), 'q': q.get('q', ''), 'source': q.get('source', ''),
+                                         'layout': q.get('layout', ''), 'section': q.get('section', ''),
+                                         'flow': q.get('flow', ''), 'access': q.get('access', '')}) }}
 {% endif %}
-</div>
+
+{% include "admin/sft/tabs/" ~ tab ~ ".html" %}
 {% endblock %}
 
 {% block scripts %}

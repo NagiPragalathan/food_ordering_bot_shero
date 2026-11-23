@@ -17,6 +17,12 @@ For each lead the journey is not finished with:
 Never to a lead with the team (they asked a person), one who opted out, is
 Lost, or has finished. Follow-ups go out only between the settings' hours in
 its timezone; a task is raised at any hour.
+
+The Nudges page switches them all off (nothing is sent, nothing skipped: they
+wait), or one at a time (that one is skipped as it falls due, and the next
+one follows on time). Two follow-ups are at least a day apart (or their
+waits' gap, if shorter), so a lead quiet for a long time - when SFT or the
+nudges are switched on again - is not sent them back to back.
 """
 
 from __future__ import annotations
@@ -29,13 +35,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.models import SftLead
-from app.sft import config, content as c, leads, sending
+from app.sft import config, content as c, leads, offers, sending
 from app.sft.config import SftConfig
 from app.sft.leads import aware, event, now
 
 log = get_logger(__name__)
 
 BATCH = 200
+# Two follow-ups are at least this far apart (or their waits' gap, if shorter).
+MIN_GAP_HOURS = 24
 
 
 def quiet_hours(cfg: SftConfig, when: datetime | None = None) -> bool:
@@ -79,12 +87,38 @@ async def one(session: AsyncSession, lead: SftLead, cfg: SftConfig, at: datetime
 
 
 # --- follow-ups --------------------------------------------------------------------
+def followup_due(lead: SftLead, cfg: SftConfig,
+                 last_nudge: datetime | None = None) -> datetime | None:
+    """When the lead's next follow-up falls due: its wait after their last move,
+    and at least a day after the last nudge (or the gap between the waits, if
+    that is shorter)."""
+    sent = lead.followups_sent
+    if sent >= len(cfg.followup_hours):
+        return None
+    quiet_since = aware(lead.last_activity_at) or aware(lead.created_at)
+    if quiet_since is None:
+        return None
+    due = quiet_since + timedelta(hours=cfg.followup_hours[sent])
+    last_nudge = aware(lead.nudged_at) or aware(last_nudge)
+    if sent and last_nudge is not None and last_nudge > quiet_since:
+        gap = min(cfg.followup_hours[sent] - cfg.followup_hours[sent - 1], MIN_GAP_HOURS)
+        due = max(due, last_nudge + timedelta(hours=gap))
+    return due
+
+
 async def _followup(session, lead, cfg, at) -> bool:
     sent = lead.followups_sent
     if sent >= len(cfg.followup_hours):
         return await _followups_done(session, lead, cfg, at)
-    quiet_since = aware(lead.last_activity_at) or aware(lead.created_at)
-    if quiet_since is None or at - quiet_since < timedelta(hours=cfg.followup_hours[sent]):
+    due = followup_due(lead, cfg, None if lead.nudged_at else await _last(session, lead,
+                                                                            "followup"))
+    if due is None or at < due or not cfg.nudges_on:
+        return False
+    key = f"followup_{sent + 1}"
+    if not cfg.nudge_on(key):
+        lead.followups_sent = sent + 1
+        await event(session, lead, "nudge_skip", f"Follow-up {sent + 1} skipped (switched off "
+                    "on the Nudges page)", data={"n": sent + 1})
         return False
     if quiet_hours(cfg, at):
         return False
@@ -93,6 +127,7 @@ async def _followup(session, lead, cfg, at) -> bool:
         spec = c.PAYMENT_REMINDER
     how = await sending.template(session, lead, cfg, spec, leads.first(lead), at=at)
     lead.followups_sent = sent + 1
+    lead.nudged_at = at
     await event(session, lead, "followup",
                 f"Follow-up {sent + 1} of {len(cfg.followup_hours)} ({spec.name})"
                 + ("" if how else ": could not be sent"), crm=True,
@@ -104,7 +139,7 @@ async def _followups_done(session, lead, cfg, at) -> bool:
     hours = cfg.attention_hours.get("followups_done", 0)
     if not hours:
         return False
-    last = await _last(session, lead, "followup")
+    last = aware(lead.nudged_at) or await _last(session, lead, "followup")
     if last is None or at - last < timedelta(hours=hours):
         return False
     return await leads.raise_attention(session, lead, "followups_done", hours=hours)
@@ -115,6 +150,8 @@ async def _payment_reminder(session, lead, cfg, at) -> bool:
     sent = aware(lead.link_sent_at)
     if sent is None or lead.payment_reminded_at is not None or lead.paid_at is not None:
         return False
+    if not cfg.nudge_on("payment_reminder"):
+        return False
     if at - sent < timedelta(minutes=cfg.payment_reminder_minutes):
         return False
     if not sending.in_window(lead, at) or quiet_hours(cfg, at):
@@ -122,8 +159,10 @@ async def _payment_reminder(session, lead, cfg, at) -> bool:
     from app.sft.flow import enrol_url
 
     lead.payment_reminded_at = at
-    await sending.link(session, lead, cfg, c.PAY_REMINDER.format(first=leads.first(lead)),
-                       url=enrol_url(lead), label=c.PAY_BUTTON.format(fee=cfg.fee_label()),
+    lead.nudged_at = at
+    price = await offers.price(session, lead, cfg)
+    await sending.link(session, lead, cfg, c.say(cfg, "pay_reminder", first=leads.first(lead)),
+                       url=enrol_url(lead), label=c.PAY_BUTTON.format(fee=cfg.money(price.amount)),
                        what="payment_reminder")
     await event(session, lead, "followup", "Payment reminder (the link again)", crm=True)
     return True
@@ -136,12 +175,15 @@ async def _nurture(session, lead, cfg, at) -> bool:
         lead.nurture_until = (aware(lead.last_activity_at) or at) + timedelta(days=7)
     if lead.nurture_sent > len(cfg.nurture_days) or lead.nurture_until is None:
         return False
+    if not cfg.nudge_on("nurture"):
+        return False
     due = aware(lead.nurture_until)
     if due is None or at < due or quiet_hours(cfg, at):
         return False
     how = await sending.template(session, lead, cfg, c.NURTURE_TEMPLATE, leads.first(lead),
                                   at=at)
     lead.nurture_sent += 1
+    lead.nudged_at = at
     following = lead.nurture_sent - 1
     lead.nurture_until = (due + timedelta(days=cfg.nurture_days[following])
                           if following < len(cfg.nurture_days) else None)
@@ -157,10 +199,18 @@ async def _after_paying(session, lead, cfg, at) -> bool:
     if paid is None or lead.access_confirmed_at is not None:
         return False
     checked = aware(lead.access_check_sent_at)
+    if checked is None and not cfg.nudge_on("course_check"):
+        # No check message: the team's task counts from the payment instead.
+        checked = paid + timedelta(hours=cfg.access_check_hours)
+        hours = cfg.attention_hours.get("access", 0)
+        if hours and at - checked >= timedelta(hours=hours):
+            return await leads.raise_attention(session, lead, "access", hours=hours)
+        return False
     if checked is None:
         if at - paid < timedelta(hours=cfg.access_check_hours) or quiet_hours(cfg, at):
             return False
         lead.access_check_sent_at = at
+        lead.nudged_at = at
         lead.step = c.ACCESS
         how = await sending.template(session, lead, cfg, c.COURSE_CHECK, leads.first(lead),
                                       at=at)

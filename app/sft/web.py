@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import PaymentError
 from app.core.logging import get_logger
 from app.db.session import get_session
-from app.sft import config, leads, payments
+from app.sft import config, leads, offers, payments
 from app.templating import templates
 
 log = get_logger(__name__)
@@ -44,10 +44,11 @@ async def enrol(token: str, request: Request, session: AsyncSession = Depends(ge
                      course_url=cfg.course_url)
     await payments.clicked(session, lead)
     if payments.test_checkout(lead, cfg):
+        fee = offers.fee_text(cfg, await offers.price(session, lead, cfg))
         return _page(request, "Test payment",
-                     f"Shero Food Training (SFT): {cfg.fee_label()}. This is a test checkout: "
+                     f"Shero Food Training (SFT): {fee}. This is a test checkout: "
                      "nobody is charged.", test_pay_url=f"/sft/enrol/{token}/test-paid",
-                     fee=cfg.fee_label())
+                     fee=fee)
     try:
         url = await payments.checkout_url(session, lead, cfg)
     except PaymentError as exc:
@@ -65,7 +66,7 @@ async def test_paid(token: str, request: Request, session: AsyncSession = Depend
     if lead is None or not payments.test_checkout(lead, cfg):
         return _page(request, "Not available", "This page is for test payments only.",
                      status=404)
-    await payments.mark_paid(session, lead, cfg, amount=cfg.course_fee, currency=cfg.currency,
+    await payments.mark_paid(session, lead, cfg, amount=None, currency=cfg.currency,
                              test=True)
     return _page(request, "Test payment done ✅",
                  "Marked as paid (a test: nobody was charged). Check WhatsApp for the "

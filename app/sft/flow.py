@@ -39,7 +39,7 @@ from app.schemas.inbound import InboundEvent, InboundKind
 from app.services.conversation.validators import clean_name
 from app.services.reply_triggers import normalise
 from app.sft import content as c
-from app.sft import leads, matching, sending
+from app.sft import leads, matching, offers, sending
 from app.sft.config import SftConfig
 from app.sft.leads import event, move, now, touch
 
@@ -81,16 +81,54 @@ async def handle(session: AsyncSession, ev: InboundEvent, cfg: SftConfig,
         return await _stop(session, lead, cfg)
     if not created and lead.stage == c.NEW:
         await move(session, lead, c.CONTACTED, "replied")
+    applied = choice is None and lead.step != c.QUESTION and \
+        await _apply_code(session, lead, cfg, text)
     restart = (choice is None and matching.has_keyword(text, cfg)
                and not matching.is_question(text) and lead.step != c.QUESTION)
-    if created or restart:
+    if created or restart or (applied and (lead.opted_out or lead.stage == c.LOST)):
         if lead.opted_out or lead.stage == c.LOST:
             lead.opted_out = False
             await event(session, lead, "back", "Came back after saying no", crm=True)
         return await start(session, lead, cfg, again=not created)
+    if applied:
+        # The code was the message: the question they are at, at the new price.
+        return await _prompt_again(session, lead, cfg)
     if choice:
         return await _choose(session, lead, cfg, choice, ev)
     return await _typed(session, lead, cfg, ev)
+
+
+async def _apply_code(session, lead, cfg, text: str) -> bool:
+    """An offer code in the message: the lead's price from now on (Offers page)."""
+    offer = await offers.from_message(session, lead, text, cfg)
+    if offer is None or offer.id == lead.offer_id:
+        return False
+    before = await offers.price(session, lead, cfg)
+    lead.offer_id = offer.id
+    lead.offer_code = offer.code
+    after = await offers.price(session, lead, cfg)
+    if after.offer is None or after.offer.id != offer.id:
+        # A better offer already applies to them: keep it, and say so.
+        kept = before.offer if before.offer is not None and before.offer.code else None
+        lead.offer_id = kept.id if kept else None
+        lead.offer_code = kept.code if kept else None
+        await sending.text(session, lead, cfg,
+                           f"You already have our best price: {offers.fee_text(cfg, before)}. 🙂",
+                           what="offer_not_better")
+        return True
+    await event(session, lead, "offer", f"Applied code {offer.code}: {cfg.money(after.amount)}",
+                crm=True, data={"offer": str(offer.id), "code": offer.code,
+                                "price": str(after.amount)})
+    await sending.text(session, lead, cfg,
+                       c.say(cfg, "offer_applied", first=leads.first(lead), code=offer.code,
+                             fee=cfg.money(after.amount), was=cfg.money(after.fee)),
+                       what="offer_applied")
+    return True
+
+
+async def fee(session, lead, cfg) -> str:
+    """The fee as this lead's messages say it ("$79 (was $99)" with an offer)."""
+    return offers.fee_text(cfg, await offers.price(session, lead, cfg))
 
 
 async def start(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
@@ -102,7 +140,7 @@ async def start(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
     if not lead.name:
         if cfg.ask_name:
             lead.step = c.ASK_NAME
-            await sending.text(session, lead, cfg, c.ASK_NAME_TEXT, what="ask_name")
+            await sending.text(session, lead, cfg, c.say(cfg, "ask_name"), what="ask_name")
             return "asked name"
         lead.name = clean_name(lead.profile_name)
     if again and lead.goal:
@@ -114,21 +152,22 @@ async def start(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
 async def _welcome(session, lead, cfg) -> str:
     lead.step = c.GOAL
     await sending.buttons(session, lead, cfg,
-                          c.WELCOME.format(first=leads.first(lead), fee=cfg.fee_label()),
+                          c.say(cfg, "welcome", first=leads.first(lead),
+                                fee=await fee(session, lead, cfg)),
                           c.GOAL_BUTTONS, what="welcome")
     return "welcome"
 
 
 async def _resume(session, lead, cfg) -> str:
     """Back after a while: their last open question again."""
-    await sending.text(session, lead, cfg, c.WELCOME_BACK.format(first=leads.first(lead)),
+    await sending.text(session, lead, cfg, c.say(cfg, "welcome_back", first=leads.first(lead)),
                        what="welcome_back")
     if lead.stage == c.PAYMENT_PENDING:
         return await _enrol(session, lead, cfg)
     if leads.reached(lead, c.BROCHURE_SENT):
         lead.step = c.DECIDE
-        await sending.buttons(session, lead, cfg, _brochure_text(cfg), c.DECIDE_BUTTONS,
-                              what="decide")
+        await sending.buttons(session, lead, cfg, await _brochure_text(session, lead, cfg),
+                              c.DECIDE_BUTTONS, what="decide")
         return "resumed at the brochure"
     return await _interest(session, lead, cfg)
 
@@ -143,8 +182,8 @@ async def _goal(session, lead, cfg, goal: str) -> str:
 
 async def _interest(session, lead, cfg) -> str:
     lead.step = c.DETAILS
-    body = c.INTEREST.get(lead.goal or "skills", c.INTEREST["skills"])
-    await sending.buttons(session, lead, cfg, body.format(first=leads.first(lead)),
+    key = "interest_business" if lead.goal == "business" else "interest_skills"
+    await sending.buttons(session, lead, cfg, c.say(cfg, key, first=leads.first(lead)),
                           c.DETAIL_BUTTONS, what="interest")
     return "interest"
 
@@ -155,21 +194,22 @@ async def _brochure(session, lead, cfg) -> str:
     await sending.document(session, lead, cfg, url=url, filename=c.BROCHURE_FILENAME,
                            caption=c.BROCHURE_CAPTION)
     lead.step = c.DECIDE
-    await sending.buttons(session, lead, cfg, _brochure_text(cfg), c.DECIDE_BUTTONS,
-                          what="decide")
+    await sending.buttons(session, lead, cfg, await _brochure_text(session, lead, cfg),
+                          c.DECIDE_BUTTONS, what="decide")
     await _advance(session, lead, c.BROCHURE_SENT, "viewed the course details")
     return "brochure"
 
 
-def _brochure_text(cfg: SftConfig) -> str:
-    return (c.BROCHURE.format(fee=cfg.fee_label())
+async def _brochure_text(session, lead, cfg: SftConfig) -> str:
+    return (c.say(cfg, "brochure", fee=await fee(session, lead, cfg))
             + c.BROCHURE_LINK_LINE.format(url=cfg.brochure_link()))
 
 
 async def _faq(session, lead, cfg) -> str:
     touch(lead)
     lead.step = c.FAQ
-    await sending.faq_list(session, lead, cfg, c.FAQ_PROMPT.format(first=leads.first(lead)))
+    await sending.faq_list(session, lead, cfg,
+                           c.say(cfg, "faq_prompt", first=leads.first(lead)))
     await _advance(session, lead, c.QUESTIONS, "opened the questions")
     return "faq"
 
@@ -178,7 +218,8 @@ async def _answer(session, lead, cfg, faq_id: str) -> str:
     touch(lead)
     lead.step = c.FAQ
     await event(session, lead, "faq", faq_id.rsplit(":", 1)[-1], data={"faq": faq_id})
-    await sending.buttons(session, lead, cfg, c.FAQ_ANSWERS[faq_id].format(fee=cfg.fee_label()),
+    await sending.buttons(session, lead, cfg,
+                          c.say(cfg, c.FAQ_TEXTS[faq_id], fee=await fee(session, lead, cfg)),
                           c.AFTER_FAQ_BUTTONS, what="faq_answer")
     await _advance(session, lead, c.QUESTIONS, "read an answer")
     return "faq answer"
@@ -195,14 +236,14 @@ async def _ask(session, lead, cfg) -> str:
 async def _type_question(session, lead, cfg) -> str:
     touch(lead)
     lead.step = c.QUESTION
-    await sending.text(session, lead, cfg, c.ASK_QUESTION.format(first=leads.first(lead)),
+    await sending.text(session, lead, cfg, c.say(cfg, "ask_question", first=leads.first(lead)),
                        what="ask_question")
     await _advance(session, lead, c.QUESTIONS, "has a question")
     return "asked for the question"
 
 
 async def to_team(session: AsyncSession, lead: SftLead, cfg: SftConfig, question: str, *,
-                  key: str = "question", message: str = c.HANDED_OVER) -> str:
+                  key: str = "question", message: str = "handed_over") -> str:
     """Hand the chat to a person: tell the lead, then stay silent."""
     touch(lead)
     if question:
@@ -212,7 +253,7 @@ async def to_team(session: AsyncSession, lead: SftLead, cfg: SftConfig, question
     lead.step = c.WITH_TEAM
     if key == "question":
         await _advance(session, lead, c.QUESTIONS, "asked the team")
-    await sending.text(session, lead, cfg, message.format(first=leads.first(lead)),
+    await sending.text(session, lead, cfg, c.say(cfg, message, first=leads.first(lead)),
                        what="handed_over")
     await event(session, lead, "handover",
                 f'With the team. Question: "{question[:400]}"' if question else "With the team",
@@ -250,9 +291,11 @@ async def _enrol(session, lead, cfg) -> str:
     lead.step = c.PAY
     lead.link_sent_at = now()
     lead.payment_reminded_at = None
+    price = await offers.price(session, lead, cfg)
     await sending.link(session, lead, cfg,
-                       c.ENROL.format(first=leads.first(lead), fee=cfg.fee_label()),
-                       url=enrol_url(lead), label=c.PAY_BUTTON.format(fee=cfg.fee_label()),
+                       c.say(cfg, "enrol", first=leads.first(lead),
+                             fee=offers.fee_text(cfg, price)),
+                       url=enrol_url(lead), label=c.PAY_BUTTON.format(fee=cfg.money(price.amount)),
                        what="enroll")
     await _advance(session, lead, c.PAYMENT_PENDING, "wants to enroll")
     return "payment link"
@@ -265,7 +308,7 @@ def enrol_url(lead: SftLead) -> str:
 
 async def _already_paid(session, lead, cfg) -> str:
     lead.step = c.IDLE
-    body = c.ALREADY_PAID.format(first=leads.first(lead))
+    body = c.say(cfg, "already_paid", first=leads.first(lead))
     if cfg.course_url:
         await sending.link(session, lead, cfg, body, url=cfg.course_url, label=c.COURSE_BUTTON,
                            what="course_link")
@@ -279,7 +322,7 @@ async def _not_now(session, lead, cfg) -> str:
     """Not right now (after the brochure): the automated follow-ups take it."""
     touch(lead)
     lead.step = c.IDLE
-    await sending.text(session, lead, cfg, c.NOT_NOW.format(first=leads.first(lead)),
+    await sending.text(session, lead, cfg, c.say(cfg, "not_now", first=leads.first(lead)),
                        what="not_now")
     await move(session, lead, c.NURTURE, "not right now")
     return "not now"
@@ -288,7 +331,7 @@ async def _not_now(session, lead, cfg) -> str:
 async def _maybe_later(session, lead, cfg) -> str:
     touch(lead)
     lead.step = c.LATER
-    await sending.buttons(session, lead, cfg, c.LATER.format(first=leads.first(lead)),
+    await sending.buttons(session, lead, cfg, c.say(cfg, "later", first=leads.first(lead)),
                           c.WHEN_BUTTONS, what="maybe_later")
     await move(session, lead, c.NURTURE, "maybe later")
     return "maybe later"
@@ -301,7 +344,7 @@ async def _when(session, lead, cfg, choice: str) -> str:
         lead.nurture_until = None
         lead.nurture_sent = len(cfg.nurture_days)        # no automated check-ins
         lead.followups_sent = max(lead.followups_sent, len(cfg.followup_hours))
-        await sending.text(session, lead, cfg, c.LATER_THEM, what="later_them")
+        await sending.text(session, lead, cfg, c.say(cfg, "later_them"), what="later_them")
         await event(session, lead, "nurture", "Will message us themselves", crm=True)
         return "they will message"
     days = 7 if choice == c.B_WEEK else 30
@@ -309,7 +352,8 @@ async def _when(session, lead, cfg, choice: str) -> str:
     lead.nurture_sent = 0
     lead.followups_sent = max(lead.followups_sent, len(cfg.followup_hours))
     when = "in a week" if days == 7 else "in a month"
-    await sending.text(session, lead, cfg, c.LATER_SET.format(when=when), what="later_set")
+    await sending.text(session, lead, cfg, c.say(cfg, "later_set", when=when),
+                       what="later_set")
     await event(session, lead, "nurture", f"Check back {when}", crm=True, data={"days": days})
     return f"check back {when}"
 
@@ -318,7 +362,8 @@ async def _not_interested(session, lead, cfg) -> str:
     touch(lead)
     lead.opted_out = True
     lead.step = c.LOST_REASON
-    await sending.buttons(session, lead, cfg, c.NOT_INTERESTED.format(first=leads.first(lead)),
+    await sending.buttons(session, lead, cfg,
+                          c.say(cfg, "not_interested", first=leads.first(lead)),
                           c.WHY_BUTTONS, what="not_interested")
     await move(session, lead, c.LOST, "not interested")
     if lead.needs_attention:
@@ -330,14 +375,14 @@ async def _why(session, lead, cfg, choice: str) -> str:
     lead.lost_reason = c.WHY_IDS[choice]
     lead.step = c.IDLE
     await event(session, lead, "lost_reason", f"Reason: {lead.lost_reason}", crm=True)
-    await sending.text(session, lead, cfg, c.LOST_THANKS, what="lost_thanks")
+    await sending.text(session, lead, cfg, c.say(cfg, "lost_thanks"), what="lost_thanks")
     return "lost reason"
 
 
 async def _stop(session, lead, cfg) -> str:
     lead.opted_out = True
     lead.step = c.IDLE
-    await sending.text(session, lead, cfg, c.STOPPED, what="stopped")
+    await sending.text(session, lead, cfg, c.say(cfg, "stopped"), what="stopped")
     await move(session, lead, c.LOST, "asked to stop")
     if lead.needs_attention:
         await leads.resolve(session, lead, "asked to stop", by="the bot")
@@ -350,13 +395,13 @@ async def _access(session, lead, cfg, ok: bool) -> str:
         lead.access_confirmed_at = lead.access_confirmed_at or now()
         lead.step = c.IDLE
         await event(session, lead, "access", "Opened the course", crm=True)
-        await sending.text(session, lead, cfg, c.ACCESS_OK.format(first=leads.first(lead)),
+        await sending.text(session, lead, cfg, c.say(cfg, "access_ok", first=leads.first(lead)),
                            what="access_ok")
         if lead.needs_attention and lead.attention_stage in ("access", "course_link"):
             await leads.resolve(session, lead, "opened the course", by="the bot")
         return "course opened"
     return await to_team(session, lead, cfg, "Needs help opening the course",
-                         key="access_help", message=c.ACCESS_HELP)
+                         key="access_help", message="access_help")
 
 
 # --- what the lead said ---------------------------------------------------------------
@@ -403,7 +448,8 @@ async def _typed(session, lead, cfg, ev: InboundEvent) -> str:
                      or matching.is_question(name) or normalise(name) in matching.SMALL_TALK):
             name = None
         if not name:
-            await sending.text(session, lead, cfg, c.ASK_NAME_AGAIN, what="ask_name_again")
+            await sending.text(session, lead, cfg, c.say(cfg, "ask_name_again"),
+                               what="ask_name_again")
             return "asked name again"
         lead.name = name.title() if name.islower() or name.isupper() else name
         lead.crm_dirty = True
@@ -428,7 +474,7 @@ async def _typed(session, lead, cfg, ev: InboundEvent) -> str:
         lead.lost_reason = text[:60]
         lead.step = c.IDLE
         await event(session, lead, "lost_reason", f"Reason: {text[:200]}", crm=True)
-        await sending.text(session, lead, cfg, c.LOST_THANKS, what="lost_thanks")
+        await sending.text(session, lead, cfg, c.say(cfg, "lost_thanks"), what="lost_thanks")
         return "lost reason"
     if matching.is_question(text):
         return await to_team(session, lead, cfg, text)
@@ -439,21 +485,22 @@ async def _prompt_again(session, lead, cfg) -> str:
     """Nothing to act on: the question they are at, once more."""
     step = lead.step
     if step == c.GOAL:
-        await sending.buttons(session, lead, cfg, c.TAP_BELOW, c.GOAL_BUTTONS, what="tap_below")
+        await sending.buttons(session, lead, cfg, c.say(cfg, "tap_below"), c.GOAL_BUTTONS, what="tap_below")
     elif step == c.DETAILS:
-        await sending.buttons(session, lead, cfg, c.TAP_BELOW, c.DETAIL_BUTTONS, what="tap_below")
+        await sending.buttons(session, lead, cfg, c.say(cfg, "tap_below"), c.DETAIL_BUTTONS, what="tap_below")
     elif step == c.DECIDE:
-        await sending.buttons(session, lead, cfg, c.TAP_BELOW, c.DECIDE_BUTTONS, what="tap_below")
+        await sending.buttons(session, lead, cfg, c.say(cfg, "tap_below"), c.DECIDE_BUTTONS, what="tap_below")
     elif step == c.FAQ:
-        await sending.faq_list(session, lead, cfg, c.FAQ_PROMPT.format(first=leads.first(lead)))
+        await sending.faq_list(session, lead, cfg,
+                               c.say(cfg, "faq_prompt", first=leads.first(lead)))
     elif step == c.LATER:
-        await sending.buttons(session, lead, cfg, c.TAP_BELOW, c.WHEN_BUTTONS, what="tap_below")
+        await sending.buttons(session, lead, cfg, c.say(cfg, "tap_below"), c.WHEN_BUTTONS, what="tap_below")
     elif step == c.ACCESS:
-        await sending.buttons(session, lead, cfg, c.TAP_BELOW, c.ACCESS_BUTTONS, what="tap_below")
+        await sending.buttons(session, lead, cfg, c.say(cfg, "tap_below"), c.ACCESS_BUTTONS, what="tap_below")
     elif step == c.PAY:
         return await _enrol(session, lead, cfg)
     elif step == c.LOST_REASON:
-        await sending.buttons(session, lead, cfg, c.TAP_BELOW, c.WHY_BUTTONS, what="tap_below")
+        await sending.buttons(session, lead, cfg, c.say(cfg, "tap_below"), c.WHY_BUTTONS, what="tap_below")
     else:
         return await start(session, lead, cfg, again=True)
     return "prompted again"
