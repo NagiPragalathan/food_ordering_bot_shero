@@ -301,3 +301,16 @@ async def test_a_real_payment_needs_a_tick_to_delete(admin, session, cfg, rec):
     admin.post(f"/admin/sft/leads/{lead.id}/action",
                data={"action": "forget", "confirm_paid": "on"})
     assert await session.get(SftLead, lead.id) is None
+
+
+async def test_the_leads_list_has_a_delete_on_each_row(admin, session, cfg, rec):
+    from app.db.models import SftLead
+
+    await say(session, cfg, "SFT")
+    await say(session, cfg, "Priya")
+    lead = await leads.get(session, NUMBER)
+    page = admin.get("/admin/sft?tab=leads").text
+    assert "data-sft-row-delete" in page and "Yes, delete" in page
+    assert f"/admin/sft/leads/{lead.id}/action" in page
+    admin.post(f"/admin/sft/leads/{lead.id}/action", data={"action": "forget"})
+    assert await session.get(SftLead, lead.id) is None
