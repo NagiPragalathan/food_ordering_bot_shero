@@ -599,12 +599,18 @@ flow that answers **any keyword** also answers a customer typing their name to
 this bot - so both bots reply at once. The welcome menu replaces that flow:
 
 - **On** (with *Reply to any message* off): a message that no trigger keyword
-  matches, in a **new chat**, gets the menu - a message and up to three
-  buttons. New means none of these in the last 24 hours: the menu, the
-  ordering bot, a Gallabox flow picked from the menu. So it goes once, not to
-  every message.
+  matches, in a **new chat**, gets the menu - a message and its options:
+  up to three go as buttons (20 characters each), four to ten as a list
+  with a "See options" button (24 characters each). New means none of these
+  in the last 24 hours: the menu, the ordering bot, a Gallabox flow picked
+  from the menu, **Shero Food Training** (a lead SFT is talking with never
+  gets the food menu). So it goes once, not to every message.
 - Each button **goes to** the ordering bot (with both welcome messages, only
-  Order Now or only WhatsApp, like a trigger keyword) or **a Gallabox flow**.
+  Order Now or only WhatsApp, like a trigger keyword), **a Gallabox flow**,
+  or (Shero US) **Shero Food Training (SFT bot)**: SFT takes the tap, whatever
+  the label says, and starts the course journey (name, welcome, brochure).
+  While SFT is off (or the number isn't on its test list) the tap gets no
+  reply from either bot.
 - A Gallabox button gets no reply from the bot. In Gallabox that flow's
   keyword is the button's label, so the tap starts it there. For 24 hours
   after, the bot stays out of the chat: the flow's questions and buttons are

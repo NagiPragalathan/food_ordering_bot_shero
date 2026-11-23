@@ -61,9 +61,9 @@ async def bot_replies_page(
         "message_query": message,
         "asks_email": settings.asks_customer_email,
         "welcome": welcome_menu.load(),
-        "goes_to": welcome_menu.GOES_TO,
+        "goes_to": welcome_menu.goes_to_options(),
         "sent_by": welcome_menu.SENT_BY,
-        "label_limit": welcome_menu.load().label_limit,
+        "label_limit": welcome_menu.OPTION_LIMIT,
         "text_limit": welcome_menu.TEXT_LIMIT,
     })
 

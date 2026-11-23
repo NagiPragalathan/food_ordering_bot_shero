@@ -63,10 +63,10 @@
 
     <div>
       <div class="mb-1 hidden grid-cols-[1fr_15rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-stone-400 sm:grid">
-        <span>Button (up to {{ label_limit }} characters)</span><span>Goes to</span>
+        <span>Button (up to {{ 20 if welcome.we_send else label_limit }} characters{% if welcome.we_send %}; 24 in a list{% endif %})</span><span>Goes to</span>
       </div>
-      <div class="space-y-2">
-        {% for i in range(3 if welcome.we_send else [6, welcome.buttons | length + 1] | max) %}
+      <div class="space-y-2" data-welcome-buttons>
+        {% for i in range([5 if welcome.we_send else 6, welcome.buttons | length + 1] | max) %}
           {% set b = welcome.buttons[i] if i < welcome.buttons | length else none %}
           <div class="grid gap-2 rounded-lg border border-stone-100 p-2 sm:grid-cols-[1fr_15rem] sm:border-0 sm:p-0">
             <input name="label" value="{{ b.label if b else '' }}" maxlength="{{ label_limit }}"
@@ -82,7 +82,10 @@
         {% endfor %}
       </div>
       <p class="mt-2 text-[11px] text-stone-500">Leave a button blank to drop it.
-        {% if welcome.we_send %}WhatsApp shows at most three.{% else %}Use the options' exact words in the Gallabox flow (up to {{ label_limit }} characters each).{% endif %}</p>
+        {% if welcome.we_send %}Up to three go as buttons; four or more go as a list with a &ldquo;See options&rdquo; button (WhatsApp shows at most three buttons).{% else %}Use the options' exact words in the Gallabox flow (up to {{ label_limit }} characters each).{% endif %}</p>
+      {% if 'sft' in goes_to %}
+      <p class="mt-1 text-[11px] text-stone-500" data-welcome-sft-hint>&ldquo;Shero Food Training (SFT bot)&rdquo; starts the course journey (name, welcome, brochure), answered by SFT, not the ordering bot. SFT must be Live (or the number on SFT&rsquo;s test list) on the SFT page&rsquo;s Bot replies. Someone in the middle of SFT never gets this menu.</p>
+      {% endif %}
     </div>
 
     <div class="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">

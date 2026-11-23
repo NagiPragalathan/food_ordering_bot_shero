@@ -83,8 +83,9 @@ async def handle(session: AsyncSession, ev: InboundEvent, cfg: SftConfig,
         await move(session, lead, c.CONTACTED, "replied")
     applied = choice is None and lead.step != c.QUESTION and \
         await _apply_code(session, lead, cfg, text)
-    restart = (choice is None and matching.has_keyword(text, cfg)
-               and not matching.is_question(text) and lead.step != c.QUESTION)
+    restart = choice is None and lead.step != c.QUESTION and (
+        matching.from_menu(ev)
+        or (matching.has_keyword(text, cfg) and not matching.is_question(text)))
     if created or restart or (applied and (lead.opted_out or lead.stage == c.LOST)):
         if lead.opted_out or lead.stage == c.LOST:
             lead.opted_out = False

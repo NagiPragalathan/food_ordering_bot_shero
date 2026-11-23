@@ -87,6 +87,8 @@ def _wants_sft(event: InboundEvent, lead: SftLead | None, cfg: SftConfig) -> boo
         return True
     if matching.has_keyword(event.text, cfg) or matching.from_listed_ad(event, cfg):
         return True
+    if matching.from_menu(event):
+        return True                     # the welcome menu's Shero Food Training button
     if lead is None:
         return False
     if lead.with_team:

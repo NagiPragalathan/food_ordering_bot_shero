@@ -217,6 +217,10 @@ async def decide(session: AsyncSession, event: InboundEvent,
         if button and button.to_gallabox:
             return Decision(False, "Gallabox flow", action=welcome_menu.LEFT_TO_GALLABOX,
                             label=button.label)
+        if button and button.to_sft:
+            # SFT takes its own button first (app/sft/router.py); here only
+            # while SFT is off or not answering this number: not for ordering.
+            return Decision(False, "SFT button, SFT not answering this number")
         if button:
             return Decision(True, "welcome menu", fresh_start=True, reply=button.goes_to,
                             label=button.label)

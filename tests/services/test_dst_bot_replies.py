@@ -190,9 +190,19 @@ def test_us_defaults_are_unchanged():
 
 
 def test_a_menu_the_bot_sends_keeps_whatsapp_s_limits():
+    # Four or more options go as a list (24 characters each); three or fewer
+    # are buttons (20 each); never more than ten.
     menu = wm.Menu(enabled=True, buttons=tuple(wm.MenuButton(f"Option {i}", wm.GALLABOX)
                                                for i in range(4)))
-    assert "WhatsApp allows at most 3 buttons." in wm.problems(menu)
+    assert wm.problems(menu) == [] and menu.as_list
+    eleven = wm.Menu(enabled=True, buttons=tuple(wm.MenuButton(f"Option {i}", wm.GALLABOX)
+                                                 for i in range(11)))
+    assert "At most 10 options." in wm.problems(eleven)
+    long = "Twenty-two characters"
+    three = wm.Menu(enabled=True, buttons=(wm.MenuButton(long, wm.GALLABOX),))
+    assert any("longer than 20" in p for p in wm.problems(three))
+    listed = wm.Menu(enabled=True, buttons=(wm.MenuButton(long, wm.GALLABOX),) + menu.buttons[:3])
+    assert wm.problems(listed) == []
     by_gallabox = wm.Menu(enabled=True, buttons=menu.buttons, sent_by=wm.GALLABOX_SENDS)
     assert wm.problems(by_gallabox) == []
     assert wm.parse(wm.dump(by_gallabox)) == by_gallabox

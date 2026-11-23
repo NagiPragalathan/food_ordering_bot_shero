@@ -20,6 +20,18 @@ def has_keyword(text: str | None, cfg: SftConfig) -> bool:
     return any(f" {normalise(k)} " in said for k in cfg.keywords if normalise(k))
 
 
+def from_menu(event: InboundEvent) -> bool:
+    """The welcome menu's Shero Food Training button (services/welcome_menu),
+    tapped or its words typed: SFT's, whatever its label says."""
+    from app.services import welcome_menu
+
+    menu = welcome_menu.active()
+    if menu is None:
+        return False
+    button = menu.button(event.reply_title or event.reply_id or event.text or "")
+    return bool(button and button.to_sft)
+
+
 def from_listed_ad(event: InboundEvent, cfg: SftConfig) -> bool:
     """A Click-to-WhatsApp ad that is SFT's: listed by id, or one whose
     headline or text carries a keyword."""
@@ -66,6 +78,8 @@ def origin(event: InboundEvent, cfg: SftConfig) -> Origin:
         referral = event.referral or {}
         headline = str(referral.get("headline") or "").strip()
         return Origin(META_AD, headline or (f"ad {event.ad_id}" if event.ad_id else None))
+    if from_menu(event):
+        return Origin(WHATSAPP, "welcome menu")
     said = normalise(event.text or "")
     words = said.split()
     for code, name in cfg.source_codes.items():

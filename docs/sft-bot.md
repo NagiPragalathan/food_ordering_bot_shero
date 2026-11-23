@@ -143,6 +143,17 @@ lead-to-contact, interest captured, brochure engagement, payment link opened,
 link to paid, overall conversion, course access, recovery after a follow-up,
 and the team's response time.
 
+## From the ordering bot's welcome menu
+
+The US dashboard's **Bot replies → Welcome menu** can have a button that goes
+to **Shero Food Training (SFT bot)** (e.g. "Shero Food Training"; four or more
+options go as a list). Its tap is SFT's whatever the label says, and starts
+the journey; the lead's source is WhatsApp, detail "welcome menu". The food
+menu never goes to someone SFT is talking with (24 hours from SFT's last
+message either way, or while the team has the chat), and SFT never takes the
+ordering bot's messages. If the old greeting still arrives mid-SFT, it is
+Gallabox's own **Main Card** (any keyword): turn it off in Gallabox.
+
 ## Which WhatsApp number
 
 * **Shero US's number** (the default): a chat becomes SFT's only when it asks
