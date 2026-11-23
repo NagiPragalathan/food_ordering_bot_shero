@@ -136,6 +136,20 @@ def _no_zip_lookups(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _sft_settings_fresh():
+    """SFT's settings are cached for a few seconds per process; one test's
+    Live setting must never answer another test's WhatsApp message."""
+    from app.sft import config as sft_config
+    from app.sft import sending as sft_sending
+
+    sft_config.clear_cache()
+    sft_sending.clear_cache()
+    yield
+    sft_config.clear_cache()
+    sft_sending.clear_cache()
+
+
+@pytest.fixture(autouse=True)
 def _templates_approved(monkeypatch):
     """Every template counts as approved unless a test says otherwise.
 

@@ -36,6 +36,7 @@ from app.services import media
 from app.integrations.zoho.client import zoho_client
 from app.admin.auth import bootstrap_first_user
 from app.services.settings_store import apply_overrides, refresh_if_stale
+from app.sft import web as sft_web
 from app.workers.scheduler import shutdown_scheduler, start_scheduler
 
 configure_logging()
@@ -137,6 +138,8 @@ app.include_router(pay.router)
 app.include_router(order_web.router)
 app.include_router(order_addresses.router)
 app.include_router(receipts.router)
+# Shero Food Training's enrol links (/sft/enrol/<token>).
+app.include_router(sft_web.router)
 
 # Dish photos downloaded from the client's sheet at import time. Served from
 # here rather than hot-linked, so a page load never depends on Drive.

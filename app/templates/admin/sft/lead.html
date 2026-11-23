@@ -1,0 +1,108 @@
+{% extends "admin/base.html" %}
+{% import "admin/_macros.html" as ui %}
+{% import "admin/sft/_bits.html" as sft %}
+{% block title %}SFT lead{% endblock %}
+{% block heading %}{{ lead.name or lead.profile_name or ('+' ~ lead.whatsapp_number) }}{% endblock %}
+{% block subheading %}
+  <p class="text-xs text-stone-500"><a href="{{ back }}" class="font-semibold text-brand-700">← SFT leads</a> · +{{ lead.whatsapp_number }} · came in {{ local(lead.created_at) }}</p>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center gap-1.5">{{ sft.stage(c, lead.stage) }}{{ sft.flags(lead) }}</div>
+
+<div class="mt-5 grid gap-5 lg:grid-cols-3">
+  <div class="space-y-5 lg:col-span-2">
+    {% if lead.with_team or lead.needs_attention %}
+    <section class="rounded-2xl border {{ 'border-red-200 bg-red-50/60' if lead.attention_priority == 'high' else 'border-amber-200 bg-amber-50/60' }} p-5" data-sft-task>
+      <h2 class="text-sm font-semibold text-stone-900">
+        {% if lead.with_team %}With the team: the bot is silent for {{ lead.name or 'this lead' }}{% else %}For the team: {{ drop.stage_name if drop else 'follow up' }}{% endif %}
+      </h2>
+      {% if lead.attention_reason %}<p class="mt-1 text-sm text-stone-700">{{ lead.attention_reason }}{% if lead.attention_since %} <span class="text-xs text-stone-500">· since {{ local(lead.attention_since) }}</span>{% endif %}</p>{% endif %}
+      {% if lead.question and lead.with_team %}<blockquote class="mt-3 rounded-xl bg-white px-4 py-3 text-sm text-stone-800 ring-1 ring-stone-200">"{{ lead.question }}"</blockquote>{% endif %}
+      {% if script %}
+      <div class="mt-3 rounded-xl bg-white px-4 py-3 ring-1 ring-stone-200">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-stone-400">Suggested message · {{ drop.next_action }}</div>
+        <p class="mt-1 text-sm text-stone-800">{{ script }}</p>
+      </div>
+      {% endif %}
+      <p class="mt-3 text-xs text-stone-600">Reply to them in Gallabox (WhatsApp +{{ lead.whatsapp_number }}), then close this here:</p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        {% if lead.with_team %}
+        <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}"><input type="hidden" name="action" value="hand_back">
+          <button class="rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700">Answered: hand back to the bot</button></form>
+        {% endif %}
+        {% for action, label in [('continue', 'Done: carry on with the journey'), ('nurture7', 'Follow up in a week'), ('nurture30', 'Follow up in a month'), ('enrolled', 'Enrolled outside the bot')] %}
+        <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}"><input type="hidden" name="action" value="{{ action }}">
+          <button class="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">{{ label }}</button></form>
+        {% endfor %}
+        <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}" class="flex gap-1"><input type="hidden" name="action" value="lost">
+          <input name="reason" placeholder="Reason (optional)" class="w-36 rounded-lg border border-stone-300 px-2 py-1.5 text-xs">
+          <button class="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-red-600 ring-1 ring-stone-200 hover:bg-red-50">Close as lost</button></form>
+      </div>
+    </section>
+    {% endif %}
+
+    {% call ui.card('Timeline', 'Everything said and done, oldest first') %}
+      <ol class="relative space-y-3 border-l border-stone-200 pl-5" data-sft-timeline>
+        {% for e in events %}
+        <li class="relative">
+          <span class="absolute -left-[26px] top-1 h-2.5 w-2.5 rounded-full ring-4 ring-white
+            {% if e.kind == 'inbound' %}bg-sky-500{% elif e.kind == 'sent' %}bg-emerald-500{% elif e.kind in ('attention', 'handover') %}bg-amber-500{% elif e.kind in ('send_failed', 'not_sent') %}bg-red-500{% elif e.kind == 'payment' %}bg-brand-600{% else %}bg-stone-400{% endif %}"></span>
+          <div class="flex flex-wrap items-baseline gap-x-2">
+            <span class="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{{ {'inbound': 'They said', 'sent': 'Bot sent', 'stage': 'Stage', 'attention': 'Team task', 'resolved': 'Task closed', 'handover': 'Hand-over', 'followup': 'Follow-up', 'payment': 'Payment', 'team': 'Team', 'send_failed': 'Not delivered', 'not_sent': 'Not sent'}.get(e.kind, e.kind | replace('_', ' ') | title) }}</span>
+            <span class="text-[11px] text-stone-400">{{ local(e.at) }}</span>
+          </div>
+          <div class="mt-0.5 whitespace-pre-line break-words text-sm {{ 'text-stone-900' if e.kind in ('inbound', 'stage', 'attention', 'payment') else 'text-stone-600' }}">{{ e.detail | whatsapp }}</div>
+        </li>
+        {% else %}<li class="text-sm text-stone-400">Nothing yet.</li>{% endfor %}
+      </ol>
+    {% endcall %}
+  </div>
+
+  <div class="space-y-5">
+    {% call ui.card('Lead') %}
+      <dl class="space-y-2 text-sm">
+        {% for label, value in [('Name', lead.name), ('WhatsApp name', lead.profile_name), ('Email', lead.email), ('Goal', c.GOALS.get(lead.goal)), ('Source', lead.source ~ ((' · ' ~ lead.source_detail) if lead.source_detail else '')), ('Ad / campaign', ((lead.ad_id or '') ~ (' / ' ~ lead.campaign_id if lead.campaign_id else '')) or None), ('First message', lead.first_message), ('Waiting for', lead.step | replace('_', ' ')), ('Follow-ups sent', lead.followups_sent), ('Next check-in', local(lead.nurture_until) if lead.nurture_until else None), ('Lost reason', lead.lost_reason)] %}
+          {% if value not in (None, '') %}<div class="flex justify-between gap-3"><dt class="text-stone-500">{{ label }}</dt><dd class="text-right text-stone-800">{{ value }}</dd></div>{% endif %}
+        {% endfor %}
+      </dl>
+    {% endcall %}
+
+    {% call ui.card('Payment') %}
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between"><dt class="text-stone-500">Link sent</dt><dd>{{ local(lead.link_sent_at) or '-' }}</dd></div>
+        <div class="flex justify-between"><dt class="text-stone-500">Link opened</dt><dd>{{ local(lead.link_clicked_at) or '-' }}</dd></div>
+        <div class="flex justify-between"><dt class="text-stone-500">Paid</dt><dd>{% if lead.paid_at %}{{ lead.amount_paid }} {{ lead.currency }} · {{ local(lead.paid_at) }}{% else %}-{% endif %}</dd></div>
+        {% if lead.paid_at %}<div class="flex justify-between"><dt class="text-stone-500">Opened the course</dt><dd>{{ local(lead.access_confirmed_at) or 'not yet' }}</dd></div>{% endif %}
+      </dl>
+      <p class="mt-3 break-all rounded-lg bg-stone-50 px-3 py-2 font-mono text-[11px] text-stone-600">{{ enrol_url }}</p>
+      <p class="mt-1 text-[11px] text-stone-500">Their enroll link: opens a fresh secure checkout every time.</p>
+    {% endcall %}
+
+    {% call ui.card('Zoho CRM') %}
+      <div class="text-sm">
+        {% if lead.source == 'Test chat' %}<p class="text-stone-500">A test-chat lead: never sent to Zoho.</p>
+        {% elif lead.zoho_id %}<p class="text-stone-700">{{ lead.zoho_module[:-1] }} {{ lead.zoho_id }}{% if not lead.zoho_created %} <span class="text-xs text-stone-500">(already in Zoho: kept its own details)</span>{% endif %}</p>
+          <p class="mt-1 text-xs text-stone-500">Synced {{ local(lead.crm_synced_at) or '-' }}</p>
+        {% else %}<p class="text-stone-500">Not in Zoho yet.</p>{% endif %}
+        {% if lead.crm_error %}<p class="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{{ lead.crm_error }}</p>{% endif %}
+        <div class="mt-3 flex flex-wrap gap-1">{% for t in tags %}<span class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] text-stone-600">{{ t }}</span>{% endfor %}</div>
+      </div>
+      {% if lead.source != 'Test chat' %}
+      <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}" class="mt-3"><input type="hidden" name="action" value="resync">
+        <button class="text-xs font-semibold text-brand-700">Sync again</button></form>
+      {% endif %}
+    {% endcall %}
+
+    {% call ui.card('Team') %}
+      {% if not lead.with_team %}
+      <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}" class="mb-3"><input type="hidden" name="action" value="take">
+        <button class="w-full rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">Take the chat (the bot goes silent)</button></form>
+      {% endif %}
+      <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}"><input type="hidden" name="action" value="notes">
+        <textarea name="notes" rows="4" placeholder="Notes for the team" class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm">{{ lead.notes or '' }}</textarea>
+        <button class="mt-2 rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white">Save notes</button></form>
+    {% endcall %}
+  </div>
+</div>
+{% endblock %}

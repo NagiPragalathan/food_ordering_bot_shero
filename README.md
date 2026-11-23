@@ -110,6 +110,7 @@ app/
 ├── static/brand/   Shero logo and favicon
 ├── static/css/     the pages' built stylesheets (from tailwind/, see below)
 ├── api/routes/     webhooks, payment redirect, ops API, health
+├── sft/            Shero Food Training's WhatsApp journey (docs/sft-bot.md)
 └── workers/        scheduled jobs
 alembic/            migrations
 tailwind/           brand colours + Tailwind configs that build static/css
@@ -149,6 +150,12 @@ tests/              287 tests
 ### Automatic kitchen allocation
 
 Incoming orders select the nearest active, serviceable kitchen with bookable slot capacity. See the [setup and usage guide](docs/automatic-kitchen-allocation.md).
+
+### Shero Food Training (SFT)
+
+A separate WhatsApp journey for the $99 course: name, goal, brochure, payment,
+questions handed to the team, follow-ups and Zoho tags. Off until switched on
+at `/admin/sft` (not in the menu yet). See [docs/sft-bot.md](docs/sft-bot.md).
 
 ### Loyalty rewards
 

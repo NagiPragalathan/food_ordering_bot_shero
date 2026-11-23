@@ -1,0 +1,73 @@
+{# Shared bits of the SFT pages. #}
+{% import "admin/_macros.html" as ui %}
+
+{% macro stage(c, key) %}
+  {% set name = c.STAGES.get(key, key) %}
+  {% if key == 'enrolled' %}{{ ui.badge(name, 'good') }}
+  {% elif key == 'lost' %}{{ ui.badge(name, 'bad') }}
+  {% elif key == 'payment_pending' %}{{ ui.badge(name, 'warn') }}
+  {% elif key == 'nurture' %}{{ ui.badge(name) }}
+  {% else %}{{ ui.badge(name, 'info') }}{% endif %}
+{% endmacro %}
+
+{% macro flags(lead) %}
+  {% if lead.with_team %}{{ ui.badge('With the team', 'warn') }}{% endif %}
+  {% if lead.needs_attention %}{{ ui.badge('High priority' if lead.attention_priority == 'high' else 'Needs the team', 'bad' if lead.attention_priority == 'high' else 'warn') }}{% endif %}
+  {% if lead.test_payment %}{{ ui.badge('Test payment') }}{% endif %}
+  {% if lead.opted_out %}{{ ui.badge('Opted out') }}{% endif %}
+{% endmacro %}
+
+{% macro field(label, name, value, hint=None, type='text', placeholder='') %}
+<label class="block">
+  <span class="text-xs font-medium text-stone-600">{{ label }}</span>
+  <input type="{{ type }}" name="{{ name }}" value="{{ value }}" placeholder="{{ placeholder }}"
+         class="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+  {% if hint %}<span class="mt-1 block text-[11px] text-stone-500">{{ hint }}</span>{% endif %}
+</label>
+{% endmacro %}
+
+{% macro area(label, name, value, hint=None, rows=3) %}
+<label class="block">
+  <span class="text-xs font-medium text-stone-600">{{ label }}</span>
+  <textarea name="{{ name }}" rows="{{ rows }}"
+            class="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">{{ value }}</textarea>
+  {% if hint %}<span class="mt-1 block text-[11px] text-stone-500">{{ hint }}</span>{% endif %}
+</label>
+{% endmacro %}
+
+{% macro check(label, name, on, hint=None) %}
+<label class="flex items-start gap-2.5">
+  <input type="checkbox" name="{{ name }}" {% if on %}checked{% endif %}
+         class="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+  <span><span class="text-sm text-stone-800">{{ label }}</span>
+  {% if hint %}<span class="block text-[11px] text-stone-500">{{ hint }}</span>{% endif %}</span>
+</label>
+{% endmacro %}
+
+{# One chat bubble: theirs on the left, the bot's on the right. #}
+{% macro bubble(e, local) %}
+{% set mine = e.kind == 'inbound' %}
+<div class="flex {{ 'justify-start' if mine else 'justify-end' }}">
+  <div class="max-w-[85%] rounded-2xl px-3.5 py-2 text-sm shadow-sm
+    {% if mine %}rounded-bl-md bg-white ring-1 ring-stone-200
+    {% elif e.kind in ('send_failed', 'not_sent') %}rounded-br-md bg-red-50 text-red-800 ring-1 ring-red-200
+    {% else %}rounded-br-md bg-[#DCF8C6] text-stone-900{% endif %}">
+    {% set data = e.data or {} %}
+    {% if data.buttons or data.link %}
+      <div class="whitespace-pre-line break-words">{{ e.detail.split('  [')[0] | whatsapp }}</div>
+      {% if data.link %}
+        <a href="{{ data.link }}" target="_blank" rel="noopener"
+           class="mt-2 block rounded-lg bg-white/70 px-3 py-1.5 text-center text-xs font-semibold text-sky-700 ring-1 ring-stone-200">↗ {{ data.label }}</a>
+      {% endif %}
+      {% if data.buttons %}
+        <div class="mt-2 flex flex-wrap gap-1">
+          {% for b in data.buttons %}<span class="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-medium text-sky-700 ring-1 ring-stone-200">{{ b[1] }}</span>{% endfor %}
+        </div>
+      {% endif %}
+    {% else %}
+      <div class="whitespace-pre-line break-words">{{ e.detail | whatsapp }}</div>
+    {% endif %}
+    <div class="mt-1 text-right text-[10px] text-stone-400">{{ local(e.at) }}</div>
+  </div>
+</div>
+{% endmacro %}

@@ -150,6 +150,16 @@ def cta_url_message(body: str, *, url: str, display_text: str,
     return {"type": "interactive", "interactive": interactive}
 
 
+def document_message(url: str, *, filename: str, caption: str | None = None) -> dict:
+    """A document (a PDF) by its public link, in Meta's shape."""
+    if not url:
+        raise ValueError("a document message needs a url")
+    document: dict = {"link": url, "filename": filename}
+    if caption:
+        document["caption"] = caption
+    return {"type": "document", "document": document}
+
+
 def location_request_message(body: str) -> dict:
     """Native "share your location" prompt (spec steps 6a and 9).
 

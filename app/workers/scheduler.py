@@ -97,6 +97,18 @@ def start_scheduler() -> AsyncIOScheduler:
         id="crm_outbox", only={"dst"}, max_instances=1, coalesce=True,
         misfire_grace_time=120,
     )
+    # Shero Food Training (app/sft/): its follow-ups and team tasks, and its
+    # leads to Zoho. Shero US only; both do nothing while SFT is off.
+    add(
+        jobs.send_sft_nudges, IntervalTrigger(minutes=5),
+        id="sft_nudges", only={"us"}, max_instances=1, coalesce=True,
+        misfire_grace_time=300,
+    )
+    add(
+        jobs.sync_sft_crm, IntervalTrigger(minutes=1),
+        id="sft_crm", only={"us"}, max_instances=1, coalesce=True,
+        misfire_grace_time=120,
+    )
     # Slots only need topping up occasionally; 03:00 UTC is outside service
     # hours for the US east-coast outlets in the spec.
     add(

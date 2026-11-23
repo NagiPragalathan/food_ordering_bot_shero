@@ -10,6 +10,10 @@ route, only this file changes - the bot engine talks in terms of
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from app.core.config import settings
 from app.core.exceptions import IntegrationError
 from app.core.logging import get_logger
@@ -18,6 +22,26 @@ from app.integrations.gallabox import messages as m
 from app.integrations.gallabox.templates import TemplateSpec, render
 
 log = get_logger(__name__)
+
+# The channel (WhatsApp number) to send from instead of the business's own,
+# for the rest of this task: Shero Food Training may have a number of its
+# own in the same Gallabox account (app/sft/sending.py).
+_channel: ContextVar[str | None] = ContextVar("gallabox_channel", default=None)
+
+
+def channel_id() -> str:
+    """The channel sends go out on: an override, or the business's own."""
+    return _channel.get() or settings.gallabox_channel_id
+
+
+@contextmanager
+def use_channel(channel: str | None) -> Iterator[None]:
+    """Send from `channel` inside this block (None or "": the business's own)."""
+    token = _channel.set(channel or None)
+    try:
+        yield
+    finally:
+        _channel.reset(token)
 
 
 class GallaboxClient(ApiClient):
@@ -36,7 +60,7 @@ class GallaboxClient(ApiClient):
     # -- core send ------------------------------------------------------------
     async def _send(self, to: str, whatsapp_block: dict, *, name: str | None = None) -> dict:
         payload = {
-            "channelId": settings.gallabox_channel_id,
+            "channelId": channel_id(),
             "channelType": "whatsapp",
             "recipient": {"phone": normalise_phone(to), **({"name": name} if name else {})},
             "whatsapp": whatsapp_block,
@@ -67,6 +91,14 @@ class GallaboxClient(ApiClient):
         return await self._send(to, m.cta_url_message(
             body, url=url, display_text=display_text,
             header=header, footer=footer))
+
+    async def send_document(self, to: str, *, url: str, filename: str,
+                            caption: str | None = None) -> dict:
+        """A file (the SFT brochure PDF) the customer taps to open.
+
+        WhatsApp fetches `url` itself when it delivers the message, so it
+        must be public."""
+        return await self._send(to, m.document_message(url, filename=filename, caption=caption))
 
     async def request_location(self, to: str, body: str) -> dict:
         return await self._send(to, m.location_request_message(body))
@@ -122,7 +154,7 @@ class GallaboxClient(ApiClient):
         (a bot-flow "handoff" node, say), swap the call here.
         """
         payload = {
-            "channelId": settings.gallabox_channel_id,
+            "channelId": channel_id(),
             "phone": normalise_phone(to),
             "assignedTo": None,      # null -> unassigned team inbox
             "botEnabled": False,     # stop the bot replying over the agent

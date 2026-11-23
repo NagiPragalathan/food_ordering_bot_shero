@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<!--
+  Shero Food Training (SFT) brochure, USA. The PDF the WhatsApp bot sends
+  (app/static/sft/shero-food-training-brochure.pdf) is printed from this page:
+
+    chrome --headless=new --no-pdf-header-footer --print-to-pdf=<out.pdf> brochure.html
+
+  Every fact here matches app/sft/content.py (the bot's FAQ answers): change both together.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shero Food Training (SFT) | Brochure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 0; }
+  :root {
+    --teal: #029B99; --teal-600: #028582; --teal-700: #026B69; --teal-800: #03524F; --teal-900: #043A38;
+    --teal-50: #E6F5F5; --teal-100: #C4E9E8;
+    --red: #C7010A; --red-50: #FDECEC;
+    --ink: #0D1F1E; --ink-700: #25403F; --muted: #5B706F;
+    --mist: #EFF6F5; --mist-200: #DCE9E8; --paper: #FFFFFF; --cream: #FBF7F1;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #888; }
+  body { font-family: Inter, "Segoe UI", system-ui, sans-serif; color: var(--ink); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page { width: 210mm; height: 297mm; position: relative; overflow: hidden; background: var(--paper); page-break-after: always; break-after: page; }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .pad { padding: 18mm 17mm 0 17mm; }
+  h1, h2, h3 { font-family: Fraunces, Georgia, serif; letter-spacing: -0.01em; }
+  .eyebrow { font-size: 8.5pt; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--teal-600); }
+  .lede { font-size: 11pt; line-height: 1.55; color: var(--muted); }
+  .rule { height: 3px; width: 42px; background: var(--red); border-radius: 2px; margin: 4mm 0 5mm; }
+
+  /* page chrome */
+  .topbar { position: absolute; top: 0; left: 0; right: 0; height: 5mm; background: linear-gradient(90deg, var(--red) 0 16%, var(--teal) 16% 100%); }
+  .foot { position: absolute; left: 17mm; right: 17mm; bottom: 10mm; display: flex; align-items: center; gap: 3mm; padding-top: 3mm; border-top: 1px solid var(--mist-200); font-size: 8pt; color: var(--muted); }
+  .foot img { width: 8mm; height: 8mm; border-radius: 2mm; }
+  .foot b { color: var(--teal-800); letter-spacing: 0.06em; text-transform: uppercase; font-size: 7.5pt; }
+  .foot .num { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  /* ---------------- cover ---------------- */
+  .cover { background: radial-gradient(120% 80% at 85% 10%, #046a67 0%, var(--teal-900) 55%, #022725 100%); color: #fff; }
+  .cover .rings { position: absolute; right: -60mm; top: -40mm; width: 190mm; height: 190mm; border-radius: 50%; border: 1px solid rgba(255,255,255,.08); box-shadow: 0 0 0 18mm rgba(255,255,255,.025), 0 0 0 36mm rgba(255,255,255,.02); }
+  .cover .dot { position: absolute; right: 30mm; top: 34mm; width: 9mm; height: 9mm; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 4mm rgba(199,1,10,.12); }
+  .cover .logo { width: 30mm; height: 30mm; border-radius: 6mm; box-shadow: 0 6mm 14mm rgba(0,0,0,.25); }
+  .cover .eyebrow { color: var(--teal-100); margin-top: 14mm; }
+  .cover h1 { font-size: 40pt; line-height: 1.04; margin-top: 5mm; font-weight: 700; }
+  .cover h1 em { font-style: normal; color: #7FE0DD; }
+  .cover .sub { margin-top: 7mm; font-size: 12.5pt; line-height: 1.55; color: rgba(255,255,255,.82); max-width: 140mm; }
+  .price { flex-shrink: 0; white-space: nowrap; display: inline-flex; align-items: center; gap: 5mm; margin-top: 11mm; padding: 4.5mm 7mm 4.5mm 6mm; border-radius: 5mm; background: var(--red); box-shadow: 0 5mm 12mm rgba(199,1,10,.28); }
+  .price .amount { font-family: Fraunces, Georgia, serif; font-size: 34pt; font-weight: 700; line-height: 1; }
+  .price .label { font-size: 8.5pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; line-height: 1.45; }
+  .stats { position: absolute; left: 17mm; right: 17mm; bottom: 46mm; display: grid; grid-template-columns: repeat(4, 1fr); gap: 3.5mm; }
+  .stat { padding: 4.5mm 4mm; border-radius: 4mm; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); }
+  .stat .n { font-family: Fraunces, Georgia, serif; font-size: 22pt; font-weight: 700; line-height: 1; }
+  .stat .t { margin-top: 1.5mm; font-size: 8.5pt; color: rgba(255,255,255,.75); line-height: 1.35; }
+  .glance { position: absolute; left: 17mm; right: 17mm; bottom: 86mm; }
+  .glance .title { font-size: 8pt; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--teal-100); margin-bottom: 3mm; }
+  .glance .row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.5mm; }
+  .glance .d { padding: 2.6mm 3mm; border-left: 2px solid #7FE0DD; background: rgba(255,255,255,.04); border-radius: 0 2.5mm 2.5mm 0; }
+  .glance .d small { display: block; font-size: 6.8pt; font-weight: 700; letter-spacing: .14em; color: #7FE0DD; }
+  .glance .d span { display: block; margin-top: .8mm; font-size: 8.6pt; line-height: 1.35; color: #fff; }
+  .cover .tagline { position: absolute; left: 17mm; right: 17mm; bottom: 27mm; font-size: 10.5pt; color: rgba(255,255,255,.88); line-height: 1.5; }
+  .cover .for { position: absolute; left: 17mm; right: 17mm; bottom: 13mm; padding-top: 4mm; border-top: 1px solid rgba(255,255,255,.15); font-size: 9pt; color: rgba(255,255,255,.7); }
+  .cover .for b { color: #fff; }
+
+  /* ---------------- page 2 ---------------- */
+  h2 { font-size: 25pt; line-height: 1.12; color: var(--teal-900); }
+  .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; margin-top: 7mm; }
+  .pillar { padding: 5mm 4.5mm; border-radius: 4mm; background: var(--mist); border: 1px solid var(--mist-200); }
+  .pillar .ico { width: 10mm; height: 10mm; border-radius: 3mm; background: var(--teal); display: flex; align-items: center; justify-content: center; }
+  .pillar .ico svg { width: 5.5mm; height: 5.5mm; }
+  .pillar h3 { margin-top: 3.5mm; font-size: 12pt; color: var(--teal-900); }
+  .pillar p { margin-top: 1.8mm; font-size: 9pt; line-height: 1.5; color: var(--ink-700); }
+  .two { display: grid; grid-template-columns: 1.25fr 1fr; gap: 6mm; margin-top: 8mm; }
+  h4 { font-size: 10.5pt; font-weight: 700; color: var(--teal-800); margin-bottom: 3mm; }
+  .checks { list-style: none; }
+  .checks li { position: relative; padding-left: 7mm; margin-bottom: 3mm; font-size: 9.5pt; line-height: 1.5; color: var(--ink-700); }
+  .checks li::before { content: ""; position: absolute; left: 0; top: 1.1mm; width: 4.4mm; height: 4.4mm; border-radius: 50%; background: var(--teal) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center/70% no-repeat; }
+  .checks b { color: var(--ink); }
+  .who { display: grid; gap: 3mm; }
+  .who .card { padding: 4.5mm; border-radius: 4mm; border: 1px solid var(--mist-200); }
+  .who .card h5 { font-size: 10pt; color: var(--teal-900); }
+  .who .card p { margin-top: 1.2mm; font-size: 8.8pt; line-height: 1.5; color: var(--muted); }
+  .note { margin-top: 8mm; padding: 5mm 6mm; border-radius: 4mm; background: var(--cream); border-left: 1.4mm solid var(--red); }
+  .note b { display: block; font-family: Fraunces, Georgia, serif; font-size: 12pt; color: var(--ink); }
+  .note p { margin-top: 1.5mm; font-size: 9.2pt; line-height: 1.55; color: var(--ink-700); }
+
+  /* ---------------- page 3: the five days ---------------- */
+  .days { margin-top: 6mm; display: grid; gap: 3.4mm; }
+  .day { display: grid; grid-template-columns: 20mm 1fr 46mm; gap: 4mm; align-items: stretch; padding: 4mm; border-radius: 4mm; border: 1px solid var(--mist-200); background: #fff; }
+  .day .badge { border-radius: 3mm; background: var(--teal-900); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .day .badge small { font-size: 6.8pt; letter-spacing: .18em; font-weight: 700; color: var(--teal-100); }
+  .day .badge span { font-family: Fraunces, Georgia, serif; font-size: 22pt; font-weight: 700; line-height: 1; }
+  .day h3 { font-size: 12pt; color: var(--teal-900); }
+  .day ul { list-style: none; margin-top: 1.8mm; }
+  .day li { display: flex; justify-content: space-between; gap: 3mm; font-size: 9pt; line-height: 1.45; color: var(--ink-700); padding: .6mm 0; border-bottom: 1px dashed var(--mist-200); }
+  .day li:last-child { border-bottom: 0; }
+  .day li .min { white-space: nowrap; color: var(--teal-700); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .day .quiz { border-radius: 3mm; background: var(--mist); padding: 2.6mm 3mm; display: flex; flex-direction: column; justify-content: center; gap: 2mm; }
+  .day .quiz div { font-size: 8pt; line-height: 1.35; color: var(--ink-700); }
+  .day .quiz small { display: block; font-size: 6.6pt; font-weight: 700; letter-spacing: .12em; color: var(--teal-600); text-transform: uppercase; }
+  .totals { margin-top: 5mm; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3.5mm; }
+  .totals div { padding: 3.5mm 4mm; border-radius: 3mm; background: var(--teal-50); font-size: 8.8pt; color: var(--teal-900); }
+  .totals b { display: block; font-family: Fraunces, Georgia, serif; font-size: 15pt; }
+  .fine { margin-top: 3.5mm; font-size: 8pt; color: var(--muted); line-height: 1.5; }
+
+  /* ---------------- page 4: to certification ---------------- */
+  .steps { margin-top: 9mm; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; counter-reset: step; }
+  .step { position: relative; padding: 6mm 5mm 5.5mm; border-radius: 4mm; background: var(--mist); border: 1px solid var(--mist-200); min-height: 38mm; }
+  .step .num { width: 8mm; height: 8mm; border-radius: 50%; background: var(--teal); color: #fff; font-size: 9.5pt; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .step.last { background: var(--teal-900); border-color: var(--teal-900); }
+  .step.last .num { background: var(--red); }
+  .step.last h3, .step.last p { color: #fff; }
+  .step h3 { margin-top: 2.8mm; font-size: 11.5pt; color: var(--teal-900); }
+  .step p { margin-top: 1.2mm; font-size: 8.8pt; line-height: 1.45; color: var(--ink-700); }
+  .step .arrow { position: absolute; right: -3.6mm; top: 50%; width: 3mm; height: 3mm; transform: translateY(-50%) rotate(45deg); border-top: 1.6px solid var(--teal); border-right: 1.6px solid var(--teal); z-index: 2; }
+  .cuisines { display: flex; gap: 3mm; margin: 3mm 0 2.5mm; }
+  .cuisines span { padding: 2mm 4.5mm; border-radius: 99px; background: var(--red-50); color: var(--red); font-weight: 700; font-size: 9.5pt; }
+
+  .band { position: absolute; left: 17mm; right: 17mm; bottom: 24mm; display: flex; align-items: center; gap: 4mm; padding: 5mm 6mm; border-radius: 4mm; background: var(--teal-50); }
+  .band .ico { flex-shrink: 0; width: 9mm; height: 9mm; border-radius: 50%; background: var(--teal); display: flex; align-items: center; justify-content: center; }
+  .band .ico svg { width: 5mm; height: 5mm; }
+  .band p { font-size: 9.6pt; line-height: 1.5; color: var(--teal-900); }
+
+  /* ---------------- page 5: questions, next step ---------------- */
+  .faq { margin-top: 5mm; display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+  .faq .q { padding: 4.2mm 4.6mm; border-radius: 4mm; border: 1px solid var(--mist-200); }
+  .faq h3 { font-size: 11pt; color: var(--teal-900); line-height: 1.3; }
+  .faq p { margin-top: 2mm; font-size: 9pt; line-height: 1.5; color: var(--ink-700); }
+  .faq p b { color: var(--ink); }
+  .cta { position: absolute; left: 17mm; right: 17mm; bottom: 22mm; padding: 8mm 9mm 7mm; border-radius: 6mm; color: #fff; overflow: hidden;
+         background: radial-gradient(120% 120% at 100% 0%, #046a67 0%, var(--teal-900) 60%, #022725 100%); }
+  .cta .eyebrow { color: var(--teal-100); }
+  .cta h2 { color: #fff; font-size: 20pt; margin-top: 2.5mm; }
+  .cta .row { display: flex; align-items: center; gap: 7mm; margin-top: 5mm; }
+  .cta .price { margin-top: 0; }
+  .cta .how { font-size: 10.5pt; line-height: 1.55; color: rgba(255,255,255,.88); }
+  .cta .how b { color: #fff; }
+  .wa { display: inline-flex; align-items: center; gap: 2mm; margin-top: 3mm; padding: 2.4mm 4mm; border-radius: 99px; background: #25D366; color: #fff; font-weight: 700; font-size: 9.5pt; }
+  .wa svg { width: 4.6mm; height: 4.6mm; }
+  .after { margin-top: 6mm; }
+  .after .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; }
+  .after .s { display: flex; gap: 2.6mm; align-items: flex-start; padding: 3.4mm 3.6mm; border-radius: 4mm; background: var(--mist); }
+  .after .s .n { flex-shrink: 0; width: 7mm; height: 7mm; border-radius: 50%; background: var(--teal); color: #fff; font-size: 9pt; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .after .s b { display: block; font-size: 9.6pt; color: var(--teal-900); }
+  .after .s span { display: block; margin-top: .6mm; font-size: 8.3pt; line-height: 1.45; color: var(--ink-700); }
+  .cta .small { margin-top: 5mm; padding-top: 3.5mm; border-top: 1px solid rgba(255,255,255,.15); font-size: 8pt; color: rgba(255,255,255,.65); line-height: 1.5; }
+  .cta .dot { position: absolute; right: 12mm; top: 10mm; width: 6mm; height: 6mm; border-radius: 50%; background: var(--red); }
+</style>
+</head>
+<body>
+
+<!-- ============================ 1. Cover ============================ -->
+<section class="page cover">
+  <div class="rings"></div><div class="dot"></div>
+  <div class="pad">
+    <img class="logo" src="shero-logo.png" alt="Shero Home Food">
+    <div class="eyebrow">Shero Food Training (SFT) · USA</div>
+    <h1>Learn in 5 days.<br>Cook to <em>Shero standards.</em><br>Get certified.</h1>
+    <p class="sub">A practical, self-paced learning path for people who want to build their South Indian food skills and explore a structured kitchen-partner pathway.</p>
+    <div class="price"><div class="amount">$99</div><div class="label">One-time<br>course fee</div></div>
+  </div>
+  <div class="glance">
+    <div class="title">Your five days at a glance</div>
+    <div class="row">
+      <div class="d"><small>DAY 1</small><span>Meet Shero Food Technology</span></div>
+      <div class="d"><small>DAY 2</small><span>Understand the process</span></div>
+      <div class="d"><small>DAY 3</small><span>Ingredients and base preparation</span></div>
+      <div class="d"><small>DAY 4</small><span>Handle and hand off food carefully</span></div>
+      <div class="d"><small>DAY 5</small><span>Prepare for order execution</span></div>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n">5</div><div class="t">days, at your own pace</div></div>
+    <div class="stat"><div class="n">10</div><div class="t">short videos<br>(52 minutes in all)</div></div>
+    <div class="stat"><div class="n">10</div><div class="t">quizzes<br>to check your learning</div></div>
+    <div class="stat"><div class="n">3</div><div class="t">regional cuisines<br>Kerala · Andhra · Chettinad</div></div>
+  </div>
+  <p class="tagline">Start with the learning. Complete the cooking and approval steps. Earn certification when approved.</p>
+  <p class="for"><b>For aspiring food entrepreneurs and existing home cooks in the USA.</b> Learn on your own schedule using a laptop or desktop.</p>
+</section>
+
+<!-- ============================ 2. Why SFT ============================ -->
+<section class="page">
+  <div class="topbar"></div>
+  <div class="pad">
+    <div class="eyebrow">Why SFT</div>
+    <h2>Recipes matter.<br>A repeatable process matters too.</h2>
+    <div class="rule"></div>
+    <p class="lede">Knowing how to cook is one part of preparing food for a customer. Ingredients, base preparation, hygiene, packing, labels, order execution and customer handoff all need a clear process. <b style="color:var(--teal-800)">SFT gives you a structured place to learn those processes.</b></p>
+
+    <div class="pillars">
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.55-2.28A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M4 6h9a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z"/></svg></div>
+        <h3>Learn the method</h3>
+        <p>Short video lessons introduce Shero Food Technology, kitchen terminology, ingredients, storage and base masala preparation.</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg></div>
+        <h3>Understand the standard</h3>
+        <p>Explore hygiene, product protection, labeling, allergens, customer handoff and the daily operating rhythm.</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3l2-3h6l2 3h3a1 1 0 011 1v11a1 1 0 01-1 1H4a1 1 0 01-1-1V8a1 1 0 011-1z"/><circle cx="12" cy="13" r="3.5"/></svg></div>
+        <h3>Show your work</h3>
+        <p>After the course, complete the required preparation steps and submit product photos for review and approval.</p>
+      </div>
+    </div>
+
+    <div class="two">
+      <div>
+        <h4>What your $99 covers</h4>
+        <ul class="checks">
+          <li><b>A five-day guided sequence:</b> ten video topics arranged in a clear learning progression.</li>
+          <li><b>Ten knowledge checks:</b> one mid-day quiz and one end-of-day quiz each day.</li>
+          <li><b>Food operations topics:</b> ingredients, storage, base preparation, hygiene, packing, labels, allergens, order execution and customer experience.</li>
+          <li><b>A defined next step:</b> complete the training, follow the assigned recipe and submission process, and enter the approval stage.</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Who it's for</h4>
+        <div class="who">
+          <div class="card"><h5>Aspiring food entrepreneurs</h5><p>Learn the process behind preparing food for customers, before you take your next step.</p></div>
+          <div class="card"><h5>Existing home cooks</h5><p>Build your South Indian food skills and cook to a clear, repeatable standard.</p></div>
+          <div class="card"><h5>Anywhere in the USA</h5><p>Self-paced and online, on your own schedule, using a laptop or desktop.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>The value is structure, not a promise of earnings.</b>
+      <p>SFT helps you understand Shero's methods and the steps required for product preparation and approval. It does not guarantee income, orders or partner acceptance.</p>
+    </div>
+  </div>
+  <div class="foot"><img src="shero-logo.png" alt=""><b>Shero Food Training</b><span class="num">02 / 05</span></div>
+</section>
+
+<!-- ============================ 3. Five days ============================ -->
+<section class="page">
+  <div class="topbar"></div>
+  <div class="pad">
+    <div class="eyebrow">The course</div>
+    <h2>A clear five-day learning path</h2>
+    <div class="rule"></div>
+    <p class="lede">Short lessons, daily milestones and a final practical submission pathway. The video durations below match the course modules.</p>
+
+    <div class="days">
+      <div class="day">
+        <div class="badge"><small>DAY</small><span>1</span></div>
+        <div><h3>Meet Shero Food Technology</h3><ul>
+          <li><span>SFT (US)</span><span class="min">15 min</span></li>
+          <li><span>Reflection</span><span class="min">1 min</span></li></ul></div>
+        <div class="quiz"><div><small>Mid-day quiz</small>Ready for a Quick Check?</div><div><small>End-of-day quiz</small>Ready for Your First Milestone Challenge?</div></div>
+      </div>
+      <div class="day">
+        <div class="badge"><small>DAY</small><span>2</span></div>
+        <div><h3>Understand the process</h3><ul>
+          <li><span>Shero Food Technology</span><span class="min">6 min</span></li>
+          <li><span>Terminology</span><span class="min">2 min</span></li></ul></div>
+        <div class="quiz"><div><small>Mid-day quiz</small>Ready to Test Your Knowledge?</div><div><small>End-of-day quiz</small>Another Achievement Awaits!</div></div>
+      </div>
+      <div class="day">
+        <div class="badge"><small>DAY</small><span>3</span></div>
+        <div><h3>Ingredients and base preparation</h3><ul>
+          <li><span>Ingredients, Vegetables, Storage</span><span class="min">4 min</span></li>
+          <li><span>HDM-2: Base Masala Preparation</span><span class="min">5 min</span></li></ul></div>
+        <div class="quiz"><div><small>Mid-day quiz</small>Ready for Your Next Challenge?</div><div><small>End-of-day quiz</small>Halfway Milestone Check!</div></div>
+      </div>
+      <div class="day">
+        <div class="badge"><small>DAY</small><span>4</span></div>
+        <div><h3>Handle and hand off food carefully</h3><ul>
+          <li><span>Hygiene, Packing &amp; Product Protection</span><span class="min">7 min</span></li>
+          <li><span>Labels, Allergens &amp; the Customer Handoff</span><span class="min">2 min</span></li></ul></div>
+        <div class="quiz"><div><small>Mid-day quiz</small>Ready to Show What You Know?</div><div><small>End-of-day quiz</small>One More Step Towards Completion!</div></div>
+      </div>
+      <div class="day">
+        <div class="badge"><small>DAY</small><span>5</span></div>
+        <div><h3>Prepare for order execution</h3><ul>
+          <li><span>Order Execution, Customer Experience &amp; Certification</span><span class="min">4 min</span></li>
+          <li><span>The Shero Daily Operating Rhythm</span><span class="min">6 min</span></li></ul></div>
+        <div class="quiz"><div><small>Mid-day quiz</small>Ready for the Final Learning Check?</div><div><small>End-of-day quiz</small>Your Final Challenge Begins!</div></div>
+      </div>
+    </div>
+
+    <div class="totals">
+      <div><b>52 minutes</b>of video, in ten short lessons</div>
+      <div><b>10 quizzes</b>5 minutes each, two a day</div>
+      <div><b>Self-paced</b>online, on a laptop or desktop</div>
+    </div>
+    <p class="fine">Complete the items in the order set by the learning platform.</p>
+  </div>
+  <div class="foot"><img src="shero-logo.png" alt=""><b>Shero Food Training</b><span class="num">03 / 05</span></div>
+</section>
+
+<!-- ============================ 4. Certification ============================ -->
+<section class="page">
+  <div class="topbar"></div>
+  <div class="pad">
+    <div class="eyebrow">After the lessons</div>
+    <h2>From learning to certification</h2>
+    <div class="rule"></div>
+    <p class="lede">Certification is connected to the required learning and product-approval process, not simply to paying the course fee.</p>
+
+    <div class="steps">
+      <div class="step"><div class="num">1</div><h3>Learn</h3><p>Complete the five-day modules and quizzes.</p><div class="arrow"></div></div>
+      <div class="step"><div class="num">2</div><h3>Prepare bases</h3><p>Make the assigned base preparations and submit them for approval.</p><div class="arrow"></div></div>
+      <div class="step"><div class="num">3</div><h3>Cook</h3><p>Use the standardized recipe for your assigned products.</p></div>
+      <div class="step"><div class="num">4</div><h3>Upload</h3><p>Submit product photos through the app.</p><div class="arrow"></div></div>
+      <div class="step"><div class="num">5</div><h3>Review</h3><p>Shero checks the required submissions.</p><div class="arrow"></div></div>
+      <div class="step last"><div class="num">6</div><h3>Certificate</h3><p>Issued once the required approval is granted.</p></div>
+    </div>
+
+    <div class="two" style="grid-template-columns: 1.3fr 1fr; margin-top: 12mm;">
+      <div>
+        <h4>What you will work toward</h4>
+        <ul class="checks">
+          <li>Understand the preparation and operating topics taught in the course.</li>
+          <li>Follow the assigned standardized recipe, including gram and spoon measures where provided.</li>
+          <li>Prepare the required base items (such as OTM base, Toor Dal base or HDM-2 base masala, as assigned) and submit them through the app for approval before cooking finished products.</li>
+          <li>Cook the products assigned for your selected cuisine and upload product photos through the app for review.</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Cuisine pathways</h4>
+        <div class="cuisines"><span>Kerala</span><span>Andhra</span><span>Chettinad</span></div>
+        <p class="fine" style="font-size:8.8pt;color:var(--ink-700)">The current program setup lists these three cuisine pathways, with five products per cuisine. Each partner is assigned one recipe after completing all modules; confirm the exact assignment in the partner workflow.</p>
+        <div class="note" style="margin-top:5mm">
+          <b>Is the certificate automatic?</b>
+          <p>No. It is issued after the required course and product-submission approval steps are completed.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="band">
+    <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+    <p><b>One step at a time.</b> Finish the lessons and quizzes in the order set by the learning platform, and have your base items approved before you cook finished products.</p>
+  </div>
+  <div class="foot"><img src="shero-logo.png" alt=""><b>Shero Food Training</b><span class="num">04 / 05</span></div>
+</section>
+
+<!-- ============================ 5. Questions, next step ============================ -->
+<section class="page">
+  <div class="topbar"></div>
+  <div class="pad">
+    <div class="eyebrow">Good to know</div>
+    <h2>Questions you may have</h2>
+    <div class="rule"></div>
+    <div class="faq">
+      <div class="q"><h3>Do I need to attend live classes?</h3><p>No. The course is self-paced and designed to be completed online using a laptop or desktop.</p></div>
+      <div class="q"><h3>Is the certificate automatic after payment?</h3><p>No. Certification is issued after the required course and product-submission approval steps are completed.</p></div>
+      <div class="q"><h3>Will I definitely become a Shero Kitchen Partner?</h3><p>No. Partner acceptance is separate and depends on Shero's applicable review, standards, eligibility and local requirements.</p></div>
+      <div class="q"><h3>Does the course guarantee income or orders?</h3><p>No. The course teaches Shero's process; it does not guarantee earnings, orders or business results.</p></div>
+    </div>
+    <div class="after">
+      <h4>After you enroll</h4>
+      <div class="row">
+        <div class="s"><div class="n">1</div><div><b>Pay securely</b><span>Tap the payment link in your WhatsApp chat for a secure checkout.</span></div></div>
+        <div class="s"><div class="n">2</div><div><b>Get your course access</b><span>Your confirmation and course access arrive in the same chat.</span></div></div>
+        <div class="s"><div class="n">3</div><div><b>Start Day 1</b><span>Work through the lessons and quizzes in order, at your own pace.</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cta">
+    <div class="dot"></div>
+    <div class="eyebrow">Your next step starts here</div>
+    <h2>Learn the process.<br>Practice the standard.<br>Submit for approval.</h2>
+    <div class="row">
+      <div class="price"><div class="amount">$99</div><div class="label">One-time<br>course fee</div></div>
+      <div class="how">
+        <b>Ready to enroll?</b> In your WhatsApp chat with Shero, tap <b>Yes, enroll me</b> for your secure checkout link. Have a question first? Tap <b>Ask a question</b> and our team will reply.
+        <div><span class="wa"><svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2a10 10 0 00-8.66 15l-1.3 4.76 4.88-1.28A10 10 0 1012 2zm0 18.2a8.2 8.2 0 01-4.18-1.15l-.3-.18-2.9.76.78-2.83-.2-.3A8.2 8.2 0 1112 20.2zm4.5-6.14c-.25-.12-1.46-.72-1.69-.8-.23-.08-.39-.12-.56.12-.16.25-.64.8-.78.97-.14.16-.29.18-.54.06a6.7 6.7 0 01-3.33-2.91c-.25-.43.25-.4.72-1.34.08-.16.04-.3-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.4-.41-.56-.42h-.47a.9.9 0 00-.66.31 2.76 2.76 0 00-.86 2.05 4.8 4.8 0 001 2.54 10.96 10.96 0 004.2 3.71c1.56.68 2.18.73 2.96.62.48-.07 1.46-.6 1.67-1.18.2-.58.2-1.07.14-1.18-.06-.1-.22-.16-.47-.28z"/></svg>Reply SFT on WhatsApp any time</span></div>
+      </div>
+    </div>
+    <p class="small">A clear course. A practical workflow. Certification after approval. This course makes no earnings, order-volume or guaranteed-partner claims.</p>
+  </div>
+  <div class="foot"><img src="shero-logo.png" alt=""><b>Shero Food Training</b><span class="num">05 / 05</span></div>
+</section>
+
+</body>
+</html>

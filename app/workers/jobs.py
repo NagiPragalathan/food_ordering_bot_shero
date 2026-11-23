@@ -198,6 +198,35 @@ async def send_crm_events() -> int:
     return counts["sent"]
 
 
+async def send_sft_nudges() -> int:
+    """Shero Food Training's follow-ups and team tasks (app/sft/nudges.py).
+    Shero US only; nothing while SFT is off."""
+    from app.sft import nudges as sft_nudges
+
+    if not tenants.current().is_default:
+        return 0
+    async with session_scope() as session:
+        try:
+            return await sft_nudges.run(session)
+        except Exception as exc:  # noqa: BLE001 - never kill the scheduler
+            log.error("sft_nudge_job_failed", error=str(exc))
+            return 0
+
+
+async def sync_sft_crm() -> int:
+    """Shero Food Training's leads to Zoho (app/sft/crm.py). Shero US only."""
+    from app.sft import crm as sft_crm
+
+    if not tenants.current().is_default:
+        return 0
+    async with session_scope() as session:
+        try:
+            return await sft_crm.run(session)
+        except Exception as exc:  # noqa: BLE001 - never kill the scheduler
+            log.error("sft_crm_job_failed", error=str(exc))
+            return 0
+
+
 async def refresh_settings() -> int:
     """Pick up settings saved through the admin dashboard elsewhere.
 
@@ -278,5 +307,7 @@ ALL_JOBS = {
     "slot_generation": generate_upcoming_slots,
     "menu_photos": store_menu_photos,
     "crm_outbox": send_crm_events,
+    "sft_nudges": send_sft_nudges,
+    "sft_crm": sync_sft_crm,
     "settings_refresh": refresh_settings,
 }

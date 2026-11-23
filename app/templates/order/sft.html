@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ title }} · Shero Food Training</title>
+  <link rel="stylesheet" href="{{ static_url('css/order.css') }}">
+  {% include "_brand.html" %}
+</head>
+<body class="flex min-h-screen items-center justify-center bg-mist-100 px-4 text-ink-900">
+  <div class="w-full max-w-sm rounded-2xl border border-mist-200 bg-white p-8 text-center shadow-card">
+    <img src="/static/brand/shero-logo-192.png" alt="Shero Home Food" width="64" height="64"
+         class="mx-auto h-16 w-16 rounded-xl">
+    <p class="mt-3 text-[11px] font-semibold uppercase tracking-widest text-brand-600">Shero Food Training</p>
+    <h1 class="mt-1 text-lg font-semibold">{{ title }}</h1>
+    <p class="mt-2 text-sm text-stone-600">{{ message }}</p>
+    {% if test_pay_url %}
+      <form method="post" action="{{ test_pay_url }}" class="mt-6">
+        <button type="submit"
+                class="flex w-full items-center justify-center rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white hover:bg-brand-700">
+          Pay {{ fee }} (test)
+        </button>
+      </form>
+    {% endif %}
+    {% if course_url %}
+      <a href="{{ course_url }}"
+         class="mt-6 flex w-full items-center justify-center rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white hover:bg-brand-700">
+        Open your course
+      </a>
+    {% endif %}
+  </div>
+</body>
+</html>

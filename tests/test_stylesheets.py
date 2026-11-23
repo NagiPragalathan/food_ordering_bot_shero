@@ -14,6 +14,7 @@ PAGES = {
     "order/index.html": "css/order.css",
     "order/location.html": "css/order.css",
     "order/expired.html": "css/order.css",
+    "order/sft.html": "css/order.css",
 }
 
 

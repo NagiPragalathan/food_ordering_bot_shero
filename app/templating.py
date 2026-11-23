@@ -8,6 +8,7 @@ their filters and globals.
 from __future__ import annotations
 
 import hashlib
+import re
 from functools import cache
 from pathlib import Path
 
@@ -34,3 +35,21 @@ def static_url(path: str) -> str:
 templates.env.globals["locale"] = locale
 templates.env.globals["tenant_settings"] = settings
 templates.env.globals["static_url"] = static_url
+
+
+def whatsapp(text: str | None):
+    """A WhatsApp message as the admin pages show it: *bold* and _italic_ as
+    WhatsApp draws them, everything else escaped."""
+    from markupsafe import Markup, escape
+
+    html = str(escape(text or ""))
+    html = BOLD.sub(r"<b>\1</b>", html)
+    html = ITALIC.sub(r"<i>\1</i>", html)
+    return Markup(html)
+
+
+BOLD = re.compile(r"\*([^*\n]+)\*")
+ITALIC = re.compile(r"(?<![\w/])_([^_\n]+)_(?!\w)")
+
+
+templates.env.filters["whatsapp"] = whatsapp

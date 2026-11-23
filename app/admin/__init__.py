@@ -2,6 +2,8 @@
 
 from fastapi import APIRouter
 
+from app.sft import admin as sft_admin
+
 from app.admin.routes import (auth, bot_replies, customers, dashboard, deliveries, feedback,
                                imports, kitchens, loyalty, menu, nudges, order_alerts, orders,
                                payouts, promotions, settings)
@@ -23,5 +25,7 @@ router.include_router(settings.router)
 router.include_router(order_alerts.router)
 router.include_router(nudges.router)
 router.include_router(feedback.router)
+# Shero Food Training: /admin/sft, not in the menu yet (app/sft/admin.py).
+router.include_router(sft_admin.router)
 
 __all__ = ["router"]

@@ -146,4 +146,6 @@ async def test_each_business_has_its_own_scheduled_jobs():
     others = {f"{t.key}_{name}" for t in tenants.enabled() if not t.is_default for name in us}
     # DST India's own CRM has one job more; Shero US's list is unchanged.
     own = {"dst_crm_outbox"} if tenants.DST in tenants.enabled() else set()
-    assert ids == us | others | own
+    # Shero Food Training (app/sft/) is Shero US's alone: no dst_ copies.
+    sft = {"sft_nudges", "sft_crm"}
+    assert ids == us | others | own | sft

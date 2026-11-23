@@ -9,6 +9,7 @@ Start here.
 | [credentials-checklist.md](credentials-checklist.md) | **Everything we need from you**, grouped by system, with where to find each value |
 | [loyalty-program.md](loyalty-program.md) | Earning points, repeat bonuses, tiers, redemption and every admin control |
 | [nudges.md](nudges.md) | WhatsApp nudges by stage, the No / Later / No response follow-ups, and who got what |
+| [sft-bot.md](sft-bot.md) | Shero Food Training: the course's WhatsApp journey, team hand-overs, follow-ups, Zoho tags, going live |
 | [kitchen-payouts.md](kitchen-payouts.md) | Splitting each order between its kitchen partner and Shero, and the orders with each side's amount |
 | [admin-dashboard.md](admin-dashboard.md) | Running the bot day to day: menu, import, orders, settings |
 | [dst-india.md](dst-india.md) | DST India, the second business: its own tab, database, Razorpay payments and own delivery staff; setting it up |

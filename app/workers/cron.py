@@ -5,9 +5,9 @@ nothing runs between requests, so Vercel Cron calls /cron/tick every minute
 and /cron/daily once a day (api/routes/cron.py), and this module decides
 which jobs are due on each call, keeping the same rhythm as the scheduler:
 
-    every minute     payment reminders, payment expiry
+    every minute     payment reminders, payment expiry, SFT leads to Zoho
     every 5 minutes  feedback requests, courier booking, kitchen alerts, nudges,
-                     menu photos still linked from the ERP
+                     menu photos still linked from the ERP, SFT follow-ups
     daily            delivery slot top-up
 
 A minute Vercel skips simply delays the 5-minute jobs to the next multiple
@@ -23,9 +23,9 @@ from app.workers import jobs
 
 log = get_logger(__name__)
 
-EVERY_MINUTE = ("payment_reminders", "payment_expiry")
+EVERY_MINUTE = ("payment_reminders", "payment_expiry", "sft_crm")
 EVERY_5_MINUTES = ("feedback_requests", "courier_dispatch", "kitchen_alerts", "nudges",
-                   "menu_photos")
+                   "menu_photos", "sft_nudges")
 DAILY = ("slot_generation",)
 
 

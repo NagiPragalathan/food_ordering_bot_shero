@@ -23,6 +23,7 @@ from app.schemas.inbound import parse_inbound
 from app.services import allowlist, reply_triggers, welcome_menu
 from app.services.conversation.engine import handle_event
 from app.services.nudges import delivery
+from app.sft import router as sft
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -65,6 +66,13 @@ async def gallabox_webhook(
 
     event = parse_inbound(body)
     event_name = request.headers.get("x-event-name") or str(body.get("event") or "")
+
+    # Shero Food Training (app/sft/) first: its own number, or a chat that
+    # asks for it on Shero US's. Off, or not SFT's: it changes nothing here.
+    if tenants.current().is_default and not delivery.is_status_event(event_name, body):
+        taken = await sft.route(session, event)
+        if taken is not None:
+            return taken
 
     # Which business's WhatsApp number it came in on (Shero US, DST India -
     # one Gallabox account, one webhook). Another team's number in the same

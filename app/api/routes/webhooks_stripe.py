@@ -53,6 +53,12 @@ async def stripe_webhook(
     if event_type not in HANDLED_EVENTS:
         return {"status": "ignored", "type": event_type}
 
+    # A Shero Food Training checkout (app/sft/payments.py), not an order.
+    from app.sft import payments as sft_payments
+
+    if sft_payments.is_sft(obj):
+        return await sft_payments.handle_stripe(session, event_type, obj)
+
     order = await _find_order(session, obj)
     if order is None:
         # Not ours, or a test event fired from the Stripe dashboard.
