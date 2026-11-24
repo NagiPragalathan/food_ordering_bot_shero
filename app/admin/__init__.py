@@ -25,7 +25,7 @@ router.include_router(settings.router)
 router.include_router(order_alerts.router)
 router.include_router(nudges.router)
 router.include_router(feedback.router)
-# Shero Food Training: /admin/sft, not in the menu yet (app/sft/admin.py).
+# Shero Food Training: /admin/sft, its own tab beside the businesses (app/sft/admin.py).
 router.include_router(sft_admin.router)
 
 __all__ = ["router"]

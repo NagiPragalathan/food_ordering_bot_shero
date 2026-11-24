@@ -23,7 +23,7 @@ team gets the leads who stall at a stage.
     analytics.py  the KPIs
     periods.py    the admin's date ranges
     views.py      each lead's flow and next nudge, for the admin
-    admin.py      /admin/sft (not in the dashboard menu yet)
+    admin.py      /admin/sft (the dashboard's Shero Food Training tab)
 
 Tables: sft_leads, sft_events, sft_offers (models/sft.py). See docs/sft-bot.md.
 """

@@ -1,20 +1,20 @@
-"""SFT's admin pages: /admin/sft (Shero US). Not in the dashboard's menu yet:
-open it by its address. One login with the rest of the dashboard; its own
-layout (admin/sft/base.html) with only SFT's sections.
+"""SFT's admin pages: /admin/sft (Shero US). The dashboard's top tabs open it:
+Shero US | DST India | Shero Food Training (admin/deps.py tenant_tabs), and the
+same tabs on its pages lead back. One login with the rest of the dashboard;
+its own layout (admin/sft/base.html) with only SFT's sections.
 
     Overview     the KPIs, the funnel and a daily chart for the chosen dates
     Leads        every lead: a list, or a board by stage; each lead's page
-    Payments     the enrollments paid, revenue, refunds, and who is waiting to pay
-    Customers    the students (everyone who paid) and their course access
+    Customers    everyone who paid: payments, revenue, refunds, receipts, who
+                 is waiting to pay, and each student's course access
     Nudges       the automated follow-ups: rules, who is in which flow, what was
                  sent, and the WhatsApp templates
     Offers       codes and launch prices for the course
     Bot replies  who SFT answers, what starts it, and everything it says
-    Journey      every message and button, stage by stage
     Test chat    walk the journey as a lead would, without WhatsApp
-    Settings     the course, the team's numbers, Zoho
+    Settings     the course, the brochure, the team's numbers, Zoho
 
-The Overview, Leads, Payments, Customers and Nudges take a date range
+The Overview, Leads, Customers and Nudges take a date range
 (app/sft/periods.py), kept as the sidebar moves between them.
 """
 

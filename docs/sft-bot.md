@@ -4,11 +4,10 @@ The $99 course's own WhatsApp journey, built beside the food ordering bot but
 kept separate from it. It has its own leads, follow-ups, team hand-overs and
 Zoho sync, and its own admin page at **`/admin/sft`**.
 
-That page is **not in the dashboard menu yet**: open it by its address (same
-login; signing in from the address brings you back to it). It has its own
-layout with only SFT's sections. To add it to the dashboard's menu later, add
-one link to the sidebar in `app/templates/admin/base.html` pointing at
-`url_for('admin_sft')`.
+Open it with the **Shero Food Training** tab at the top of the dashboard,
+beside **Shero US** and **DST India**. The same tabs are on its pages, so those
+two tabs take you back to the food dashboards. It uses the same login and has
+its own layout with only SFT's sections.
 
 SFT is **off** until it is switched on in **Bot replies** on that page. While
 it is off, nothing changes for anyone.

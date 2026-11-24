@@ -132,6 +132,20 @@
       <a href="{{ sign_out }}" class="rounded-lg px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10">Sign out</a>
     </div>
 
+    {# The dashboard's tabs (admin/deps.py tenant_tabs), here on Shero Food Training. #}
+    {% if tenant_tabs is defined and tenant_tabs | length > 1 %}
+    <div class="border-b border-stone-200 bg-white px-5 lg:px-8" data-business-tabs>
+      <nav class="-mb-px flex gap-1 overflow-x-auto" aria-label="Business">
+        {% for tab in tenant_tabs %}
+        <a href="{{ tab.url }}"
+           class="whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition
+                  {% if tab.active %}border-brand-600 text-brand-700{% else %}border-transparent text-stone-500 hover:border-stone-300 hover:text-stone-800{% endif %}"
+           {% if tab.active %}aria-current="page"{% endif %}>{{ tab.name }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+    {% endif %}
+
     <header class="sticky top-0 z-10 flex min-h-[4.5rem] flex-wrap items-center justify-between gap-3 border-b
                    border-stone-200/80 bg-stone-100 px-5 py-3 lg:px-8">
       <div>

@@ -105,10 +105,17 @@ def tenant_tabs(request: Request) -> list[dict[str, Any]]:
     parts = [p for p in inner.split("/") if p]
     inner = "/admin/" + (parts[1] if len(parts) > 1 and parts[0] == "admin" else "")
     outer = root[: len(root) - len(here.url_prefix)] if here.url_prefix else root
+    # Shero Food Training (app/sft/admin.py) is a tab of its own: Shero US's
+    # course bot, at /admin/sft. From it, a business tab opens its dashboard.
+    on_sft = inner == "/admin/sft"
+    if on_sft:
+        inner = "/admin/"
     tabs = []
     for tenant in tenants.enabled():
-        tabs.append({"key": tenant.key, "name": tenant.name, "active": tenant == here,
+        tabs.append({"key": tenant.key, "name": tenant.name, "active": tenant == here and not on_sft,
                      "url": f"{outer}{tenant.url_prefix}{inner}"})
+    tabs.append({"key": "sft", "name": "Shero Food Training", "active": on_sft,
+                 "url": f"{outer}{tenants.DEFAULT.url_prefix}/admin/sft"})
     return tabs
 
 

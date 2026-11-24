@@ -38,6 +38,17 @@ def test_every_tab_opens(admin, tab):
     assert f'href="http://testserver/admin/sft?tab={tab}" aria-current="page"' in page.text
 
 
+def test_shero_food_training_is_a_tab_of_the_dashboard(admin):
+    from tests.admin.test_dst_admin import tabs
+
+    sft = ("/admin/sft", "Shero Food Training")
+    assert tabs(admin.get("/admin/orders").text)[-1] == (*sft, False)
+    assert tabs(admin.get("/dst/admin/orders").text)[-1] == (*sft, False)
+    # On SFT's pages the same tabs, SFT open; the businesses open their dashboards.
+    assert tabs(admin.get("/admin/sft?tab=leads").text) == [
+        ("/admin/", "Shero US", False), ("/dst/admin/", "DST India", False), (*sft, True)]
+
+
 def test_the_old_templates_tab_opens_nudges(admin):
     page = admin.get("/admin/sft?tab=templates").text
     assert 'href="http://testserver/admin/sft?tab=nudges" aria-current="page"' in page
@@ -52,13 +63,11 @@ async def test_sft_has_its_own_menu_not_the_food_dashboards(admin, session, cfg,
     page = admin.get(path).text
     for key in TABS:
         assert f"/admin/sft?tab={key}" in page, key
-    for food in ("Kitchens", "Uber queue", "Payouts", "Loyalty", "DST India",
-                 "data-business-tabs", "admin/menu", "admin/bot-replies", "admin/orders"):
+    # Only the dashboard's top tabs (Shero US | DST India | Shero Food Training).
+    assert "data-business-tabs" in page
+    for food in ("Kitchens", "Uber queue", "Payouts", "Loyalty",
+                 "admin/menu", "admin/bot-replies", "admin/orders"):
         assert food not in page, food
-
-
-def test_it_is_not_in_the_dashboards_menu(admin):
-    assert "/admin/sft" not in admin.get("/admin/").text
 
 
 def test_there_is_no_dst_copy(admin):

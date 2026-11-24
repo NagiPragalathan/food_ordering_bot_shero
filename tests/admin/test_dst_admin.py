@@ -39,12 +39,14 @@ def test_both_businesses_have_tabs_and_each_opens_the_same_section(admin):
     us = admin.get("/admin/orders")
     assert us.status_code == 200
     assert tabs(us.text) == [("/admin/orders", "Shero US", True),
-                             ("/dst/admin/orders", "DST India", False)]
+                             ("/dst/admin/orders", "DST India", False),
+                             ("/admin/sft", "Shero Food Training", False)]
 
     dst = admin.get("/dst/admin/orders")
     assert dst.status_code == 200
     assert tabs(dst.text) == [("/admin/orders", "Shero US", False),
-                              ("/dst/admin/orders", "DST India", True)]
+                              ("/dst/admin/orders", "DST India", True),
+                              ("/admin/sft", "Shero Food Training", False)]
 
 
 def test_every_link_on_a_dst_page_stays_in_dst(admin):
