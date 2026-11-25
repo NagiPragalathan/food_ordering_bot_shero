@@ -48,8 +48,10 @@ def reference(lead: SftLead) -> str:
 
 
 def test_checkout(lead: SftLead, cfg: SftConfig) -> bool:
-    """No real charge: no Stripe key, or one of SFT's test numbers in Test mode."""
-    return checkout.mock_mode() or (cfg.mode == TEST and cfg.answers(lead.whatsapp_number))
+    """No real charge: no Stripe key, or one of SFT's test numbers in Test mode
+    while Test payments is on (Bot replies). Live mode always charges."""
+    return checkout.mock_mode() or (cfg.mode == TEST and cfg.test_payments
+                                    and cfg.answers(lead.whatsapp_number))
 
 
 async def checkout_url(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> str:

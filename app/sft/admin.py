@@ -727,9 +727,13 @@ async def save_replies(request: Request, session: AsyncSession = Depends(get_ses
             data[name] = str(form.get(name) or "").strip()
     if "has_ask_name" in form:
         data["ask_name"] = form.get("ask_name") == "on"
+    if "has_test_payments" in form:
+        data["test_payments"] = form.get("test_payments") == "on"
     mode = data.get("mode", cfg.mode)
+    paying = (" They pay with test payments: no charge." if data.get("test_payments", True)
+              else " They pay for real on Stripe.")
     done = {"off": "Saved. SFT is off: it answers nobody.",
-            "test": "Saved. SFT answers only the test numbers.",
+            "test": "Saved. SFT answers only the test numbers." + paying,
             "live": "Saved. SFT is live."}.get(mode, "Saved.")
     return await _save(request, session, data, current_user.email, _url(request, "replies"), done)
 

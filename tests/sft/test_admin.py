@@ -49,6 +49,17 @@ def test_shero_food_training_is_a_tab_of_the_dashboard(admin):
         ("/admin/", "Shero US", False), ("/dst/admin/", "DST India", False), (*sft, True)]
 
 
+async def test_bot_replies_switches_test_payments(admin, session):
+    page = admin.get("/admin/sft?tab=replies").text
+    assert "data-sft-test-payments" in page and 'name="test_payments" checked' in page
+    form = {"mode": "test", "test_numbers": "15551230001", "has_test_payments": "1"}
+    assert admin.post("/admin/sft/replies", data=form).status_code == 303
+    assert (await config.load(session, fresh=True)).test_payments is False
+    admin.post("/admin/sft/replies", data=form | {"test_payments": "on"})
+    assert (await config.load(session, fresh=True)).test_payments is True
+    assert "Test payments are on: no card is charged" in admin.get("/admin/sft?tab=replies").text
+
+
 def test_the_old_templates_tab_opens_nudges(admin):
     page = admin.get("/admin/sft?tab=templates").text
     assert 'href="http://testserver/admin/sft?tab=nudges" aria-current="page"' in page

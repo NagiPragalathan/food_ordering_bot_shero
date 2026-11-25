@@ -84,6 +84,23 @@ async def test_pay_opens_stripe_and_a_test_lead_goes_back_to_review(session, cfg
     assert page.status_code == 303 and page.headers["location"].startswith("https://checkout.stripe")
 
 
+async def test_test_payments_switch_decides_if_test_numbers_pay_for_real(session, monkeypatch):
+    from app.db.models import SftLead
+    from app.integrations.stripe_gw import checkout
+
+    monkeypatch.setattr(checkout, "mock_mode", lambda: False)        # a real Stripe key
+    tester, customer = SftLead(whatsapp_number=NUMBER), SftLead(whatsapp_number="15550009999")
+    cfg = await config.save(session, {"mode": "test", "test_numbers": NUMBER}, "t")
+    assert cfg.test_payments                                           # on unless switched off
+    assert payments.test_checkout(tester, cfg)                         # no charge
+    cfg = await config.save(session, {"mode": "test", "test_numbers": NUMBER,
+                                      "test_payments": False}, "t")
+    assert not payments.test_checkout(tester, cfg)                     # the real Stripe page
+    cfg = await config.save(session, {"mode": "live", "test_numbers": NUMBER}, "t")
+    assert cfg.test_payments and not payments.test_checkout(tester, cfg)
+    assert not payments.test_checkout(customer, cfg)                   # live: everyone pays
+
+
 async def test_the_test_payment_enrols_and_sends_the_course(session, rec, pages):
     cfg = await config.save(session, {"mode": "live", "course_url": COURSE}, "t")
     lead = await _wants_to_pay(session, cfg)

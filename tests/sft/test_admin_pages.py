@@ -254,15 +254,18 @@ async def test_the_lead_page_links_the_receipt_and_shows_lead_status(admin, sess
     assert "SFT - Enrolled" in page and "data-sft-zoho-fields" in page
 
 
-def test_a_document_goes_in_gallaboxs_shape():
-    """path + mimeType: Gallabox accepts Meta's link/filename but never delivers it."""
+def test_a_document_goes_in_gallaboxs_shape_with_its_name():
+    """path + mimeType (Gallabox drops Meta's `link`), and the file's name, so
+    WhatsApp doesn't show "Untitled"."""
     from app.integrations.gallabox import messages as m
 
     block = m.document_message("https://x.example/a/Brochure.pdf", filename="Brochure.pdf",
                                caption="The brochure")
     assert block == {"type": "document", "document": {
         "path": "https://x.example/a/Brochure.pdf", "mimeType": "application/pdf",
-        "caption": "The brochure"}}
+        "fileName": "Brochure.pdf", "filename": "Brochure.pdf", "caption": "The brochure"}}
+    odd = m.document_message("https://x.example/r.pdf", filename="a/b.pdf")["document"]
+    assert odd["fileName"] == "a-b.pdf"                 # WhatsApp allows no path separators
 
 
 # --- Delete a lead: the bot forgets the number ----------------------------------------

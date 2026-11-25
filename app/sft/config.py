@@ -60,6 +60,10 @@ NUDGES: dict[str, str] = {
 class SftConfig(BaseModel):
     mode: Literal["off", "test", "live"] = OFF
     test_numbers: list[str] = Field(default_factory=list)
+    # Test mode only: the test numbers pay with a test payment (no card, no
+    # charge). Off: they get the real Stripe checkout, as customers do. Live
+    # mode always takes real payments.
+    test_payments: bool = True
     # SFT's own Gallabox channel (WhatsApp number). Empty: Shero US's number.
     channel_id: str = ""
     # A message containing one of these (whole words) starts the journey.

@@ -21,7 +21,7 @@ it is off, nothing changes for anyone.
 | Customers | everyone who paid, with the money on top: paying customers, revenue, link-to-paid, discounts, refunds; each customer's payment (Stripe, **receipt**) and course access (opened, not confirmed yet, needs the team); who is waiting to pay; revenue by day; CSV |
 | Nudges | **Rules** (on/off, send hours, each follow-up's wait and switch, the payment reminder, Maybe later check-ins, the course check, when the team takes over), **Leads by flow**, **Messages sent**, **WhatsApp templates** |
 | Offers | codes and launch prices (below) |
-| Bot replies | who SFT answers (Off / Test / Live, test numbers), what starts it (keywords, source codes, ad ids, own number), **Check a message**, and **every message the bot says, with its buttons, editable** |
+| Bot replies | who SFT answers (Off / Test / Live, test numbers, **Test payments** on/off), what starts it (keywords, source codes, ad ids, own number), **Check a message**, and **every message the bot says, with its buttons, editable** |
 | Test chat | the journey without WhatsApp, with time travel for the nudges |
 | Settings | the course (fee, links), Stripe's status, the team's numbers, Zoho |
 
@@ -236,8 +236,11 @@ the bot sends next and when.
 
 Payments use Shero US's Stripe account and its existing webhook
 (`/webhooks/stripe`); SFT's checkouts are told apart by their metadata.
-Without a Stripe key, and for test numbers in Test mode, the pay button opens
-a test checkout that charges nobody.
+Without a Stripe key, and for test numbers in Test mode while **Test payments**
+is on, the pay button opens a test checkout that charges nobody (a **Complete
+test payment** button; the receipt says TEST). The switch is in **Bot replies**,
+under the test numbers. Turn it off to try the real Stripe checkout from a test
+number: the card is charged. Live mode always takes real payments.
 
 ## Code
 

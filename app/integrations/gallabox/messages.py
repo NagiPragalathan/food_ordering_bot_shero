@@ -155,14 +155,21 @@ def document_message(url: str, *, filename: str, caption: str | None = None) -> 
     """A document (a PDF) by its public link, in Gallabox's shape: `path` and
     `mimeType` (its API reference, "Send Document Message").
 
-    Not Meta's `link`/`filename`: Gallabox answers ACCEPTED to that and then
-    drops the message, so the file never reaches the customer. WhatsApp
-    shows the file under the last part of the link, so name the file well.
+    Not Meta's `link` instead of `path`: Gallabox answers ACCEPTED to that and
+    then drops the message, so the file never reaches the customer.
+
+    The name WhatsApp shows under the file goes with it, or the customer sees
+    "Untitled": Gallabox's examples name a file `fileName` (fileMetaData) and,
+    in Meta's shape, `filename`, so it goes under both. Gallabox ignores keys
+    it doesn't use, so the extra one costs nothing.
     """
     if not url:
         raise ValueError("a document message needs a url")
     mime = mimetypes.guess_type(filename or url)[0] or "application/pdf"
     document: dict = {"path": url, "mimeType": mime}
+    name = (filename or "").replace("/", "-").replace("\\", "-").strip()[:240]
+    if name:
+        document["fileName"] = document["filename"] = name
     if caption:
         document["caption"] = caption
     return {"type": "document", "document": document}

@@ -37,7 +37,8 @@
       <span class="flex h-3 w-3 rounded-full bg-amber-500"></span>
       <div>
         <p class="text-sm font-semibold text-amber-900">Test mode: replying only to {{ cfg.test_numbers | length }} whitelisted number{{ '' if cfg.test_numbers | length == 1 else 's' }}</p>
-        <p class="text-xs text-amber-800/80">Customers are not answered by SFT. Switch to Everyone to go live.</p>
+        <p class="text-xs text-amber-800/80">Customers are not answered by SFT. Switch to Everyone to go live.
+          {% if cfg.test_payments %}Test payments are on: no card is charged.{% else %}<strong>Test payments are off: the test numbers pay for real on Stripe.</strong>{% endif %}</p>
       </div>
     </div>
     {% endif %}
@@ -99,6 +100,20 @@
           Add number
         </button>
         <p class="mt-2 text-[11px] text-stone-400">Full number with country code, e.g. 1 for the US. Spaces, + and dashes are fine.</p>
+
+        {# Test mode only: whether the test numbers pay for real (payments.test_checkout). #}
+        <input type="hidden" name="has_test_payments" value="1">
+        <label data-sft-test-payments class="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-stone-200 p-4 hover:border-stone-300">
+          <input type="checkbox" name="test_payments" {% if cfg.test_payments %}checked{% endif %}
+                 class="mt-0.5 rounded text-brand-600 focus:ring-brand-500">
+          <span>
+            <span class="block text-sm font-semibold text-stone-900">Test payments</span>
+            <span class="block text-xs text-stone-500"><strong>On:</strong> the test numbers enroll with a
+              <em>Complete test payment</em> button: no card, no charge, and the receipt says TEST.
+              <strong>Off:</strong> they get the real Stripe checkout and their card is charged.
+              Everyone mode (live) always takes real payments.</span>
+          </span>
+        </label>
       </div>
     </div>
     <div class="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-5 py-3">
