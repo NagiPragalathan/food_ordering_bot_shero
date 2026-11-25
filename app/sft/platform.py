@@ -47,6 +47,9 @@ WEBHOOK = "/partner-payments/webhook"
 TIMEOUT = 15.0
 # Minutes between tries after a network error or a 5xx; then the team takes it.
 RETRY_MINUTES = (1, 5, 15, 60, 240, 720)
+# 4xx answers that mean "not now" rather than "no": its rate limit (429) and
+# a timeout (408) are tried again too.
+AGAIN = (408, 429)
 TEST_CHAT = "Test chat"            # admin.TEST_SOURCE: never a real student
 EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
 
@@ -136,7 +139,7 @@ async def enrol(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> str:
     if status == 401:
         return await _failed(session, lead, f"The course platform refused the webhook secret "
                                             f"({error}): check it on SFT Settings")
-    if 400 <= status < 500:
+    if 400 <= status < 500 and status not in AGAIN:
         return await _failed(session, lead, f"The course platform said: {error}")
     return await _retry(session, lead, f"The course platform said: {error}")
 

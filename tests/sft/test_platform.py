@@ -96,6 +96,18 @@ async def test_a_platform_hiccup_is_tried_again_then_the_login_goes(session, cfg
     assert rec.last()[2][0] == LOGIN
 
 
+async def test_its_rate_limit_is_tried_again_not_sent_to_the_team(session, cfg, rec, api):
+    lead = await _wants_to_pay(session, cfg)
+    lead.email = "priya@example.com"
+    api.answers = [(429, {"error": "Too many requests"})]
+    await payments.mark_paid(session, lead, cfg, amount=Decimal("99"), currency="usd",
+                             payment_intent="pi_50")
+    assert lead.platform_next_try_at and lead.platform_attempts == 1
+    assert not lead.needs_attention
+    lead.platform_next_try_at = leads.now() - timedelta(seconds=1)
+    assert await platform.run(session) == 1 and lead.platform_enrolled_at
+
+
 async def test_a_refused_secret_goes_to_the_team(session, cfg, rec, api):
     lead = await _wants_to_pay(session, cfg)
     lead.email = "priya@example.com"
