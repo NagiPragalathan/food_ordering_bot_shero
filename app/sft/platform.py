@@ -41,6 +41,8 @@ from app.sft.leads import event, now
 log = get_logger(__name__)
 
 DONE, RETRY, FAILED, SKIPPED = "done", "retry", "failed", "skipped"
+BUSY = "busy"                      # the same payment is being sent right now
+_posting: set[str] = set()         # payment ids on their way (one server process)
 WEBHOOK = "/partner-payments/webhook"
 TIMEOUT = 15.0
 # Minutes between tries after a network error or a 5xx; then the team takes it.
@@ -103,12 +105,20 @@ async def enrol(session: AsyncSession, lead: SftLead, cfg: SftConfig) -> str:
         return await _failed(session, lead, "No email to make the course account with: add "
                                             "their email on the lead page, then Make the course "
                                             "account")
+    pid = payment_id(lead)
+    if pid in _posting:
+        # Already on its way (the job and the lead page at once): never two
+        # calls for one payment at the same moment (the platform's G8).
+        return BUSY
+    _posting.add(pid)
     try:
         status, data = await _post(_webhook(cfg), json=body(lead),
                                    headers={"x-webhook-secret": secret()})
     except httpx.HTTPError as exc:
         return await _retry(session, lead, f"Could not reach the course platform "
                                            f"({type(exc).__name__})")
+    finally:
+        _posting.discard(pid)
     error = str(data.get("error") or f"HTTP {status}")[:200]
     if status == 200 and data.get("ok"):
         lead.platform_id = str(data.get("id") or "")[:64] or None

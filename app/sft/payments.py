@@ -17,6 +17,8 @@ charging anyone.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import timedelta
 from decimal import Decimal
 
@@ -114,13 +116,40 @@ async def clicked(session: AsyncSession, lead: SftLead) -> None:
     leads.touch(lead)
 
 
+# Stripe's webhook and the lead's return to /done can confirm one payment at
+# the same moment, each in its own request and session: the second must not
+# enrol them again (a second confirmation, receipt and course-platform call;
+# the platform asks for one call per payment, its G8). One server process
+# (uvicorn, no workers), so a lock and a note per lead do it; the note lasts
+# until the first request's commit has surely landed.
+_paying: dict[str, asyncio.Lock] = {}
+_paid_here: dict[str, float] = {}
+PAID_MEMO_SECONDS = 600
+
+
 async def mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
                     amount: Decimal | None, currency: str | None,
                     payment_intent: str | None = None, email: str | None = None,
                     test: bool = False) -> bool:
     """The lead has paid: enrolled, told, and given the course. Once only."""
-    if lead.paid_at is not None:
-        return False
+    key = str(lead.id)
+    lock = _paying.setdefault(key, asyncio.Lock())
+    async with lock:
+        marked = _paid_here.get(key)
+        if lead.paid_at is not None or (marked and time.monotonic() - marked < PAID_MEMO_SECONDS):
+            return False
+        _paid_here[key] = time.monotonic()
+        try:
+            return await _mark_paid(session, lead, cfg, amount=amount, currency=currency,
+                                    payment_intent=payment_intent, email=email, test=test)
+        except BaseException:
+            _paid_here.pop(key, None)
+            raise
+
+
+async def _mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
+                     amount: Decimal | None, currency: str | None,
+                     payment_intent: str | None, email: str | None, test: bool) -> bool:
     price = await offers.price(session, lead, cfg)
     if price.offer is not None and lead.offer_id != price.offer.id:
         lead.offer_id = price.offer.id

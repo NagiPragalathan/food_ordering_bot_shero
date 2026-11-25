@@ -165,6 +165,32 @@ async def test_already_paid_gets_the_login_again(session, cfg, rec, api):
     assert rec.last()[2][0] == LOGIN and len(api.calls) == 1        # no second account
 
 
+async def test_one_payment_confirmed_twice_at_once_enrols_once(session, cfg, rec, api):
+    """Stripe's webhook and the return page together: one call to the platform."""
+    import asyncio
+
+    lead = await _wants_to_pay(session, cfg)
+    lead.email = "priya@example.com"
+    first, second = await asyncio.gather(
+        payments.mark_paid(session, lead, cfg, amount=Decimal("99"), currency="usd",
+                           payment_intent="pi_48"),
+        payments.mark_paid(session, lead, cfg, amount=Decimal("99"), currency="usd",
+                           payment_intent="pi_48"))
+    assert (first, second) == (True, False) and len(api.calls) == 1
+    lead.paid_at = None                     # as a second session's stale copy sees it
+    assert await payments.mark_paid(session, lead, cfg, amount=Decimal("99"),
+                                    currency="usd", payment_intent="pi_48") is False
+    assert len(api.calls) == 1
+
+
+async def test_a_payment_on_its_way_is_not_sent_again(session, cfg, rec, api, monkeypatch):
+    lead = await _wants_to_pay(session, cfg)
+    lead.email = "priya@example.com"
+    lead.paid_at, lead.payment_intent_id = leads.now(), "pi_49"
+    monkeypatch.setattr(platform, "_posting", {"pi_49"})
+    assert await platform.enrol(session, lead, cfg) == platform.BUSY and not api.calls
+
+
 async def test_check_connection_makes_nothing(api):
     cfg = config.SftConfig()
     api.answers = [(400, {"error": "partner_name, partner_email, and payment_id are required"})]

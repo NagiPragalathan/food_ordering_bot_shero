@@ -611,6 +611,9 @@ async def _platform_action(session, lead: SftLead, action: str, here: str):
             "The login went to them on WhatsApp." if went else
             "The login goes to them on WhatsApp when they next message (the 24-hour window is "
             "closed).")))
+    if outcome == platform.BUSY:
+        return redirect(here, flash=("warning", "It is being made right now: refresh in a "
+                                                "moment."))
     if outcome == platform.RETRY:
         return redirect(here, flash=("warning", f"Not made yet: {lead.platform_error}. "
                                                 "Trying again automatically."))
