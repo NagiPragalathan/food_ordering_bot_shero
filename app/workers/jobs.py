@@ -227,6 +227,21 @@ async def sync_sft_crm() -> int:
             return 0
 
 
+async def make_sft_accounts() -> int:
+    """Shero Food Training: course accounts not made at payment time, tried
+    again (app/sft/platform.py). Shero US only."""
+    from app.sft import platform as sft_platform
+
+    if not tenants.current().is_default:
+        return 0
+    async with session_scope() as session:
+        try:
+            return await sft_platform.run(session)
+        except Exception as exc:  # noqa: BLE001 - never kill the scheduler
+            log.error("sft_platform_job_failed", error=str(exc))
+            return 0
+
+
 async def refresh_settings() -> int:
     """Pick up settings saved through the admin dashboard elsewhere.
 
@@ -309,5 +324,6 @@ ALL_JOBS = {
     "crm_outbox": send_crm_events,
     "sft_nudges": send_sft_nudges,
     "sft_crm": sync_sft_crm,
+    "sft_platform": make_sft_accounts,
     "settings_refresh": refresh_settings,
 }

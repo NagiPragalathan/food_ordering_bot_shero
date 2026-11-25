@@ -20,6 +20,7 @@ team gets the leads who stall at a stage.
     web.py        /sft/enrol/<token>
     nudges.py     follow-ups, reminders and team tasks (job: sft_nudges)
     crm.py        Zoho sync (job: sft_crm)
+    platform.py   the course account on Shero Training, and the login (job: sft_platform)
     analytics.py  the KPIs
     periods.py    the admin's date ranges
     views.py      each lead's flow and next nudge, for the admin

@@ -114,6 +114,16 @@ class SftLead(Base, UUIDPrimaryKey, Timestamps):
     access_check_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     access_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Their account on the Shero Training course platform (app/sft/platform.py),
+    # made once they have paid, and when their login went to them on WhatsApp.
+    platform_id: Mapped[str | None] = mapped_column(String(64))
+    platform_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    platform_error: Mapped[str | None] = mapped_column(String(300))
+    platform_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    platform_next_try_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                                  index=True)
+    login_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Zoho CRM (app/sft/crm.py): synced by a job, never inside the chat.
     zoho_module: Mapped[str | None] = mapped_column(String(20))
     zoho_id: Mapped[str | None] = mapped_column(String(32))

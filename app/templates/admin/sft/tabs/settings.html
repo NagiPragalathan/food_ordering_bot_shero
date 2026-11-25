@@ -42,6 +42,34 @@
   {% endcall %}
 
   <div class="space-y-5">
+    {# The Shero Training course platform (sft/platform.py): makes a paid
+       lead's account and emails the invite; the bot sends the login. #}
+    {% call ui.card('Shero Training course platform', 'Course accounts and the login, after paying') %}
+      <div class="space-y-3" data-sft-platform>
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          {% if platform_on %}{{ ui.badge('Connected', 'good') }}<span class="text-stone-600">Each paid lead gets an account and invite; the bot sends their login.</span>
+          {% else %}{{ ui.badge('Not connected', 'warn') }}<span class="text-stone-600">Paste the webhook secret from Shero to switch it on.</span>{% endif %}
+        </div>
+        <label class="block">
+          <span class="text-xs font-semibold text-stone-700">Webhook secret</span>
+          <input type="password" name="platform_secret" autocomplete="off" spellcheck="false"
+                 placeholder="{{ 'Saved: paste a new one to replace it' if platform_on else 'x-webhook-secret from Shero' }}"
+                 {% if not can_store_secret %}disabled{% endif %}
+                 class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          <span class="mt-1 block text-[11px] text-stone-500">Shero's PARTNER_PAYMENTS_WEBHOOK_SECRET. Stored encrypted and never shown again.{% if not can_store_secret %} Needs SETTINGS_ENCRYPTION_KEY on the server.{% endif %}</span>
+        </label>
+        {{ sft.field('Student login page', 'platform_login_url', cfg.platform_login_url, 'The button in the login message. Students enter their email, then the 6-digit code it emails them.', 'url', 'https://') }}
+        {{ sft.field('API address', 'platform_api_url', cfg.platform_api_url, 'Accounts are made at its /partner-payments/webhook.', 'url', 'https://') }}
+        <input type="hidden" name="has_platform_for_tests" value="1">
+        {{ sft.check('Also for test payments', 'platform_for_tests', cfg.platform_for_tests, 'Off: test payments make no account. On: they make a real account on Shero Training and the platform emails a real invite (it has no test mode).') }}
+        <div class="flex flex-wrap gap-2 pt-1">
+          <button type="submit" form="sft-platform-check" class="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50" {% if not platform_on %}disabled{% endif %}>Check connection</button>
+          {% if platform_on %}<button type="submit" form="sft-platform-off" class="rounded-lg px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">Disconnect</button>{% endif %}
+        </div>
+        <p class="text-[11px] leading-relaxed text-stone-500">Check connection sends no student, so nothing is made. Until it is connected, paid leads get the course link above.</p>
+      </div>
+    {% endcall %}
+
     {% call ui.card('Payments', 'Shero US\'s Stripe account and webhook') %}
       <div class="flex items-center gap-2 text-sm">
         {% if stripe_live %}{{ ui.badge('Stripe connected', 'good') }}<span class="text-stone-600">Real checkouts; SFT's are marked "Shero Food Training (SFT)".</span>
@@ -80,4 +108,6 @@
   <form method="post" action="{{ url_for('admin_sft_zoho') }}"><input type="hidden" name="action" value="sync">
     <button class="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">Sync to Zoho now</button></form>
 </div>
+<form id="sft-platform-check" method="post" action="{{ url_for('admin_sft_platform') }}" class="hidden"><input type="hidden" name="action" value="check"></form>
+<form id="sft-platform-off" method="post" action="{{ url_for('admin_sft_platform') }}" class="hidden"><input type="hidden" name="action" value="off"></form>
 <form id="sft-brochure-form" method="post" action="{{ url_for('admin_sft_brochure') }}" enctype="multipart/form-data" class="hidden"></form>

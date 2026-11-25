@@ -308,16 +308,27 @@ def enrol_url(lead: SftLead) -> str:
 
 
 async def _already_paid(session, lead, cfg) -> str:
+    from app.sft import payments, platform
+
     lead.step = c.IDLE
     body = c.say(cfg, "already_paid", first=leads.first(lead))
-    if cfg.course_url:
+    making = platform.wanted(lead, cfg)
+    if making:
+        # Their course account is still to be made (a miss at payment time).
+        await platform.enrol(session, lead, cfg)
+    if lead.platform_enrolled_at:
+        # Their Shero Training login (the course platform made the account).
+        await platform.send_login(session, lead, cfg)
+    elif making:
+        await sending.text(session, lead, cfg, body.split("!")[0] + "! 🎉 We're setting up your "
+                           "course account now. Your login comes here in a few minutes.",
+                           what="already_paid")
+    elif cfg.course_url:
         await sending.link(session, lead, cfg, body, url=cfg.course_url, label=c.COURSE_BUTTON,
                            what="course_link")
     else:
         await sending.text(session, lead, cfg, body.split("!")[0] + "! 🎉 Our team will be in "
                            "touch with your course access.", what="already_paid")
-    from app.sft import payments
-
     await payments.send_receipt(session, lead, cfg)
     return "already enrolled"
 

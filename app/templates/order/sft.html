@@ -71,19 +71,26 @@
         </div>
       </div>
       <div class="px-5 pb-5">
-        {% if test %}
-        <form method="post" action="{{ test_pay_url }}">
-          <button type="submit" class="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[15px] font-semibold text-white shadow-sm transition hover:bg-brand-700 active:scale-[.99]">
+        {# Their email, then Pay. While the course platform is connected the
+           email is their login there (sft/platform.py), so it is required. #}
+        <form id="sft-pay-form" method="post" action="{{ test_pay_url if test else pay_url }}" data-sft-pay-form>
+          <label for="email" class="block text-xs font-semibold text-ink-800">
+            Your email{% if need_email %} <span class="font-normal text-stone-500">(your course login)</span>{% endif %}
+          </label>
+          <input id="email" name="email" type="email" autocomplete="email" inputmode="email"
+                 value="{{ email }}" placeholder="you@example.com" {% if need_email %}required{% endif %}
+                 {% if email_error %}aria-invalid="true" aria-describedby="email-error"{% endif %}
+                 class="mt-1.5 w-full rounded-xl border {{ 'border-red-400' if email_error else 'border-mist-200' }} bg-white px-3.5 py-3 text-[15px] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20" data-sft-email>
+          {% if email_error %}<p id="email-error" class="mt-1.5 text-xs font-medium text-red-700" data-sft-email-error>{{ email_error }}</p>{% endif %}
+          <p class="mt-1.5 text-[11px] leading-relaxed text-stone-500">
+            {% if need_email %}You'll sign in to the course with this email: your invitation and sign-in codes are sent there.
+            {% else %}For your enrollment details.{% endif %}
+          </p>
+          <button type="submit" data-sft-pay class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[15px] font-semibold text-white shadow-sm transition hover:bg-brand-700 active:scale-[.99]">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
-            Pay {{ total }} (test)
+            {% if test %}Pay {{ total }} (test){% else %}Pay {{ total }} securely{% endif %}
           </button>
         </form>
-        {% else %}
-        <a href="{{ pay_url }}" data-sft-pay class="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[15px] font-semibold text-white shadow-sm transition hover:bg-brand-700 active:scale-[.99]">
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
-          Pay {{ total }} securely
-        </a>
-        {% endif %}
         <p class="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-stone-500">
           <svg class="mt-0.5 h-3.5 w-3.5 flex-none text-brand-600" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           {% if test %}A test checkout: no card is asked for and nobody is charged.
@@ -181,13 +188,8 @@
         <p class="text-sm text-white/80">Total due today</p>
         <p class="text-xl font-bold tabular-nums">{{ total }}</p>
       </div>
-      {% if test %}
-      <form method="post" action="{{ test_pay_url }}" class="mt-3">
-        <button type="submit" class="w-full rounded-xl bg-white py-3 text-sm font-semibold text-ink-900">Pay {{ total }} (test)</button>
-      </form>
-      {% else %}
-      <a href="{{ pay_url }}" class="mt-3 block w-full rounded-xl bg-white py-3 text-center text-sm font-semibold text-ink-900">Pay {{ total }} securely</a>
-      {% endif %}
+      {# Sends the form above (with the email), from the end of the page. #}
+      <button type="submit" form="sft-pay-form" class="mt-3 block w-full rounded-xl bg-white py-3 text-center text-sm font-semibold text-ink-900">Pay {{ total }}{{ ' (test)' if test else ' securely' }}</button>
     </div>
   </section>
 </main>
@@ -214,7 +216,23 @@
     </dl>
 
     <div class="grid gap-2 px-6 py-5">
-      {% if course_url %}
+      {% if login_url %}
+      {# The Shero Training course platform made their account (sft/platform.py). #}
+      <div class="rounded-xl border border-brand-200 bg-brand-50/60 p-4 text-sm" data-sft-login>
+        <p class="font-semibold text-ink-900">Your course login</p>
+        <ol class="mt-2 space-y-1 text-[13px] text-stone-700">
+          <li>1. Open Shero Training</li>
+          <li>2. Enter your email: <b class="break-all">{{ email }}</b></li>
+          <li>3. Type the 6-digit code we email you</li>
+        </ol>
+        <p class="mt-2 text-[11px] text-stone-500">Your invitation is in your inbox too. We've sent these steps to your WhatsApp.</p>
+      </div>
+      <a href="{{ login_url }}" class="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[15px] font-semibold text-white shadow-sm hover:bg-brand-700">Open Shero Training →</a>
+      {% elif account_pending %}
+      <p class="rounded-xl border border-mist-200 bg-mist-50 p-4 text-center text-sm text-stone-700" data-sft-login-pending>
+        We're setting up your course account. Your login comes to your WhatsApp in a few minutes{% if email %}, and your invitation to <b class="break-all">{{ email }}</b>{% endif %}.
+      </p>
+      {% elif course_url %}
       <a href="{{ course_url }}" class="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[15px] font-semibold text-white shadow-sm hover:bg-brand-700">Open your course →</a>
       {% endif %}
       <a href="{{ receipt_url }}" target="_blank" rel="noopener" data-sft-receipt
@@ -229,7 +247,9 @@
   <div class="mt-5 rounded-2xl border border-mist-200 bg-white p-6 shadow-card">
     <h2 class="text-base font-semibold">What happens next</h2>
     <ol class="mt-3 space-y-3 text-sm">
-      {% for step in [('Open your course', 'Use the button above' if course_url else 'Our team sends your course access on WhatsApp shortly'),
+      {% for step in [('Open your course', 'Sign in with your email and the code we email you' if login_url
+                                           else ('Your login comes to your WhatsApp shortly' if account_pending
+                                           else ('Use the button above' if course_url else 'Our team sends your course access on WhatsApp shortly'))),
                       ('Start Day 1', 'Work through the 5 days in order: videos, then quizzes'),
                       ('Prepare and upload', 'Cook your assigned items with the standard recipe and upload photos'),
                       ('Get certified', 'Your certificate is issued once Shero approves them')] %}

@@ -79,7 +79,7 @@ async def test_pay_opens_stripe_and_a_test_lead_goes_back_to_review(session, cfg
     monkeypatch.setattr(payments, "test_checkout", lambda lead, cfg: False)
     monkeypatch.setattr(payments, "checkout_url", checkout)
     review = pages.get(f"/sft/enrol/{lead.pay_token}").text
-    assert f'href="/sft/enrol/{lead.pay_token}/pay"' in review and "Pay $99 securely" in review
+    assert f'action="/sft/enrol/{lead.pay_token}/pay"' in review and "Pay $99 securely" in review
     page = pages.get(f"/sft/enrol/{lead.pay_token}/pay")
     assert page.status_code == 303 and page.headers["location"].startswith("https://checkout.stripe")
 

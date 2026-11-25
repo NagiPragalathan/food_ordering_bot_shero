@@ -101,6 +101,7 @@ WHEN_BUTTONS = (Button(B_WEEK, "In a week"), Button(B_MONTH, "In a month"),
 WHY_BUTTONS = tuple(Button(i, t) for i, t in WHY_IDS.items())
 PAY_BUTTON = "Pay {fee} to enroll"
 COURSE_BUTTON = "Open your course"
+COURSE_LOGIN_BUTTON = "Open Shero Training"   # the course platform's sign-in page
 GET_COURSE = "Get my course"          # sft_enrolled's quick reply
 
 # What a tap on a template's quick reply (or a typed label) means.
@@ -174,6 +175,24 @@ PAID = ("Congratulations, {first}! 🎉 Your enrollment payment of {amount} is c
 PAID_NO_LINK = ("Congratulations, {first}! 🎉 Your enrollment payment of {amount} is confirmed. "
                 "Welcome to Shero Food Training!\n\n"
                 "Our team will send your course access details here shortly.")
+# Once the Shero Training course platform has made their account (platform.py).
+PAID_LOGIN = ("Congratulations, {first}! 🎉 Your enrollment payment of {amount} is confirmed. "
+              "Welcome to Shero Food Training!\n\n"
+              "Your course account is ready. To sign in:\n"
+              "1. Tap *Open Shero Training* below\n"
+              "2. Enter your email: {email}\n"
+              "3. Type the 6-digit code we email you\n\n"
+              "Your invitation is in your inbox too.{note}")
+PAID_SETTING_UP = ("Congratulations, {first}! 🎉 Your enrollment payment of {amount} is confirmed. "
+                   "Welcome to Shero Food Training!\n\n"
+                   "We're setting up your course account now. Your login comes here in a few "
+                   "minutes.")
+LOGIN = ("Your Shero Training account is ready, {first}! 🎓\n\n"
+         "To sign in:\n"
+         "1. Tap *Open Shero Training* below\n"
+         "2. Enter your email: {email}\n"
+         "3. Type the 6-digit code we email you\n\n"
+         "Your invitation is in your inbox too.")
 PAYMENT_FAILED = ("Hi {first}, your payment didn't go through, so you haven't been charged. "
                   "You can try again below, or tap Ask a question and we'll help.")
 
@@ -298,6 +317,11 @@ DROPS: dict[str, Drop] = {
     "course_link": Drop("course_link", "Payment Success", "Paid, but no course link is set up",
                         "Congratulations on enrolling! Here are your course access details.",
                         "Send the course access", "high"),
+    "course_account": Drop("course_account", "Payment Success",
+                           "Paid, but their Shero Training account could not be made",
+                           "Congratulations on enrolling! Your course account is being set up and "
+                           "your login follows here shortly.",
+                           "Fix the course account (lead page), then send the login", "high"),
 }
 
 # --- Follow-up templates (outside WhatsApp's 24-hour window) ------------------------------
@@ -412,7 +436,8 @@ TEXT_LIMIT = 1024
 FIELD_HELP = {"first": "their first name", "fee": "the course fee (with any offer)",
               "amount": "what they paid", "note": "the course access note (Settings)",
               "when": "in a week / in a month", "code": "the offer code",
-              "was": "the fee before the offer"}
+              "was": "the fee before the offer",
+              "email": "the email they sign in to the course with"}
 
 TEXTS: dict[str, Text] = {t.key: t for t in (
     Text("ask_name", "Ask their name", "1 · Lead enters", ASK_NAME_TEXT),
@@ -446,6 +471,12 @@ TEXTS: dict[str, Text] = {t.key: t for t in (
          ("first", "amount", "note")),
     Text("paid_no_link", "Payment confirmed (no course link set)", "6 · Paid", PAID_NO_LINK,
          ("first", "amount")),
+    Text("paid_login", "Payment confirmed (course account made: the login)", "6 · Paid",
+         PAID_LOGIN, ("first", "amount", "email", "note")),
+    Text("paid_setting_up", "Payment confirmed (course account being made)", "6 · Paid",
+         PAID_SETTING_UP, ("first", "amount")),
+    Text("login", "Course login (once the account is made, or asked again)", "6 · Paid", LOGIN,
+         ("first", "email")),
     Text("already_paid", "Already enrolled", "6 · Paid", ALREADY_PAID, ("first",)),
     Text("access_ok", "Opened the course", "6 · Paid", ACCESS_OK, ("first",)),
     Text("access_help", "Needs help opening the course", "6 · Paid", ACCESS_HELP, ("first",)),
@@ -470,6 +501,8 @@ TEXT_BUTTONS: dict[str, tuple[str, ...]] = {
     "pay_reminder": (PAY_BUTTON.format(fee="{fee}"),),
     "payment_failed": ("Try again",),
     "paid": (COURSE_BUTTON,),
+    "paid_login": (COURSE_LOGIN_BUTTON,),
+    "login": (COURSE_LOGIN_BUTTON,),
     "already_paid": (COURSE_BUTTON,),
     "later": tuple(b.title for b in WHEN_BUTTONS),
     "not_interested": tuple(b.title for b in WHY_BUTTONS),

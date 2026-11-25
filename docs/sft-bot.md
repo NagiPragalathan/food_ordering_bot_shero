@@ -186,7 +186,8 @@ answered ACCEPTED by Gallabox and then dropped, so the file never arrived.
 ## The enroll page and the receipt
 
 `/sft/enrol/<token>` shows the course and the order summary (fee, offer,
-total) with Pay; Pay opens Stripe's checkout (`/sft/enrol/<token>/pay`),
+total), **their email** and Pay; Pay keeps the email and opens Stripe's
+checkout (`/sft/enrol/<token>/pay`, with the email filled in),
 whose Back link returns to the page. In Test mode (or without a Stripe key)
 Pay marks the lead paid with nobody charged, and the page says so.
 
@@ -197,6 +198,54 @@ course, offer, total paid, next steps; a test payment is marked as one). It
 is drawn at payment and kept under `data/media/sft/receipts/`, so the link
 works the moment WhatsApp fetches it; `/sft/receipt/<token>/<file>` serves it
 (and draws it again if it is missing). The lead's page in the admin links it.
+
+While the course platform is connected, the email is required (it is their
+course login) and the page shows **Your course login** with *Open Shero
+Training* once the account is made.
+
+## The course account and the login (Shero Training)
+
+The course runs on the **Shero Training** platform (`api.sherosft.com`; its
+guide is `Shero_SFT_WhatsApp_Partner_Integration_API_Documentation.pdf`).
+When a lead pays, `app/sft/platform.py` calls its payment webhook
+(`POST /partner-payments/webhook`, header `x-webhook-secret`) with their name,
+email, the Stripe payment id, the amount and `WA-<number>`. The platform makes
+their account, partner code (`SFT-US-NNN`) and course invite, and **emails
+them the invite**. The bot then sends on WhatsApp how to sign in, with an
+**Open Shero Training** button to the login page
+(`https://sft.sherosft.com/partner-login`):
+
+1. Tap *Open Shero Training*
+2. Enter your email (the one they paid with)
+3. Type the 6-digit code the platform emails you
+
+There is no password: the platform signs students in with their email and a
+code it emails (it can't send the code on WhatsApp). The webhook doesn't give
+the invite link back, and the platform doesn't check the link's token, so the
+bot sends the login page itself.
+
+* **Connect it**: SFT **Settings** → *Shero Training course platform* →
+  paste the webhook secret from Shero (`PARTNER_PAYMENTS_WEBHOOK_SECRET`;
+  stored encrypted as `SFT_PLATFORM_WEBHOOK_SECRET`) → Save → *Check
+  connection* (it sends no student, so nothing is made). Not connected: paid
+  leads get the course link from Settings, as before.
+* **Retries**: the platform down or its email failing (5xx) is tried again by
+  the `sft_platform` job (1, 5, 15, 60, 240, 720 minutes), with the same
+  payment id, so nothing is made twice; then the team gets a task. A refused
+  secret (401), a refused request (4xx) or no email gives the team a task at
+  once. Meanwhile the lead is told their login comes in a few minutes; it goes
+  when the account is made (or on their next message, outside the 24-hour
+  window). Paid after the window: `sft_enrolled`'s **Get my course** brings
+  the login.
+* **Test payments** make no account unless *Also for test payments* is on
+  (Settings). The platform has no test mode: that makes a real account and
+  sends a real invite email (payment id `sft-test-<token>`). Test-chat leads
+  never go to it.
+* **The lead's page** → *Shero Training course*: their email (editable), the
+  account (made, being retried, or why not), *Make the course account now*
+  and *Send the login on WhatsApp again*.
+* The texts (**Bot replies**): *Payment confirmed (course account made: the
+  login)*, *Payment confirmed (course account being made)* and *Course login*.
 
 ## The nudges
 
@@ -211,12 +260,13 @@ the bot sends next and when.
 
 ## Going live
 
-1. Deploy. Migrations `0025_sft` (`sft_leads`, `sft_events`) and
-   `0026_sft_offers` (`sft_offers`, and a lead's offer and last nudge).
+1. Deploy. Migrations `0025_sft` (`sft_leads`, `sft_events`),
+   `0026_sft_offers` (`sft_offers`, and a lead's offer and last nudge) and
+   `0027_sft_platform` (a lead's course account and login).
 2. On `/admin/sft` → **Test chat**, walk the journey (it sends nothing on
    WhatsApp). Use *Time travel* to see the follow-ups.
-3. **Settings**: the course link (sent after paying) and the team's WhatsApp
-   numbers. **Bot replies**: the test numbers, and SFT's own channel id if it
+3. **Settings**: the course platform's webhook secret (*Check connection*),
+   or a course link (sent after paying), and the team's WhatsApp numbers. **Bot replies**: the test numbers, and SFT's own channel id if it
    has one.
 4. **Nudges → WhatsApp templates** → *Submit the missing ones to WhatsApp* (9 templates:
    `sft_followup_1..3`, `sft_payment_reminder`, `sft_course_check`,

@@ -43,9 +43,10 @@ from app.db.models import AdminUser, SftEvent, SftLead, SftOffer
 from app.db.session import get_session
 from app.integrations.gallabox.client import use_channel
 from app.integrations.gallabox.sender import use_sender
+from app.services import settings_store
 from app.schemas.inbound import InboundEvent, InboundKind
 from app.sft import analytics, brochure, config, content as c, crm, flow, leads, nudges, offers
-from app.sft import payments, receipt
+from app.sft import payments, platform, receipt
 from app.sft import periods, sending, views
 from app.sft import router as sft_router
 from app.sft.config import MODES, NUDGES, SftConfigError
@@ -444,7 +445,8 @@ async def _chat(request, session, cfg, rng, page, url) -> dict:
 async def _settings(request, session, cfg, rng, page, url) -> dict:
     return {"stripe_live": not is_unset(settings.stripe_secret_key),
             "brochure": brochure.describe(cfg), "brochure_max_mb": brochure.MAX_BYTES // 2**20,
-            "zoho_statuses": crm.statuses()}
+            "zoho_statuses": crm.statuses(), "platform_on": platform.ready(),
+            "can_store_secret": not is_unset(settings.settings_encryption_key)}
 
 
 async def _timeline(session, lead, kinds: tuple[str, ...] | None = None, limit: int = 300):
@@ -494,6 +496,8 @@ async def lead_page(lead_id: str, request: Request, session: AsyncSession = Depe
         "back": _url(request, "leads"), "flow_state": views.flow_of(lead, cfg, last.get(lead.id)),
         "price": price, "price_text": offers.fee_text(cfg, price),
         "attention_count": await _count(session, SftLead.needs_attention.is_(True)),
+        "platform_on": platform.ready(), "platform_wanted": platform.wanted(lead, cfg),
+        "in_window": sending.in_window(lead),
     })
 
 
@@ -561,10 +565,56 @@ async def lead_action(lead_id: str, request: Request,
         message = "It goes to Zoho within a minute."
     elif action == "forget":
         return await _forget(request, session, lead, form, who, here)
+    elif action == "email":
+        email = str(form.get("email") or "").strip().lower()[:255]
+        if email and not platform.valid_email(email):
+            return redirect(here, flash=("error", "That email doesn't look right."))
+        lead.email = email or None
+        message = "Email saved." + (" Now make their course account below."
+                                    if email and platform.wanted(lead, await config.load(session))
+                                    else "")
+    elif action in ("platform", "send_login"):
+        return await _platform_action(session, lead, action, here)
     else:
         return redirect(here, flash=("error", "Unknown action."))
     lead.crm_dirty = True
     return redirect(here, flash=("success", message))
+
+
+async def _platform_action(session, lead: SftLead, action: str, here: str):
+    """Make their Shero Training account now (a miss, or a test payment), or
+    send them the login again."""
+    cfg = await config.load(session)
+    if action == "send_login":
+        if not lead.platform_enrolled_at:
+            return redirect(here, flash=("error", "They have no course account yet."))
+        if await platform.send_login(session, lead, cfg):
+            return redirect(here, flash=("success", "The login went to them on WhatsApp."))
+        return redirect(here, flash=("error", "The login could not go on WhatsApp (outside the "
+                                              "24-hour window?). See the timeline."))
+    if not platform.ready():
+        return redirect(here, flash=("error", "Connect the course platform first (Settings)."))
+    if lead.paid_at is None:
+        return redirect(here, flash=("error", "They haven't paid yet."))
+    if lead.platform_enrolled_at:
+        return redirect(here, flash=("error", "They already have a course account."))
+    if lead.test_payment and not cfg.platform_for_tests:
+        return redirect(here, flash=("error", "A test payment: switch on \"Also for test "
+                                              "payments\" in Settings to make a real account."))
+    lead.platform_attempts = 0
+    lead.platform_next_try_at = None
+    outcome = await platform.enrol(session, lead, cfg)
+    if outcome == platform.DONE:
+        went = sending.in_window(lead) and await platform.send_login(session, lead, cfg)
+        return redirect(here, flash=("success", "Course account made on Shero Training: the "
+                                                "platform emailed the invite. " + (
+            "The login went to them on WhatsApp." if went else
+            "The login goes to them on WhatsApp when they next message (the 24-hour window is "
+            "closed).")))
+    if outcome == platform.RETRY:
+        return redirect(here, flash=("warning", f"Not made yet: {lead.platform_error}. "
+                                                "Trying again automatically."))
+    return redirect(here, flash=("error", f"Not made: {lead.platform_error}"))
 
 
 async def _forget(request, session, lead: SftLead, form, who: str, here: str):
@@ -665,14 +715,44 @@ async def save_settings(request: Request, session: AsyncSession = Depends(get_se
     cfg = await config.load(session, fresh=True)
     data = cfg.model_dump(mode="json")
     for name in ("brochure_url", "course_url", "course_access_note", "course_fee", "currency",
-                 "team_numbers"):
+                 "team_numbers", "platform_api_url", "platform_login_url"):
         if name in form:
             data[name] = str(form.get(name) or "").strip()
-    for flag in ("zoho_sync", "zoho_tasks"):
+    for flag in ("zoho_sync", "zoho_tasks", "platform_for_tests"):
         if f"has_{flag}" in form or flag in form:
             data[flag] = form.get(flag) == "on"
+    done = "SFT settings saved."
+    secret = str(form.get("platform_secret") or "").strip()
+    if secret:
+        back = _url(request, "settings")
+        if is_unset(settings.settings_encryption_key):
+            return redirect(back, flash=("error", "SETTINGS_ENCRYPTION_KEY is not set, so the "
+                                                  "secret can't be stored safely."))
+        await settings_store.save_many(session, {"SFT_PLATFORM_WEBHOOK_SECRET": secret},
+                                       updated_by=current_user.email)
+        log.info("sft_platform_secret_saved", by=current_user.email)
+        done = ("SFT settings saved, and the course platform's secret. Use Check connection to "
+                "test it.")
     return await _save(request, session, data, current_user.email, _url(request, "settings"),
-                       "SFT settings saved.")
+                       done)
+
+
+@router.post("/platform", name="admin_sft_platform")
+async def platform_card(request: Request, session: AsyncSession = Depends(get_session),
+                        current_user: AdminUser = Depends(require_admin)):
+    """Settings' course platform card: check the connection (makes nothing),
+    or disconnect (forget the secret: no more accounts are made)."""
+    form = await request.form()
+    back = _url(request, "settings")
+    if form.get("action") == "off":
+        await settings_store.save_many(session, {"SFT_PLATFORM_WEBHOOK_SECRET": ""},
+                                       updated_by=current_user.email,
+                                       allow_blank={"SFT_PLATFORM_WEBHOOK_SECRET"})
+        log.info("sft_platform_disconnected", by=current_user.email)
+        return redirect(back, flash=("success", "Course platform disconnected: paid leads get the "
+                                                "course link from Settings instead."))
+    ok, message = await platform.check(await config.load(session))
+    return redirect(back, flash=("success" if ok else "error", message))
 
 
 @router.post("/brochure", name="admin_sft_brochure")

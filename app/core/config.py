@@ -138,6 +138,11 @@ class Settings(BaseSettings):
     # admin Settings page. Empty: /api/v1 answers 503 and gives nothing out.
     integration_api_key: str = ""
 
+    # --- Shero Training course platform (Shero Food Training, Shero US) -------
+    # The secret its payment webhook checks (x-webhook-secret), from Shero.
+    # Pasted on SFT's Settings page; empty: no course accounts are made.
+    sft_platform_webhook_secret: str = ""
+
     # --- Admin dashboard -----------------------------------------------------
     admin_session_secret: str = ""
     admin_session_hours: int = 12

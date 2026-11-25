@@ -29,7 +29,7 @@ from app.core.logging import get_logger
 from app.db.models import SftLead, SftOffer
 from app.integrations.stripe_gw import checkout
 from app.sft import content as c
-from app.sft import leads, offers, receipt, sending
+from app.sft import leads, offers, platform, receipt, sending
 from app.sft.config import TEST, SftConfig
 from app.sft.leads import aware, event, move, now
 
@@ -144,21 +144,37 @@ async def mark_paid(session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
     lead.step = c.IDLE
     first = leads.first(lead)
     offer_title = price.offer.title if price.offer else None
+    # Their account on the Shero Training course platform, which emails the
+    # invite (platform.py); a miss is tried again by the sft_platform job.
+    account = await platform.enrol(session, lead, cfg)
+    on_platform = account != platform.SKIPPED
     if not sending.in_window(lead):
         # Only a template can reach them now: sft_enrolled, whose Get my course
-        # opens the chat again for the course and the receipt PDF.
+        # opens the chat again for the course (or login) and the receipt PDF.
         _save_receipt(lead, cfg, offer_title)
         went = await sending.template(session, lead, cfg, c.ENROLLED_TEMPLATE, first,
                                       amount_text, receipt.number(lead))
-        if not cfg.course_url or not went:
+        if not went or not (cfg.course_url or on_platform):
             await leads.raise_attention(
                 session, lead, "course_link",
                 detail="" if went else "Paid outside WhatsApp's 24-hour window and the "
                 "confirmation could not go (sft_enrolled not approved): send the course access")
         log.info("sft_paid", lead_id=str(lead.id), test=test, outside_window=True)
         return True
-    if cfg.course_url:
-        note = f"\n\n{cfg.course_access_note}" if cfg.course_access_note else ""
+    note = f"\n\n{cfg.course_access_note}" if cfg.course_access_note else ""
+    if account == platform.DONE:
+        if await sending.link(session, lead, cfg,
+                              c.say(cfg, "paid_login", first=first, amount=amount_text,
+                                    email=lead.email or "", note=note),
+                              url=cfg.platform_login_url, label=c.COURSE_LOGIN_BUTTON,
+                              what="paid"):
+            lead.login_sent_at = lead.course_link_sent_at = now()
+    elif on_platform:
+        # Being made (tried again shortly) or for the team (a task is raised).
+        await sending.text(session, lead, cfg,
+                           c.say(cfg, "paid_setting_up", first=first, amount=amount_text),
+                           what="paid")
+    elif cfg.course_url:
         await sending.link(session, lead, cfg,
                            c.say(cfg, "paid", first=first, amount=amount_text, note=note),
                            url=cfg.course_url, label=c.COURSE_BUTTON, what="paid")

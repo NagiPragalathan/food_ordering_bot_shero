@@ -23,7 +23,7 @@ from app.workers import jobs
 
 log = get_logger(__name__)
 
-EVERY_MINUTE = ("payment_reminders", "payment_expiry", "sft_crm")
+EVERY_MINUTE = ("payment_reminders", "payment_expiry", "sft_crm", "sft_platform")
 EVERY_5_MINUTES = ("feedback_requests", "courier_dispatch", "kitchen_alerts", "nudges",
                    "menu_photos", "sft_nudges")
 DAILY = ("slot_generation",)

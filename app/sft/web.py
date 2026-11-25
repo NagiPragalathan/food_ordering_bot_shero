@@ -1,7 +1,8 @@
 """The pages behind SFT's Pay button: /sft/enrol/<token>.
 
-    GET  /sft/enrol/<token>             review: the course, the price, Pay
-    GET  /sft/enrol/<token>/pay         opens the live Stripe checkout
+    GET  /sft/enrol/<token>             review: the course, the price, their email, Pay
+    POST /sft/enrol/<token>/pay         keeps the email, opens the live Stripe checkout
+    GET  /sft/enrol/<token>/pay         the same without a form (the email already known)
     POST /sft/enrol/<token>/test-paid   the test checkout's Pay: paid, nobody charged
     GET  /sft/enrol/<token>/done        back from Stripe: "you're enrolled"
     GET  /sft/receipt/<token>/<file>    the enrollment receipt PDF
@@ -9,6 +10,9 @@
 The token is the lead's own random pay token, so a link identifies one lead
 and nothing else (no number or name in the URL). Stripe's Back link returns
 to the review page.
+
+The email is their login on the Shero Training course platform (platform.py),
+so it is asked before paying while the platform is connected.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from app.core.exceptions import PaymentError
 from app.core.logging import get_logger
 from app.db.models import SftLead, SftOffer
 from app.db.session import get_session
-from app.sft import config, leads, offers, payments, receipt
+from app.sft import config, leads, offers, payments, platform, receipt
 from app.sft.config import SftConfig
 from app.templating import templates
 
@@ -75,17 +79,61 @@ async def enrol(token: str, request: Request, session: AsyncSession = Depends(ge
     if lead.paid_at:
         return await _enrolled(request, session, lead, cfg)
     await payments.clicked(session, lead)
+    return await _review(request, session, lead, cfg)
+
+
+async def _review(request: Request, session: AsyncSession, lead: SftLead, cfg: SftConfig, *,
+                  email: str | None = None, email_error: str = "", status: int = 200):
+    """The review page: the course, the price, their email, Pay."""
+    token = lead.pay_token
     price = await offers.price(session, lead, cfg)
     test = payments.test_checkout(lead, cfg)
     return _page(
-        request, "review", "Enroll in Shero Food Training",
+        request, "review", "Enroll in Shero Food Training", status=status,
         first=leads.first(lead) if (lead.name or lead.profile_name) else "",
         masked=_masked(lead), test=test, price=price, cfg=cfg,
         fee=cfg.money(price.fee), total=cfg.money(price.amount),
         saving=cfg.money(price.saving) if price.discounted else "",
         offer_name=(price.offer.code or price.offer.title) if price.discounted else "",
         pay_url=f"/sft/enrol/{token}/pay", test_pay_url=f"/sft/enrol/{token}/test-paid",
+        email=(lead.email or "") if email is None else email, email_error=email_error,
+        need_email=platform.ready(),
         brochure=cfg.brochure_link(), days=DAYS, topics=TOPICS, facts=FACTS)
+
+
+async def _take_email(request: Request, session: AsyncSession, lead: SftLead,
+                      cfg: SftConfig):
+    """Keep the email the Pay form sent. None when it is fine, else the review
+    page again saying what to fix (an email is needed while the course
+    platform is connected: it is their login there)."""
+    form = await request.form()
+    email = str(form.get("email") or "").strip().lower()[:255]
+    if not email and not platform.ready():
+        return None
+    if not platform.valid_email(email):
+        return await _review(request, session, lead, cfg, email=email, status=400,
+                             email_error="Please enter a valid email address: it's your "
+                                         "course login.")
+    if email != (lead.email or ""):
+        lead.email = email
+        lead.checkout_url = None            # a new checkout, with this email filled in
+        lead.crm_dirty = True
+    return None
+
+
+@router.post("/enrol/{token}/pay", name="sft_enrol_pay_form")
+async def pay_form(token: str, request: Request, session: AsyncSession = Depends(get_session)):
+    """The review page's Pay with their email: kept, then Stripe's checkout."""
+    lead = await leads.by_token(session, token)
+    if lead is None:
+        return _message(request, "Link not found", "This enrollment link isn't valid.",
+                        status=404)
+    cfg = await config.load(session)
+    if not lead.paid_at:
+        problem = await _take_email(request, session, lead, cfg)
+        if problem is not None:
+            return problem
+    return await _to_checkout(request, session, lead, cfg)
 
 
 @router.get("/enrol/{token}/pay", name="sft_enrol_pay")
@@ -96,6 +144,15 @@ async def pay(token: str, request: Request, session: AsyncSession = Depends(get_
         return _message(request, "Link not found", "This enrollment link isn't valid.",
                         status=404)
     cfg = await config.load(session)
+    if not lead.paid_at and platform.ready() and not platform.valid_email(lead.email):
+        # Their email first: it is their course login.
+        return RedirectResponse(f"/sft/enrol/{token}#email", status_code=303)
+    return await _to_checkout(request, session, lead, cfg)
+
+
+async def _to_checkout(request: Request, session: AsyncSession, lead: SftLead,
+                       cfg: SftConfig):
+    token = lead.pay_token
     if lead.paid_at or payments.test_checkout(lead, cfg):
         return RedirectResponse(f"/sft/enrol/{token}", status_code=303)
     try:
@@ -115,6 +172,11 @@ async def test_paid(token: str, request: Request, session: AsyncSession = Depend
     if lead is None or not payments.test_checkout(lead, cfg):
         return _message(request, "Not available", "This page is for test payments only.",
                         status=404)
+    if lead.paid_at:
+        return await _enrolled(request, session, lead, cfg)
+    problem = await _take_email(request, session, lead, cfg)
+    if problem is not None:
+        return problem
     await payments.mark_paid(session, lead, cfg, amount=None, currency=cfg.currency,
                              test=True)
     return await _enrolled(request, session, lead, cfg)
@@ -146,7 +208,10 @@ async def _enrolled(request: Request, session: AsyncSession, lead: SftLead, cfg:
         amount=_amount(lead, cfg), number=receipt.number(lead),
         paid_on=receipt.when(lead.paid_at, cfg), offer_name=lead.offer_code or title or "",
         receipt_url=f"/sft/receipt/{lead.pay_token}/{receipt.filename(lead)}",
-        masked=_masked(lead))
+        masked=_masked(lead), email=lead.email or "",
+        # Their Shero Training login, once the course platform made the account.
+        login_url=cfg.platform_login_url if lead.platform_enrolled_at else "",
+        account_pending=bool(platform.wanted(lead, cfg)))
 
 
 def _amount(lead: SftLead, cfg: SftConfig) -> str:

@@ -129,6 +129,14 @@ class SftConfig(BaseModel):
     # the stage then lives in Lead Status and the notes. Prepare Zoho clears it.
     zoho_no_tags: bool = False
 
+    # The Shero Training course platform (app/sft/platform.py): once a lead
+    # pays, it makes their account and course invite, and the bot sends them
+    # the login. Its secret is SFT_PLATFORM_WEBHOOK_SECRET (settings_store).
+    platform_api_url: str = "https://api.sherosft.com/api"
+    platform_login_url: str = "https://sft.sherosft.com/partner-login"
+    # Test payments make real accounts (and invite emails) there only when on.
+    platform_for_tests: bool = False
+
     @field_validator("test_numbers", "team_numbers", mode="before")
     @classmethod
     def _numbers(cls, value):
@@ -143,6 +151,14 @@ class SftConfig(BaseModel):
             if digits not in found:
                 found.append(digits)
         return found
+
+    @field_validator("platform_api_url", "platform_login_url", mode="before")
+    @classmethod
+    def _platform_url(cls, value):
+        url = str(value or "").strip().rstrip("/")
+        if not re.fullmatch(r"https://[^\s/]+(/\S*)?", url):
+            raise ValueError("the course platform's addresses start with https://")
+        return url
 
     @field_validator("keywords", "ad_ids", mode="before")
     @classmethod

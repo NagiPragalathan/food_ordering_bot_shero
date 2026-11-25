@@ -86,6 +86,8 @@ OTHER_EDITABLE: list[tuple[str, str, bool]] = [
     ("ORDER_ALERT_NUMBERS", "WhatsApp numbers told about every paid order", False),
     # Made by the Settings page's Integration API card (a new random key).
     ("INTEGRATION_API_KEY", "Read-only integration API key", True),
+    # Pasted on SFT's Settings page (Shero Training course platform card).
+    ("SFT_PLATFORM_WEBHOOK_SECRET", "Shero Training course platform webhook secret", True),
 ]
 
 # Shown only to the business that delivers that way (DELIVERY_PROVIDER).

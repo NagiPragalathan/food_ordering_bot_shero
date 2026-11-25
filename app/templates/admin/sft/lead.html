@@ -93,6 +93,41 @@
       <p class="mt-1 text-[11px] text-stone-500">Their enroll link: the course, their price, then Stripe's secure checkout.</p>
     {% endcall %}
 
+    {# Their Shero Training account (sft/platform.py). #}
+    {% call ui.card('Shero Training course') %}
+      <div class="space-y-2 text-sm" data-sft-course-account>
+        <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}" class="flex gap-2">
+          <input type="hidden" name="action" value="email">
+          <input type="email" name="email" value="{{ lead.email or '' }}" placeholder="Their email (course login)"
+                 class="min-w-0 flex-1 rounded-lg border border-stone-300 px-2.5 py-1.5 text-xs outline-none focus:border-brand-500">
+          <button class="rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50">Save</button>
+        </form>
+        {% if lead.platform_enrolled_at %}
+          <p class="text-stone-700">{{ ui.badge('Account made', 'good') }} {{ local(lead.platform_enrolled_at) }}</p>
+          <p class="text-xs text-stone-500">The platform emailed the invite. Login {{ 'sent on WhatsApp ' ~ local(lead.login_sent_at) if lead.login_sent_at else 'not sent on WhatsApp yet' }}.</p>
+          {% if lead.platform_id %}<p class="font-mono text-[11px] text-stone-400">Payment record {{ lead.platform_id }}</p>{% endif %}
+        {% elif not platform_on %}
+          <p class="text-xs text-stone-500">The course platform isn't connected (Settings), so no account is made.</p>
+        {% elif not lead.paid_at %}
+          <p class="text-xs text-stone-500">Their account is made once they pay.</p>
+        {% elif lead.source == 'Test chat' %}
+          <p class="text-xs text-stone-500">A test-chat lead: never sent to the course platform.</p>
+        {% elif lead.test_payment and not cfg.platform_for_tests %}
+          <p class="text-xs text-stone-500">A test payment: no account (switch on "Also for test payments" in Settings to make one).</p>
+        {% else %}
+          <p class="text-stone-700">{{ ui.badge('No account yet', 'warn') }}{% if lead.platform_next_try_at %} <span class="text-xs text-stone-500">trying again {{ local(lead.platform_next_try_at) }}</span>{% endif %}</p>
+        {% endif %}
+        {% if lead.platform_error and not lead.platform_enrolled_at %}<p class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{{ lead.platform_error }}</p>{% endif %}
+        {% if lead.platform_enrolled_at %}
+        <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}"><input type="hidden" name="action" value="send_login">
+          <button class="w-full rounded-lg bg-white px-3 py-2 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50" {% if not in_window %}title="Outside WhatsApp's 24-hour window: it may not go"{% endif %}>Send the login on WhatsApp again</button></form>
+        {% elif platform_on and lead.paid_at and lead.source != 'Test chat' %}
+        <form method="post" action="{{ url_for('admin_sft_action', lead_id=lead.id) }}"><input type="hidden" name="action" value="platform">
+          <button class="w-full rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700" data-sft-make-account>Make the course account now</button></form>
+        {% endif %}
+      </div>
+    {% endcall %}
+
     {% call ui.card('Zoho CRM') %}
       <div class="text-sm">
         {% if lead.source == 'Test chat' %}<p class="text-stone-500">A test-chat lead: never sent to Zoho.</p>
