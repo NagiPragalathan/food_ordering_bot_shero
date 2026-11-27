@@ -26,7 +26,7 @@ from app.db.models import Customer, Order, OrderStage, Outlet, PaymentStatus
 from app.db.session import get_session
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.client import gallabox
-from app.services import crm_sync, shiprocket_booking
+from app.services import crm_sync, order_updates, shiprocket_booking
 from app.services import orders as order_service
 from app.services import payments
 
@@ -99,6 +99,23 @@ async def list_kitchen_orders(
     return summaries
 
 
+@router.post("/orders/{order_number}/ready",
+             dependencies=[Depends(require_ops_key)])
+async def mark_food_ready(
+    order_number: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """The kitchen's food is ready: the customer hears (Food Ready); with
+    Shiprocket connected a rider is booked too (order_updates.mark_ready)."""
+    order, _ = await _load(session, order_number)
+    result = await order_updates.mark_ready(session, order)
+    if not result.ok:
+        raise HTTPException(status.HTTP_409_CONFLICT, result.message)
+    return {"order_number": order.order_number, "stage": order.stage,
+            "ready_at": order.ready_at.isoformat() if order.ready_at else None,
+            "message": result.message}
+
+
 @router.post("/orders/{order_number}/out-for-delivery",
              dependencies=[Depends(require_ops_key)])
 async def mark_out_for_delivery(
@@ -107,9 +124,7 @@ async def mark_out_for_delivery(
 ) -> dict:
     """Step 18: outlet marks the order out for delivery."""
     return await _transition(
-        session, order_number, OrderStage.OUT_FOR_DELIVERY,
-        template=tpl.ORDER_OUT_FOR_DELIVERY,
-    )
+        session, order_number, OrderStage.OUT_FOR_DELIVERY)
 
 
 @router.post("/orders/{order_number}/delivered",
@@ -124,9 +139,7 @@ async def mark_delivered(
     later (spec step 19).
     """
     return await _transition(
-        session, order_number, OrderStage.DELIVERED,
-        template=tpl.ORDER_DELIVERED,
-    )
+        session, order_number, OrderStage.DELIVERED)
 
 
 @router.post("/orders/{order_number}/cancel",
@@ -171,8 +184,8 @@ async def cancel_order(
 
 # --- internals ---------------------------------------------------------------
 async def _transition(session: AsyncSession, order_number: str,
-                      stage: OrderStage, *, template) -> dict:
-    order, customer = await _load(session, order_number)
+                      stage: OrderStage) -> dict:
+    order, _ = await _load(session, order_number)
 
     changed = order_service.set_stage(order, stage)
     if not changed:
@@ -181,8 +194,8 @@ async def _transition(session: AsyncSession, order_number: str,
                 "changed": False}
 
     await session.flush()
-    await gallabox.send_template(customer.whatsapp_number, template,
-                                 order.order_number)
+    # Food Dispatched / Order Delivered, with the invoice (order_updates).
+    await order_updates.notify_stage(session, order, stage)
     await crm_sync.push_order_stage(
         order, stage,
         delivered_at=order.delivered_at if stage is OrderStage.DELIVERED else None,

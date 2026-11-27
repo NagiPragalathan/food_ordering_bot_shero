@@ -25,7 +25,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import AdminUser, Order
 from app.db.session import get_session
-from app.services import dispatch, shiprocket_booking
+from app.services import dispatch, order_updates, shiprocket_booking
 from app.services import kitchen as kitchen_service
 
 log = get_logger(__name__)
@@ -72,7 +72,7 @@ async def queue_page(
             "has_kitchen": bool(kitchens),
             # Mark ready books a Shiprocket rider when Shiprocket is connected.
             "shiprocket": shiprocket_booking.enabled(),
-            "awaits_rider": shiprocket_booking.awaits_rider,
+            "awaits_rider": order_updates.awaits_ready,
             # Each kitchen's Shiprocket pickup location: Mark ready needs one.
             "pickups": {str(k.id): k.shiprocket_pickup for k in kitchens},
             "back": str(request.url),

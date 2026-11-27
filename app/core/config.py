@@ -242,7 +242,10 @@ class Settings(BaseSettings):
     # Off means the *message* is skipped, not the step: an unpaid order
     # still expires, and an order still moves through the kitchen stages.
     send_payment_reminder: bool = False
-    send_delivery_updates: bool = False
+    # The customer's WhatsApp at Food Ready, Food Dispatched and Order
+    # Delivered (with the invoice): on, at the client's request
+    # (services/order_updates.py). False skips the messages, not the stages.
+    send_delivery_updates: bool = True
     # "Your order is being prepared", right after the payment confirmation.
     # DST India's (on by default there); Shero US's kitchens cook a day ahead.
     send_preparing_message: bool = False

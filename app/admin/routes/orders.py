@@ -22,8 +22,7 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.integrations.gallabox import templates as tpl
-from app.integrations.gallabox.client import gallabox
-from app.services import crm_sync, kitchen_alerts, payouts, shiprocket_booking
+from app.services import crm_sync, kitchen_alerts, order_updates, payouts, shiprocket_booking
 from app.services import orders as order_service
 
 log = get_logger(__name__)
@@ -31,7 +30,9 @@ router = APIRouter(prefix="/orders", tags=["admin"])
 
 PAGE_SIZE = 40
 
-# Stage -> (next action label, target stage, template to send)
+# Stage -> (next action label, target stage, the customer's message for it,
+# sent by services/order_updates.py: Food Dispatched, Order Delivered with
+# the invoice). Food Ready goes from Mark ready / Food ready (admin_order_ready).
 TRANSITIONS = {
     OrderStage.PAID_SLOT_BOOKED: ("Send to kitchen", OrderStage.SENT_TO_KITCHEN, None),
     OrderStage.SENT_TO_KITCHEN: ("Out for delivery", OrderStage.OUT_FOR_DELIVERY,
@@ -39,16 +40,6 @@ TRANSITIONS = {
     OrderStage.OUT_FOR_DELIVERY: ("Mark delivered", OrderStage.DELIVERED,
                                   tpl.ORDER_DELIVERED),
 }
-
-
-def should_notify(template) -> bool:
-    """Whether a stage change should also message the customer.
-
-    The stage always advances; the message is optional. With
-    `SEND_DELIVERY_UPDATES` off the kitchen still tracks an order through
-    Out for delivery and Delivered - the customer simply is not told.
-    """
-    return template is not None and settings.send_delivery_updates
 
 
 @router.get("", name="admin_orders")
@@ -111,7 +102,7 @@ async def orders_index(
         "selected_kitchen": str(kitchen_id) if kitchen_id else "",
         # Mark ready books a Shiprocket rider (own delivery with Shiprocket connected).
         "shiprocket": shiprocket_booking.enabled(),
-        "awaits_rider": shiprocket_booking.awaits_rider,
+        "awaits_rider": order_updates.awaits_ready,
         "back": str(request.url),
     })
 
@@ -141,7 +132,7 @@ async def advance_order(
             "error", f"{order.order_number} is {order.stage} - no further step."
         ))
 
-    _, target, template = transition
+    _, target, _ = transition
     if target is OrderStage.SENT_TO_KITCHEN:
         # Sending by hand ahead of the delivery-day alert: message the kitchen now.
         messaged = await kitchen_alerts.send_alert(session, order)
@@ -155,30 +146,23 @@ async def advance_order(
         return redirect(url, flash=("success", "Already at that stage."))
     await session.flush()
 
-    customer = await session.get(Customer, order.customer_id)
-    if should_notify(template) and customer is not None:
-        try:
-            await gallabox.send_template(customer.whatsapp_number, template,
-                                         order.order_number)
-        except Exception as exc:  # noqa: BLE001 - stage change already committed
-            log.error("order_notify_failed", order_number=order.order_number,
-                      error=str(exc))
-            await crm_sync.push_order_stage(order, target)
-            return redirect(url, flash=(
-                "warning",
-                f"{order.order_number} moved to {target}, but the WhatsApp "
-                f"message failed to send: {exc}",
-            ))
+    # Food Dispatched / Order Delivered (with the invoice) to the customer.
+    told = await order_updates.notify_stage(session, order, target)
 
     await crm_sync.push_order_stage(
         order, target,
         delivered_at=order.delivered_at if target is OrderStage.DELIVERED else None,
     )
     log.info("admin_order_advanced", order_number=order.order_number,
-             stage=str(target), by=current_user.email)
-    return redirect(url, flash=(
-        "success", f"{order.order_number} is now {target}."
-    ))
+             stage=str(target), told=told, by=current_user.email)
+    if told:
+        return redirect(url, flash=("success", f"{order.order_number} is now {target}; the customer "
+                                    "was told on WhatsApp" + (", with the invoice." if target is
+                                                              OrderStage.DELIVERED else ".")))
+    if settings.send_delivery_updates:
+        return redirect(url, flash=("warning", f"{order.order_number} is now {target}, but the "
+                                    "customer's WhatsApp message could not be sent."))
+    return redirect(url, flash=("success", f"{order.order_number} is now {target}."))
 
 
 @router.post("/{order_number}/notify-kitchen", name="admin_order_notify_kitchen")
@@ -207,12 +191,13 @@ def _back(request: Request, form) -> str:
 async def mark_ready(request: Request, order_number: str,
                      session: AsyncSession = Depends(get_session),
                      current_user: AdminUser = Depends(require_admin)):
-    """The food is prepared: book a Shiprocket rider (shiprocket_booking)."""
+    """The food is prepared: the customer hears (Food Ready), and with
+    Shiprocket connected a rider is booked (order_updates.mark_ready)."""
     back = _back(request, await request.form())
     order = await order_service.get_by_number(session, order_number.upper())
     if order is None:
         return redirect(back, flash=("error", f"Order {order_number} not found."))
-    result = await shiprocket_booking.mark_ready(session, order)
+    result = await order_updates.mark_ready(session, order)
     log.info("admin_order_marked_ready", order_number=order.order_number, ok=result.ok,
              by=current_user.email)
     return redirect(back, flash=("success" if result.ok else "error", result.message))

@@ -242,13 +242,21 @@ Each paid order has one button that moves it forward:
 
 ```
 Paid & Slot Booked  ->  Send to kitchen
-Sent to Kitchen     ->  Out for delivery   (sends order_out_for_delivery)
-Out for Delivery    ->  Mark delivered     (sends order_delivered)
+Sent to Kitchen     ->  Food ready         (Food Ready: order_food_ready)
+                        (Mark ready with Shiprocket, which also books the rider)
+                    ->  Out for delivery   (Food Dispatched: order_out_for_delivery)
+Out for Delivery    ->  Mark delivered     (Order Delivered, with the invoice)
 ```
 
-Advancing an order **sends the matching approved WhatsApp template to the
-customer** and updates the stage in Zoho. A double-tap is safe: the second
-press does nothing rather than sending a second message.
+The customer hears on WhatsApp at those three steps (the client's three
+stages). **The invoice goes only with Mark delivered**, never when the order is
+placed: the invoice PDF itself when the customer wrote within the last 23
+hours, else the `order_delivered_v2` template with its Download Invoice
+button. Until a delivered order exists, its invoice link says the invoice
+comes with the delivery. Each step also updates the stage in the CRM. A
+double-tap is safe: the second press does nothing rather than sending a
+second message. `SEND_DELIVERY_UPDATES=false` skips the messages (the stages
+still move); it is on by default.
 
 Thirty minutes after delivery, the feedback request goes out automatically.
 

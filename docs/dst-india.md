@@ -170,10 +170,14 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
   "Thu 19 Nov, next 60 min". Shero US keeps a day's notice (24 hours, its own
   Pre-ordering lead time, in hours).
 - **Orders** and **Delivery queue**: paid orders by slot, with address, map
-  link and phone. *Send to kitchen → Out for delivery → Mark delivered* moves
-  each on and messages the customer.
+  link and phone. *Send to kitchen → Mark ready → Out for delivery → Mark
+  delivered* moves each on. The customer hears at Mark ready ("Your order
+  #… is ready at <kitchen>", `dst_order_food_ready`), Out for delivery and
+  Mark delivered, which carries the invoice (`dst_order_delivered_v2`, or the
+  PDF itself inside the 24-hour window). The invoice is sent only then, never
+  with the payment confirmation.
 - **Messages after paying**: the payment confirmation ("Payment received!
-  Your order is confirmed…"), then straight away "Your order #… is being
+  Your order is confirmed…", no invoice: `dst_payment_confirmed_v5`), then straight away "Your order #… is being
   prepared at <kitchen>" (`dst_order_preparing`; plain text until Meta
   approves it). The kitchen gets its alert at the same moment.
 - **Mark ready** (with Shiprocket connected): when the food is prepared,

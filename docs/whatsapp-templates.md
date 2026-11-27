@@ -37,7 +37,8 @@ uses a `_v2` template only once it is approved **and** `PUBLIC_BASE_URL` is
 
 | Spec name | Name on the channel |
 |---|---|
-| `payment_success` | `payment_confirmed_v4` (with the Download Invoice button; v2 said Download Bill, v3 was submitted with a test address and is unused) |
+| `payment_success` | `payment_confirmed_v5` (no invoice: it goes with `order_delivered_v2`; v4 carried a Download Invoice button, v2 said Download Bill, v3 was submitted with a test address and is unused) |
+| `order_delivered` | `order_delivered_v2` (with the Download Invoice button; `order_delivered` stands in until it is approved) |
 | `payment_link` | `shero_payment_link_v2` |
 | `payment_reminder` | `shero_payment_reminder_v2` |
 | `payment_failed` | `shero_payment_failed_v2` |
@@ -302,22 +303,22 @@ Hi {{1}}, your order #{{2}} is waiting for payment. Complete it to keep your {{3
 | | |
 |---|---|
 | Category | Utility |
-| Trigger | Stripe payment confirmed (step 16) |
-| Body | Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} for delivery at {{4}}. Thank you for ordering with Shero! Tap below for your invoice. |
-| Button | **Download Invoice**, dynamic URL `PUBLIC_BASE_URL/receipt/{{1}}` |
+| Trigger | Payment confirmed (step 16) |
+| Body | Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} for delivery at {{4}}. Thank you for ordering with Shero! We will send your invoice once your order is delivered. |
+| Button | none |
 
-Submitted under a new name because the first `payment_success` came back in
-error, and a name stays taken until the template is deleted in Gallabox.
-The button opens the paid bill as a PDF; its suffix is the order number
-signed with the app secret, so the link cannot be guessed or edited, and it
-does not expire. An unpaid order has no bill.
+`payment_confirmed_v5`. No invoice: the client asked for invoices to be made
+and sent only after delivery, not when the order is placed, so the invoice
+goes with `order_delivered_v2`. v4 carried a Download Invoice button, and a
+button cannot be taken off an approved template, hence the new name. A
+Download Invoice link from an older v4 message opens a page saying the
+invoice comes once the order is delivered.
 
 **Until it is approved the confirmation still arrives:** the bot checks
-approval first and otherwise sends the same words as a plain WhatsApp text,
-ending with a Download Invoice button. The customer paid from a link sent
-moments earlier, so the chat is inside WhatsApp's 24-hour window and a
-plain text is delivered. Code: `payments.send_payment_confirmation`,
-`services/receipts.py`, route `GET /receipt/<token>`.
+approval first and otherwise sends the same words as a plain WhatsApp text.
+The customer paid from a link sent moments earlier, so the chat is inside
+WhatsApp's 24-hour window and a plain text is delivered. Code:
+`payments.send_payment_confirmation`.
 
 ## 4. `payment_failed`
 
@@ -449,10 +450,33 @@ Thank you - Shero Home Food.
 
 ## Order and delivery templates
 
-## 7. `order_out_for_delivery`
+The customer hears at three stages (services/order_updates.py), each from
+the Orders page, the Delivery queue or the ops API, while Settings has
+`SEND_DELIVERY_UPDATES` on (the default, at the client's request):
+
+| Stage | Pressed | Template |
+|---|---|---|
+| Food Ready | **Food ready** (or **Mark ready** with Shiprocket, which also books the rider) | `order_food_ready` |
+| Food Dispatched | **Out for delivery** | `order_out_for_delivery` |
+| Order Delivered, with the invoice | **Mark delivered** | `order_delivered_v2` |
+
+## 7a. `order_food_ready`
 
 - **Category:** Utility
-- **Trigger:** Outlet marks Out for Delivery (step 18)
+- **Trigger:** the food is ready: Food ready / Mark ready, once per order
+- **Parameters:** `{{1}}` = order_number, `{{2}}` = the kitchen's name
+- **Button:** none
+
+**Body:**
+
+```
+Good news! Your order #{{1}} is ready at {{2}} and will be on its way to you shortly.
+```
+
+## 7. `order_out_for_delivery` (Food Dispatched)
+
+- **Category:** Utility
+- **Trigger:** Out for delivery (step 18)
 - **Parameters:** `{{1}}` = order_number
 - **Button:** none
 
@@ -462,18 +486,34 @@ Thank you - Shero Home Food.
 Your order #{{1}} is on its way!
 ```
 
-## 8. `order_delivered`
+## 8. `order_delivered_v2` (Order Delivered, with the invoice)
 
 - **Category:** Utility
-- **Trigger:** Outlet marks Delivered (step 18)
+- **Trigger:** Mark delivered (step 18)
 - **Parameters:** `{{1}}` = order_number
-- **Button:** none
+- **Button:** **Download Invoice**, dynamic URL `PUBLIC_BASE_URL/receipt/{{1}}`
+  (the order number signed with the app secret: it cannot be guessed or
+  edited, and does not expire)
 
 **Body:**
 
 ```
-Your order #{{1}} has been delivered. Enjoy your meal!
+Your order #{{1}} has been delivered. Enjoy your meal! Tap below to download your invoice.
 ```
+
+How the invoice goes with it:
+
+- **The customer wrote in the last 23 hours** (inside WhatsApp's 24-hour
+  window): the invoice PDF itself, as a document, with "Your order #… has
+  been delivered. Enjoy your meal! Your invoice is attached." as its caption.
+  One message, the invoice attached.
+- **Otherwise:** this template, its button opening the invoice PDF.
+- **Until Meta approves it**, outside the window: the first `order_delivered`
+  ("Your order #{{1}} has been delivered. Enjoy your meal!"), without the
+  invoice, so the customer still hears; the log says `invoice_waits_for_template`.
+
+The invoice (services/receipts.py, `GET /receipt/<token>`) exists only for a
+paid, delivered order, and shows the delivery date.
 
 ## 9. `order_cancelled`
 
@@ -528,5 +568,6 @@ end in Stripe test mode to see them fire in sequence:
 
 ```
 payment_link -> (wait 15 min) payment_reminder -> pay -> payment_success
-  -> order_out_for_delivery -> order_delivered -> (30 min) feedback_request
+  -> order_food_ready -> order_out_for_delivery -> order_delivered_v2 (invoice)
+  -> (30 min) feedback_request
 ```

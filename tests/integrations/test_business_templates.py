@@ -49,17 +49,17 @@ def test_shero_us_names_are_unchanged(us):
     assert tpl.wire_name(tpl.PAYMENT_LINK) == "shero_payment_link_v2"
     assert tpl.for_business(tpl.ORDER_SUMMARY) is tpl.ORDER_SUMMARY
     assert tpl.managed() == tpl.MANAGED_TEMPLATES
-    block = tpl.render(tpl.PAYMENT_SUCCESS, "SHO-1", "42.50", "Shero", "Wed",
-                       button_value="tok")
-    assert block["template"]["templateName"] == "payment_confirmed_v4"
+    block = tpl.render(tpl.PAYMENT_SUCCESS, "SHO-1", "42.50", "Shero", "Wed")
+    assert block["template"]["templateName"] == "payment_confirmed_v5"
 
 
 def test_dst_india_sends_its_own_prefixed_copy(dst):
     assert tpl.wire_name(tpl.PAYMENT_LINK) == "dst_shero_payment_link_v2"
     assert tpl.wire_name("order_summary_v2") == "dst_order_summary_v2"
-    block = tpl.render(tpl.PAYMENT_SUCCESS, "DST-1", "749.00", "Shero Anna Nagar", "Wed",
-                       button_value="tok")
-    assert block["template"]["templateName"] == "dst_payment_confirmed_v4"
+    block = tpl.render(tpl.PAYMENT_SUCCESS, "DST-1", "749.00", "Shero Anna Nagar", "Wed")
+    assert block["template"]["templateName"] == "dst_payment_confirmed_v5"
+    delivered = tpl.render(tpl.ORDER_DELIVERED, "DST-1", button_value="tok")
+    assert delivered["template"]["templateName"] == "dst_order_delivered_v2"
     assert [s.name for s in tpl.managed()] == [f"dst_{s.name}" for s in tpl.MANAGED_TEMPLATES]
 
 
@@ -115,7 +115,7 @@ def test_dst_submission_goes_to_its_own_number_with_its_own_links(dst):
 
 def test_dst_menu_and_invoice_buttons_point_at_its_pages(dst):
     menu = template_admin.components(tpl.MENU_LINK)[-1]["buttons"][0]["url"]
-    invoice = template_admin.components(tpl.PAYMENT_SUCCESS)[-1]["buttons"][0]["url"]
+    invoice = template_admin.components(tpl.ORDER_DELIVERED)[-1]["buttons"][0]["url"]
     assert menu == "https://smo.shero.us/dst/order/{{1}}"
     assert invoice == "https://smo.shero.us/dst/receipt/{{1}}"
 

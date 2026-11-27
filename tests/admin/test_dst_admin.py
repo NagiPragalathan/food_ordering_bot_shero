@@ -85,19 +85,26 @@ async def test_dst_delivery_queue_lists_orders_for_its_own_riders(admin, session
                         capacity=5, reserved_count=1)
     session.add(slot)
     await session.flush()
-    session.add(Order(order_number="DST-261116-RIDER", customer_id=customer.id,
+    order = Order(order_number="DST-261116-RIDER", customer_id=customer.id,
                       outlet_id=outlet.id, slot_id=slot.id, items=[], item_count=2,
                       dish_total=Decimal("498"), delivery_fee=Decimal("40"),
                       total=Decimal("562.90"), currency="INR", delivery_address="12 Anna Salai",
                       postal_code="600002", payment_status=PaymentStatus.PAID,
-                      stage=OrderStage.SENT_TO_KITCHEN))
+                      stage=OrderStage.SENT_TO_KITCHEN)
+    session.add(order)
     await session.flush()
 
     page = admin.get("/dst/admin/deliveries").text
     assert "Delivery queue" in page and "Uber" not in page.split("<main", 1)[1]
     assert "DST-261116-RIDER" in page and "₹562.90" in page and "600002" in page
-    assert "Out for delivery" in page          # the order's next step
-    assert '/dst/admin/orders/DST-261116-RIDER/advance"' in page
+    # The order's next step is Food ready (Mark ready, with Shiprocket), then
+    # Out for delivery: the customer hears at each.
+    advance = '/dst/admin/orders/DST-261116-RIDER/advance"'
+    assert "data-food-ready" in page and advance not in page
+    order.ready_at = datetime.now(timezone.utc)
+    await session.flush()
+    page = admin.get("/dst/admin/deliveries").text
+    assert "Out for delivery" in page and advance in page
 
 
 def test_the_settings_page_shows_each_business_its_own_delivery(admin):

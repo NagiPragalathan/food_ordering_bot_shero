@@ -1,5 +1,6 @@
-"""The "payment received" message (spec step 16), with its Download Invoice
-button. The not-approved fallback is the client's and is tested in
+"""The "payment received" message (spec step 16), without the invoice: it
+goes once the order is delivered (services/order_updates.py). The
+not-approved fallback is the client's and is tested in
 tests/integrations/test_template_fallback.py."""
 
 from __future__ import annotations
@@ -31,16 +32,20 @@ def _order(customer) -> Order:
                  slot_label="Tue 29 Sep, 11:00 AM - 12:00 PM", items=[])
 
 
-async def test_the_confirmation_carries_the_bill_button(customer, monkeypatch):
+async def test_the_confirmation_carries_no_invoice(customer, monkeypatch):
+    """The client: "Generate and send invoices only after order delivery,
+    not upon order placement"."""
     sender = Sender()
     monkeypatch.setattr(payments, "current_sender", lambda: sender)
 
     assert await payments.send_payment_confirmation(customer, _order(customer), "Shero")
 
     (to, name, values, button), = sender.sent
-    assert (to, name) == (customer.whatsapp_number, "payment_confirmed_v4")
+    assert (to, name) == (customer.whatsapp_number, "payment_confirmed_v5")
     assert values == ("SHO-TEST-7", "33.80", "Shero", "Tue 29 Sep, 11:00 AM - 12:00 PM")
-    assert payments.receipts.read_token(button) == "SHO-TEST-7"
+    assert button is None
+    assert "invoice once your order is delivered" in payments.tpl.PAYMENT_SUCCESS.sample_body
+    assert payments.tpl.PAYMENT_SUCCESS.button_kind == "none"
 
 
 async def test_a_failed_send_is_reported_not_raised(customer, monkeypatch):

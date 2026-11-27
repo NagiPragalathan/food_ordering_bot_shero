@@ -259,8 +259,10 @@ async def mark_ready(session: AsyncSession, order: Order) -> Result:
     customer = await session.get(Customer, order.customer_id)
 
     now = datetime.now(timezone.utc)
-    if order.ready_at is None:
-        order.ready_at = now
+    # The food is ready: recorded once, and the customer told (Food Ready),
+    # whether or not a rider can be booked just now.
+    from app.services import order_updates
+    await order_updates.record_ready(session, order)
     try:
         # A kitchen without one gets its pickup location now, from its own record.
         await ensure_pickup(session, outlet)

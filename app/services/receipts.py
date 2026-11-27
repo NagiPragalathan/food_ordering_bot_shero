@@ -1,9 +1,12 @@
-"""The bill a customer can download once they have paid (spec step 16).
+"""The invoice, made and sent only once the order is delivered (the client:
+"Generate and send invoices only after order delivery, not upon order
+placement").
 
-The payment confirmation carries a link to `/receipt/<token>`. The token is
-the order number signed with the app secret, so the URL cannot be guessed or
-edited to open somebody else's bill, and it never expires: a customer may
-want the bill weeks later. Only a paid order has a bill.
+The Order Delivered message (services/order_updates.py) carries it: the PDF
+itself, or a link to `/receipt/<token>`. The token is the order number signed
+with the app secret, so the URL cannot be guessed or edited to open somebody
+else's invoice, and it never expires: a customer may want it weeks later.
+Only a paid, delivered order has one (`invoiced`).
 
 The PDF is drawn with fpdf2 from the order snapshot, so it shows exactly what
 was charged even if menu prices change later. A coupon shows as its own line
@@ -56,6 +59,13 @@ def receipt_url(order_number: str) -> str:
     return f"{settings.public_base_url.rstrip('/')}/receipt/{build_token(order_number)}"
 
 
+def invoiced(order: Order) -> bool:
+    """A paid order that has been delivered: it has its invoice."""
+    from app.db.models import OrderStage, PaymentStatus
+    return (order.payment_status == str(PaymentStatus.PAID)
+            and (order.stage == str(OrderStage.DELIVERED) or order.delivered_at is not None))
+
+
 def filename(order: Order) -> str:
     return f"Shero-invoice-{order.order_number}.pdf"
 
@@ -88,8 +98,10 @@ def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
     pdf.cell(62, 8, "PAID INVOICE", align="R")
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*MUTED)
-    for offset, line in enumerate((f"Order #{order.order_number}",
-                                   f"Paid {_when(order)}")):
+    header = [f"Order #{order.order_number}", f"Paid {_when(order)}"]
+    if order.delivered_at:
+        header.append(f"Delivered {_when(order, order.delivered_at)}")
+    for offset, line in enumerate(header):
         pdf.set_xy(130, 25 + offset * 5)
         pdf.cell(62, 5, _t(line), align="R")
 
@@ -210,8 +222,8 @@ def _money(currency: str, amount) -> str:
     return f"{currency}{Decimal(str(amount or 0)):.2f}"
 
 
-def _when(order: Order) -> str:
-    stamp = order.paid_at or order.created_at
+def _when(order: Order, stamp=None) -> str:
+    stamp = stamp or order.paid_at or order.created_at
     if stamp is None:
         return "-"
     if stamp.tzinfo is None:

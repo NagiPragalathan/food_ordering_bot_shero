@@ -1,4 +1,5 @@
-"""The downloadable PDF bill (services/receipts.py, api/routes/receipts.py)."""
+"""The PDF invoice, only once the order is delivered (services/receipts.py,
+api/routes/receipts.py)."""
 
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ def _secret(monkeypatch):
     monkeypatch.setattr(settings, "public_base_url", "https://shero.test")
 
 
-async def _order(session, customer, outlet, *, paid=True) -> Order:
+async def _order(session, customer, outlet, *, paid=True, delivered=True) -> Order:
     order = Order(
         order_number="SHO-260930-BILL1", customer_id=customer.id, outlet_id=outlet.id,
         items=[{"retailer_id": "a", "name": "Drumstick Sambar", "quantity": 2,
@@ -33,7 +34,10 @@ async def _order(session, customer, outlet, *, paid=True) -> Order:
         slot_label="Wed 30 Sep, 7:00 PM - 8:00 PM", stripe_payment_intent_id="pi_123",
         paid_at=datetime(2026, 9, 30, 13, 5, tzinfo=timezone.utc),
         payment_status=PaymentStatus.PAID if paid else PaymentStatus.LINK_SENT,
-        stage=OrderStage.PAID_SLOT_BOOKED if paid else OrderStage.PENDING_PAYMENT)
+        stage=(OrderStage.DELIVERED if paid and delivered else
+               OrderStage.SENT_TO_KITCHEN if paid else OrderStage.PENDING_PAYMENT),
+        delivered_at=datetime(2026, 9, 30, 19, 20, tzinfo=timezone.utc)
+        if paid and delivered else None)
     session.add(order)
     await session.flush()
     return order
@@ -65,7 +69,7 @@ async def test_the_bill_is_a_pdf(session, customer, outlet):
     assert body.startswith(b"%PDF")
 
 
-async def test_a_paid_order_downloads_its_bill(session, customer, outlet):
+async def test_a_delivered_order_downloads_its_invoice(session, customer, outlet):
     await _order(session, customer, outlet)
     response = _client(session).get(f"/receipt/{receipts.build_token('SHO-260930-BILL1')}")
     assert response.status_code == 200
@@ -79,3 +83,17 @@ async def test_an_unpaid_order_or_a_bad_token_has_no_bill(session, customer, out
     client = _client(session)
     assert client.get(f"/receipt/{receipts.build_token('SHO-260930-BILL1')}").status_code == 404
     assert client.get("/receipt/SHO-260930-BILL1").status_code == 404
+
+
+async def test_before_delivery_there_is_no_invoice_yet(session, customer, outlet):
+    """The client: invoices only after delivery, not on placing the order. A
+    link from an older payment confirmation says when it comes."""
+    order = await _order(session, customer, outlet, delivered=False)
+    assert not receipts.invoiced(order)
+    response = _client(session).get(f"/receipt/{receipts.build_token('SHO-260930-BILL1')}")
+    assert response.status_code == 404
+    assert "as soon as it is delivered" in response.text
+    assert not response.content.startswith(b"%PDF")
+    order.stage, order.delivered_at = OrderStage.DELIVERED, datetime.now(timezone.utc)
+    await session.flush()
+    assert receipts.invoiced(order)

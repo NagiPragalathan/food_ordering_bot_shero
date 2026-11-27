@@ -40,7 +40,7 @@ from app.integrations import payment_gateway
 # returns this same module object for a Stripe business.
 from app.integrations.stripe_gw import checkout  # noqa: F401
 from app.services import (crm_sync, dispatch, kitchen_alerts, order_alerts, orders,
-                          loyalty, promotions, receipts, slots)
+                          loyalty, promotions, slots)
 from app.services.customers import advance, get_or_create_conversation
 
 log = get_logger(__name__)
@@ -48,15 +48,15 @@ log = get_logger(__name__)
 
 async def send_payment_confirmation(customer: Customer, order: Order,
                                     outlet_name: str) -> bool:
-    """Tell the customer their payment went through (spec step 16), with a
-    Download Invoice button. If the template is not approved the client sends
-    the same words as an ordinary message (gallabox/fallback.py). Returns
-    True when a message was accepted."""
+    """Tell the customer their payment went through (spec step 16). No
+    invoice: it goes once the order is delivered (services/order_updates.py).
+    If the template is not approved the client sends the same words as an
+    ordinary message (gallabox/fallback.py). Returns True when a message was
+    accepted."""
     try:
         await current_sender().send_template(
             customer.whatsapp_number, tpl.PAYMENT_SUCCESS, order.order_number,
-            amount_text(order), outlet_name, order.slot_label or "your chosen slot",
-            button_value=receipts.build_token(order.order_number))
+            amount_text(order), outlet_name, order.slot_label or "your chosen slot")
         return True
     except IntegrationError as exc:
         log.error("payment_success_message_failed", order_number=order.order_number,

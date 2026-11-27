@@ -46,14 +46,14 @@ def _approved(monkeypatch, value: bool):
 
 async def test_an_approved_template_is_sent_as_a_template(client, monkeypatch):
     _approved(monkeypatch, True)
-    await client.send_template("1555", tpl.ORDER_DELIVERED, "SHO-1")
+    await client.send_template("1555", tpl.ORDER_DELIVERED_V1, "SHO-1")
     (payload,), = [client.sent]
     assert payload["type"] == "template"
 
 
 async def test_without_approval_the_body_goes_as_text(client, monkeypatch):
     _approved(monkeypatch, False)
-    await client.send_template("1555", tpl.ORDER_DELIVERED, "SHO-1")
+    await client.send_template("1555", tpl.ORDER_DELIVERED_V1, "SHO-1")
     (payload,), = [client.sent]
     assert payload["type"] == "text"
     assert "SHO-1" in payload["text"]["body"] and "{{" not in payload["text"]["body"]
@@ -61,13 +61,12 @@ async def test_without_approval_the_body_goes_as_text(client, monkeypatch):
 
 async def test_a_url_button_becomes_a_link_button_to_the_same_place(client, monkeypatch):
     _approved(monkeypatch, False)
-    await client.send_template("1555", tpl.PAYMENT_SUCCESS, "SHO-1", "33.80", "Shero",
-                               "Tue 7 PM", button_value="TOKEN")
+    await client.send_template("1555", tpl.ORDER_DELIVERED, "SHO-1", button_value="TOKEN")
     (payload,), = [client.sent]
     action = payload["interactive"]["action"]["parameters"]
     assert action["url"] == "https://shero.test/receipt/TOKEN"
     assert action["display_text"] == "Download Invoice"
-    assert "Payment received! Your order #SHO-1 of $33.80" in payload["interactive"]["body"]["text"]
+    assert "Your order #SHO-1 has been delivered" in payload["interactive"]["body"]["text"]
 
 
 async def test_pay_now_points_at_the_short_payment_redirect(client, monkeypatch):
@@ -91,7 +90,7 @@ async def test_quick_replies_become_buttons_that_answer_the_same_way(client, mon
 async def test_a_template_gallabox_refuses_falls_back_too(client, monkeypatch):
     _approved(monkeypatch, True)
     client.fail_first = True
-    await client.send_template("1555", tpl.ORDER_DELIVERED, "SHO-1")
+    await client.send_template("1555", tpl.ORDER_DELIVERED_V1, "SHO-1")
     assert client.sent[0]["failed"]["type"] == "template"
     assert client.sent[1]["type"] == "text"
 
@@ -99,5 +98,5 @@ async def test_a_template_gallabox_refuses_falls_back_too(client, monkeypatch):
 async def test_wrong_values_are_still_refused_before_anything_is_sent(client, monkeypatch):
     _approved(monkeypatch, False)
     with pytest.raises(ValueError):
-        await client.send_template("1555", tpl.ORDER_DELIVERED)
+        await client.send_template("1555", tpl.ORDER_DELIVERED_V1)
     assert client.sent == []

@@ -1,5 +1,7 @@
 {# Mark ready and the Shiprocket rider it books (services/shiprocket_booking.py),
-   for one order. Used on the Delivery queue and the Orders page.
+   for one order; without Shiprocket, Food ready (services/order_updates.py).
+   Either tells the customer the food is ready. Used on the Delivery queue
+   and the Orders page.
    `shiprocket`: Shiprocket is connected; `back`: the page to come back to;
    `has_pickup`: the order's kitchen has its Shiprocket pickup location set
    (without one, the first Mark ready creates it from the kitchen's record). #}
@@ -45,5 +47,15 @@
       </button>
     </form>
     {% if c.order_id %}<div class="mt-1 text-[11px]">{{ cancel_form(o, back, 'Cancel Shiprocket order') }}</div>{% endif %}
+  {% elif not shiprocket and o.payment_status == 'paid' and o.stage == 'Sent to Kitchen' and not o.ready_at %}
+    {# Without Shiprocket: the food is prepared, and the customer hears (Food Ready). #}
+    <form method="post" class="mt-2" action="{{ url_for('admin_order_ready', order_number=o.order_number) }}" data-food-ready>
+      <input type="hidden" name="back" value="{{ back }}">
+      <button class="whitespace-nowrap rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+              title="The food is prepared: tell the customer it is ready">Food ready</button>
+    </form>
+  {% endif %}
+  {% if o.ready_at and o.stage == 'Sent to Kitchen' and not c.assigned %}
+    <div class="mt-1 text-left text-[11px] text-emerald-700">Food ready {{ o.ready_at.strftime('%H:%M') }} UTC</div>
   {% endif %}
 {% endmacro %}

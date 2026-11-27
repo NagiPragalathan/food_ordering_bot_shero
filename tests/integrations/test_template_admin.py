@@ -97,7 +97,7 @@ def test_quick_reply_buttons_keep_their_order():
 
 
 def test_a_template_without_buttons_is_body_only():
-    assert len(admin.components(tpl.ORDER_DELIVERED)) == 1
+    assert len(admin.components(tpl.ORDER_DELIVERED_V1)) == 1
 
 
 def test_the_welcome_template_offers_a_tappable_order_button():
@@ -117,7 +117,7 @@ def test_welcome_button_label_is_a_restart_keyword():
 # --- the creation payload ------------------------------------------------------
 def test_creation_payload_targets_the_sending_channel(monkeypatch):
     monkeypatch.setattr(admin.settings, "gallabox_channel_id", "chan_1", raising=False)
-    body = admin.creation_payload(tpl.ORDER_DELIVERED)
+    body = admin.creation_payload(tpl.ORDER_DELIVERED_V1)
     assert body["channelId"] == "chan_1"
     assert body["name"] == "order_delivered"
     assert body["category"] == "UTILITY"
@@ -129,12 +129,12 @@ def test_creation_payload_language_matches_the_send_path():
     from app.integrations.gallabox.messages import template_message
 
     sent = template_message("order_delivered", ["SHO-1"])
-    assert admin.creation_payload(tpl.ORDER_DELIVERED)["language"] == \
+    assert admin.creation_payload(tpl.ORDER_DELIVERED_V1)["language"] == \
         sent["template"]["language"]
 
 
 def test_an_explicit_channel_overrides_the_default():
-    body = admin.creation_payload(tpl.ORDER_DELIVERED, channel_id="chan_other")
+    body = admin.creation_payload(tpl.ORDER_DELIVERED_V1, channel_id="chan_other")
     assert body["channelId"] == "chan_other"
 
 
@@ -185,7 +185,7 @@ async def test_create_template_posts_the_payload_to_the_account(monkeypatch):
         return {"status": "pending", "whatsappTemplateId": "123"}
 
     monkeypatch.setattr(admin.gallabox, "post", fake_post)
-    record = await admin.create_template(tpl.ORDER_DELIVERED)
+    record = await admin.create_template(tpl.ORDER_DELIVERED_V1)
 
     assert seen["path"] == "/accounts/acct_1/whatsappTemplates"
     assert seen["json"]["name"] == "order_delivered"
@@ -201,7 +201,7 @@ async def test_a_non_dict_response_does_not_crash_the_caller(monkeypatch):
         return "unexpected"
 
     monkeypatch.setattr(admin.gallabox, "post", fake_post)
-    assert await admin.create_template(tpl.ORDER_DELIVERED) == {}
+    assert await admin.create_template(tpl.ORDER_DELIVERED_V1) == {}
 
 
 @pytest.mark.asyncio

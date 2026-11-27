@@ -82,24 +82,23 @@ PAYMENT_REMINDER = TemplateSpec(
 
 # Submitted as "payment_confirmed": the first "payment_success" came back in
 # error on the channel, and a template name cannot be reused until it is
-# deleted by hand in Gallabox. This one also carries the Download Invoice button.
+# deleted by hand in Gallabox. v4 carried a Download Invoice button; v5 has
+# none: the invoice is sent only once the order is delivered (the client:
+# "Generate and send invoices only after order delivery, not upon order
+# placement"), with ORDER_DELIVERED. A button cannot be taken off an approved
+# template, so the change needs a new name.
 PAYMENT_SUCCESS = TemplateSpec(
-    # v4: the button says Download Invoice (v2 said Download Bill; v3 went
-    # in by mistake with a test address and is never used). A button's
-    # text is fixed at approval, so the change needs a new template name.
-    name="payment_confirmed_v4",
+    name="payment_confirmed_v5",
     category="UTILITY",
-    trigger="Stripe payment confirmed (step 16)",
+    trigger="Payment confirmed (step 16)",
     params=("order_number", "amount", "outlet_name", "slot_label"),
     # Ends on words, not on {{4}}: Meta rejects a body whose last thing is a
     # variable, counting a trailing full stop as no ending at all.
     sample_body=(
         "Payment received! Your order #{{1}} of ${{2}} is confirmed from {{3}} "
-        "for delivery at {{4}}. Thank you for ordering with Shero! Tap below for your invoice."
+        "for delivery at {{4}}. Thank you for ordering with Shero! We will send "
+        "your invoice once your order is delivered."
     ),
-    button_kind="dynamic_url",
-    button_label="Download Invoice",
-    url_base="receipt",
 )
 
 PAYMENT_FAILED = TemplateSpec(
@@ -147,6 +146,20 @@ ORDER_PREPARING = TemplateSpec(
     ),
 )
 
+# The customer's three stage messages (services/order_updates.py): Food
+# Ready, Food Dispatched (ORDER_OUT_FOR_DELIVERY) and Order Delivered, with
+# the invoice.
+ORDER_FOOD_READY = TemplateSpec(
+    name="order_food_ready",
+    category="UTILITY",
+    trigger="The kitchen's food is ready (Mark ready / Food ready)",
+    params=("order_number", "outlet_name"),
+    sample_body=(
+        "Good news! Your order #{{1}} is ready at {{2}} and will be on its way "
+        "to you shortly."
+    ),
+)
+
 ORDER_OUT_FOR_DELIVERY = TemplateSpec(
     name="order_out_for_delivery",
     category="UTILITY",
@@ -155,10 +168,29 @@ ORDER_OUT_FOR_DELIVERY = TemplateSpec(
     sample_body="Your order #{{1}} is on its way!",
 )
 
+# v2 carries the invoice: a Download Invoice button on the order's signed
+# receipt link, which opens only once the order is delivered. Inside the
+# 24-hour window the invoice PDF itself goes instead (order_updates).
 ORDER_DELIVERED = TemplateSpec(
+    name="order_delivered_v2",
+    category="UTILITY",
+    trigger="Outlet marks Delivered (step 18) - with the invoice",
+    params=("order_number",),
+    sample_body=(
+        "Your order #{{1}} has been delivered. Enjoy your meal! Tap below to "
+        "download your invoice."
+    ),
+    button_kind="dynamic_url",
+    button_label="Download Invoice",
+    url_base="receipt",
+)
+
+# The first Delivered message, approved without the invoice: sent only
+# until Meta approves ORDER_DELIVERED, outside the 24-hour window.
+ORDER_DELIVERED_V1 = TemplateSpec(
     name="order_delivered",
     category="UTILITY",
-    trigger="Outlet marks Delivered (step 18)",
+    trigger="Until order_delivered_v2 is approved, outside the 24-hour window",
     params=("order_number",),
     sample_body="Your order #{{1}} has been delivered. Enjoy your meal!",
 )
@@ -367,7 +399,7 @@ ALL_TEMPLATES: tuple[TemplateSpec, ...] = (
 # spec lists.
 MANAGED_TEMPLATES: tuple[TemplateSpec, ...] = ALL_TEMPLATES + (
     WELCOME, ORDER_SUMMARY, MENU_LINK, WELCOME_BACK, WELCOME_NEW, OUT_OF_AREA, ORDER_ALERT,
-    KITCHEN_ORDER, ORDER_PREPARING)
+    KITCHEN_ORDER, ORDER_PREPARING, ORDER_FOOD_READY, ORDER_DELIVERED_V1)
 
 BY_NAME: dict[str, TemplateSpec] = {t.name: t for t in MANAGED_TEMPLATES}
 
@@ -376,7 +408,8 @@ RENAMED: dict[str, str] = {
     # The _v2 templates carry the hosted address (https://smo.shero.us) in their
     # link buttons; the first versions pointed at a test tunnel. A button's
     # address is fixed at approval, and Gallabox cannot edit a template.
-    "payment_success": "payment_confirmed_v4",
+    "payment_success": "payment_confirmed_v5",
+    "order_delivered": "order_delivered_v2",
     "payment_link": "shero_payment_link_v2",
     "payment_reminder": "shero_payment_reminder_v2",
     "payment_failed": "shero_payment_failed_v2",
