@@ -97,3 +97,26 @@ async def test_before_delivery_there_is_no_invoice_yet(session, customer, outlet
     order.stage, order.delivered_at = OrderStage.DELIVERED, datetime.now(timezone.utc)
     await session.flush()
     assert receipts.invoiced(order)
+
+
+async def test_a_long_kitchen_name_and_address_keep_to_their_column(session, customer, outlet):
+    """India's kitchens have long names and addresses: they used to run over
+    PAID INVOICE and the order number. Times are the kitchen's own."""
+    from zoneinfo import ZoneInfo
+
+    from fpdf import FPDF
+
+    order = await _order(session, customer, outlet)
+    outlet.name = "Shero Home Food-Chettinad SKID-IND-291 A Extra Long Kitchen Name"
+    outlet.address_line1 = ("House No: 3, Periandavar street, S.V.Nagar, Oragadam, Ambattur, "
+                            "Chennai - 600053, Ambathur Mpty Ward-79, Ambattur Taluk " * 2)
+    assert receipts.build_pdf(order, customer, outlet).startswith(b"%PDF")
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "", 8.5)
+    lines = receipts._wrap(pdf, receipts._outlet_address(outlet), receipts.HEAD_WIDTH, 3)
+    assert len(lines) == 3 and lines[-1].endswith("...")
+    assert all(pdf.get_string_width(line) <= receipts.HEAD_WIDTH for line in lines)
+    assert receipts._when(order, tz=ZoneInfo("Asia/Kolkata")) == "30 Sep 2026, 6:35 PM IST"
+    assert receipts._when(order, order.delivered_at,
+                          tz=ZoneInfo("America/New_York")) == "30 Sep 2026, 3:20 PM EDT"

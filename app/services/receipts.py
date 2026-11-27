@@ -27,12 +27,14 @@ from app.core.config import settings
 from app.db.models import Customer, Order, Outlet
 from app.integrations.zoho import crm
 from app.integrations.zoho import fields as f
+from app.services import slots
 
 SALT = "shero-receipt"
 LOGO = Path(__file__).resolve().parents[1] / "static" / "brand" / "shero-logo-192.png"
 BRAND = (15, 94, 88)        # the admin teal, as RGB
 MUTED = (110, 110, 110)
 SAVING = (31, 122, 69)      # green, for the discount line
+HEAD_WIDTH = 86             # the kitchen's name and address, left of the invoice details
 
 
 def _serializer() -> URLSafeSerializer:
@@ -83,14 +85,23 @@ def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
     # Header: logo, business, and the bill's own details on the right.
     if LOGO.exists():
         pdf.image(str(LOGO), x=18, y=16, w=18)
+    # The kitchen's name and address keep to their column (x 40 to 126), clear
+    # of the invoice's own details at 130: a long name gets smaller, then
+    # shortened; a long address wraps onto up to three lines.
+    name = outlet.name if outlet else "Shero Home Food"
+    size = 16
+    pdf.set_font("Helvetica", "B", size)
+    while size > 11 and pdf.get_string_width(_t(name)) > HEAD_WIDTH:
+        size -= 1
+        pdf.set_font("Helvetica", "B", size)
     pdf.set_xy(40, 17)
-    pdf.set_font("Helvetica", "B", 16)
     pdf.set_text_color(*BRAND)
-    pdf.cell(90, 8, _t(outlet.name if outlet else "Shero Home Food"))
-    pdf.set_xy(40, 25)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(HEAD_WIDTH, 8, _fit(pdf, name, HEAD_WIDTH))
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*MUTED)
-    pdf.cell(90, 5, _t(_outlet_address(outlet)))
+    for offset, line in enumerate(_wrap(pdf, _outlet_address(outlet), HEAD_WIDTH, 3)):
+        pdf.set_xy(40, 25 + offset * 4)
+        pdf.cell(HEAD_WIDTH, 4, line)
 
     pdf.set_xy(130, 17)
     pdf.set_font("Helvetica", "B", 14)
@@ -98,9 +109,11 @@ def build_pdf(order: Order, customer: Customer, outlet: Outlet | None) -> bytes:
     pdf.cell(62, 8, "PAID INVOICE", align="R")
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*MUTED)
-    header = [f"Order #{order.order_number}", f"Paid {_when(order)}"]
+    # In the kitchen's own time: "27 Nov 2026, 4:59 PM IST".
+    tz = slots.outlet_tz(outlet) if outlet is not None else timezone.utc
+    header = [f"Order #{order.order_number}", f"Paid {_when(order, tz=tz)}"]
     if order.delivered_at:
-        header.append(f"Delivered {_when(order, order.delivered_at)}")
+        header.append(f"Delivered {_when(order, order.delivered_at, tz=tz)}")
     for offset, line in enumerate(header):
         pdf.set_xy(130, 25 + offset * 5)
         pdf.cell(62, 5, _t(line), align="R")
@@ -222,13 +235,29 @@ def _money(currency: str, amount) -> str:
     return f"{currency}{Decimal(str(amount or 0)):.2f}"
 
 
-def _when(order: Order, stamp=None) -> str:
+def _when(order: Order, stamp=None, *, tz=timezone.utc) -> str:
     stamp = stamp or order.paid_at or order.created_at
     if stamp is None:
         return "-"
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
-    return stamp.astimezone(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+    local = stamp.astimezone(tz)
+    hour = local.strftime("%I").lstrip("0")
+    return f"{local:%d %b %Y}, {hour}:{local:%M %p} {local.tzname() or 'UTC'}"
+
+
+def _wrap(pdf: FPDF, text: str, width: float, max_lines: int) -> list[str]:
+    """Words onto lines no wider than `width`; past `max_lines`, the last one
+    is shortened with an ellipsis."""
+    lines: list[str] = []
+    for word in _t(text).split():
+        if lines and pdf.get_string_width(f"{lines[-1]} {word}") <= width:
+            lines[-1] = f"{lines[-1]} {word}"
+        else:
+            lines.append(word)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines - 1] + [" ".join(lines[max_lines - 1:])]
+    return [_fit(pdf, line, width) for line in lines]
 
 
 def _outlet_address(outlet: Outlet | None) -> str:
