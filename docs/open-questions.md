@@ -78,7 +78,8 @@ button. Roughly a day of work; say the word.
 
 **Decided (30 Sep 2026):** the earliest slot offered starts **24 hours after
 the customer orders**, because the food is cooked to order
-(`SLOT_MIN_LEAD_HOURS`, fixed in `.env`). Slots are 9 AM - 9 PM, and the Uber
+(`SLOT_MIN_LEAD_HOURS`; since 27 Nov 2026 editable on Settings → Business
+rules → Pre-ordering lead time). Slots are 9 AM - 9 PM, and the Uber
 courier is booked 2 hours before the slot (`UBER_DISPATCH_HOURS_BEFORE`).
 Customers still see three days of slots, counted from that point.
 

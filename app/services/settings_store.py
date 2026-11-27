@@ -66,8 +66,15 @@ SETTING_GROUPS: dict[str, list[tuple[str, str, bool]]] = {
          "Free delivery when the dishes come to at least this much (0 = never)", False),
         ("OWN_DELIVERY_MAX_KM",
          "Maximum delivery distance: km from the kitchen, straight line", False),
+        # Pre-ordering lead time: how far ahead an order must be placed. A
+        # business taking orders for now counts minutes to the door (DST
+        # India); one cooking to order counts hours to the first slot (Shero US).
+        ("SLOT_MIN_LEAD_HOURS",
+         "Pre-ordering lead time: hours from ordering to the earliest delivery slot "
+         "(24 = order a day ahead)", False),
         ("INSTANT_LEAD_MINUTES",
-         "Order now: minutes from ordering to the door (cooking and riding)", False),
+         "Pre-ordering lead time: minutes from ordering to the door, cooking and riding "
+         "(60 = 1 hour)", False),
         ("PUBLIC_BASE_URL", "Public API URL", False),
         ("PAY_REDIRECT_BASE_URL", "Pay redirect URL", False),
     ],
@@ -93,21 +100,23 @@ OTHER_EDITABLE: list[tuple[str, str, bool]] = [
 # Shown only to the business that delivers that way (DELIVERY_PROVIDER).
 UBER_ONLY = {"UBER_DISPATCH_HOURS_BEFORE", "DELIVERY_MAX_MILES"}
 OWN_DELIVERY_ONLY = {"OWN_DELIVERY_FEE", "FREE_DELIVERY_ABOVE", "OWN_DELIVERY_MAX_KM"}
-# Shown only to a business that takes orders for now (INSTANT_ORDERS).
+# Shown only to a business that takes orders for now (INSTANT_ORDERS), and
+# only to one that does not: each sees its own pre-ordering lead time.
 INSTANT_ONLY = {"INSTANT_LEAD_MINUTES"}
+SLOTS_ONLY = {"SLOT_MIN_LEAD_HOURS"}
 
 
 def setting_groups() -> dict[str, list[tuple[str, str, bool]]]:
     """SETTING_GROUPS as the current business's Settings page shows them:
     the Uber fields for Uber delivery, the own-delivery ones for its own staff,
-    and the "order now" time only where orders are taken for now."""
+    and the pre-ordering lead time in minutes where orders are taken for now,
+    in hours where they are not."""
     hidden = set(OWN_DELIVERY_ONLY if settings.delivery_provider == "uber" else UBER_ONLY)
     if (settings.delivery_provider == "own" and settings.shiprocket_email.strip()
             and settings.shiprocket_password):
         # Shiprocket connected: the customer pays its live rider price, not a flat one.
         hidden.add("OWN_DELIVERY_FEE")
-    if not settings.instant_orders:
-        hidden |= INSTANT_ONLY
+    hidden |= SLOTS_ONLY if settings.instant_orders else INSTANT_ONLY
     return {title: [f for f in fields if f[0] not in hidden]
             for title, fields in SETTING_GROUPS.items()}
 
@@ -139,9 +148,12 @@ NUMBER_RANGES: dict[str, tuple[float, float]] = {
     "FREE_DELIVERY_ABOVE": (0, 1000000),
     # Long enough to cook and ride; four hours is no longer "now".
     "INSTANT_LEAD_MINUTES": (10, 240),
+    # At least an hour to cook; at most a week, as slots are offered for the
+    # days after the earliest one.
+    "SLOT_MIN_LEAD_HOURS": (1, 168),
 }
-# Saved into whole-number settings.
-WHOLE_NUMBERS = {"INSTANT_LEAD_MINUTES"}
+# Saved into whole-number settings (the order page says "24 hours' notice").
+WHOLE_NUMBERS = {"INSTANT_LEAD_MINUTES", "SLOT_MIN_LEAD_HOURS"}
 
 
 class SettingValueError(ValueError):
@@ -368,7 +380,7 @@ async def save_many(session: AsyncSession, values: dict[str, str], *,
         # "Clear it" must reach the database even when this process never
         # loaded the override (a script, or a server before startup finished):
         # the in-memory value is blank then, which is not the same thing.
-        if key not in clearable and str(_current_value(key)) == (value or "").strip():
+        if key not in clearable and _same(_current_value(key), value):
             continue
         await save(session, key, value, updated_by=updated_by)
         changed.append(key)
@@ -381,6 +393,19 @@ async def save_many(session: AsyncSession, values: dict[str, str], *,
 
 def _current_value(key: str):
     return getattr(settings, key.lower(), "")
+
+
+def shown(value) -> str:
+    """A setting as the page shows it: a whole-number float without its
+    ".0" (24, not 24.0)."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _same(current, value: str | None) -> bool:
+    """The form sends back what the setting already is (24 for 24.0 too)."""
+    return shown(current) == (value or "").strip()
 
 
 def _invalidate_tokens(changed: list[str]) -> None:

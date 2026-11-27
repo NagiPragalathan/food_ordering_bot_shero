@@ -161,12 +161,14 @@ for Shero US and "₹249.00 · 5 km · PIN code" for DST India.
 ## Day to day
 
 - **Delivery times**: as on any food delivery app, customers order for
-  **Now** (the default; delivered in about 45 minutes, the **Order now** time
-  on Settings) or pick a later time today or in the next week, inside the
+  **Now** (the default; delivered within the **pre-ordering lead time**, 1
+  hour since 27 Nov 2026: Settings → Business rules → Pre-ordering lead time,
+  in minutes) or pick a later time today or in the next week, inside the
   kitchen's hours. "Now" is offered while the kitchen can deliver: open, not
   closing, and that hour not fully booked (its slot capacity). The kitchen
   is told the moment the customer pays, and the order shows as, for example,
-  "Thu 19 Nov, next 45 min". Shero US is unchanged: a day's notice.
+  "Thu 19 Nov, next 60 min". Shero US keeps a day's notice (24 hours, its own
+  Pre-ordering lead time, in hours).
 - **Orders** and **Delivery queue**: paid orders by slot, with address, map
   link and phone. *Send to kitchen → Out for delivery → Mark delivered* moves
   each on and messages the customer.

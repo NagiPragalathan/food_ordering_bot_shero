@@ -75,7 +75,8 @@ window.SheroCheckout = function (ui, opts) {
           ? 'Order now and it reaches you in about <b>' + esc(String(data.lead_minutes)) + ' minutes</b>, or pick a later time.'
           : 'We can&rsquo;t deliver right away just now. Pick a time below.')
       : (data.lead_hours
-          ? 'Orders need <b>' + esc(String(Math.round(data.lead_hours))) + ' hours&rsquo; notice</b>. ' +
+          ? 'Orders need <b>' + (Math.round(data.lead_hours) === 1 ? '1 hour&rsquo;s'
+              : esc(String(Math.round(data.lead_hours))) + ' hours&rsquo;') + ' notice</b>. ' +
             'Earliest delivery: <b>' + esc(data.earliest) + '</b>.'
           : '');
     box.innerHTML =

@@ -34,6 +34,7 @@ from app.services.settings_store import (
     SecretsUnavailable,
     SettingValueError,
     save_many,
+    shown,
     stored_keys,
 )
 
@@ -64,7 +65,7 @@ async def _settings_page(request: Request, session: AsyncSession, current_user: 
                 "label": label,
                 "is_secret": is_secret,
                 # Secrets are never sent to the browser - only whether one is set.
-                "value": "" if is_secret else str(current or ""),
+                "value": "" if is_secret else shown(current or ""),
                 "is_set": not is_unset(str(current or "")),
                 "from_database": key in overridden,
             })

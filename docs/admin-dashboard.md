@@ -440,10 +440,14 @@ Client ID and Secret in place, so reconnecting is one press.
 
 ### Delivery times
 
-- **Earliest delivery:** fixed at 24 hours after the customer orders
-  (`SLOT_MIN_LEAD_HOURS` in `.env`, not shown on this page). Someone ordering
-  at midnight sees slots from midnight the next day, and only those inside the
-  kitchen's hours.
+- **Earliest delivery:** the **pre-ordering lead time**, 24 hours after the
+  customer orders for Shero US. Change it on **Settings → Business rules →
+  Pre-ordering lead time** (whole hours, 1 to 168; `SLOT_MIN_LEAD_HOURS` in
+  `.env` is the default). It takes effect at once: someone ordering at
+  midnight with 24 hours sees slots from midnight the next day, and only those
+  inside the kitchen's hours. DST India, which takes orders for now, sets its
+  lead time in **minutes** to the door on its own Settings page (10 to 240;
+  60 = 1 hour; `INSTANT_LEAD_MINUTES`).
 - **Which hours:** set per kitchen on the [Kitchens](#kitchens) page, per
   weekday. The kitchen is set to 9:00 AM - 9:00 PM every day, so slots run
   9-10 AM through 8-9 PM.

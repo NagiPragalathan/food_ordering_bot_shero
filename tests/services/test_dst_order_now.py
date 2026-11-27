@@ -128,3 +128,34 @@ def test_the_order_now_minutes_are_on_dst_indias_settings_page_only():
     for bad in ("5", "300", "45.5", "soon"):
         with pytest.raises(settings_store.SettingValueError):
             settings_store.check_value("INSTANT_LEAD_MINUTES", bad)
+
+
+def test_each_business_edits_its_own_pre_ordering_lead_time():
+    """Shero US: hours to the earliest slot. DST India: minutes to the door."""
+    def keys():
+        return {key for fields in settings_store.setting_groups().values() for key, _, _ in fields}
+
+    assert "SLOT_MIN_LEAD_HOURS" in keys()
+    with tenants.use(tenants.DST):
+        assert "SLOT_MIN_LEAD_HOURS" not in keys()
+    label = settings_store.EDITABLE_KEYS["SLOT_MIN_LEAD_HOURS"][0]
+    assert label.startswith("Pre-ordering lead time")
+    assert settings_store.EDITABLE_KEYS["INSTANT_LEAD_MINUTES"][0].startswith(
+        "Pre-ordering lead time")
+    for good in ("1", "24", "48", "168"):
+        settings_store.check_value("SLOT_MIN_LEAD_HOURS", good)
+    for bad in ("0", "0.5", "200", "12.5", "a day"):
+        with pytest.raises(settings_store.SettingValueError, match="Pre-ordering lead time"):
+            settings_store.check_value("SLOT_MIN_LEAD_HOURS", bad)
+
+
+async def test_a_saved_lead_time_moves_the_earliest_slot_at_once(session, monkeypatch):
+    us = settings_for(tenants.US)
+    monkeypatch.setattr(us, "slot_min_lead_hours", 24.0)
+    # The page shows 24, not 24.0, and saving it unchanged changes nothing.
+    assert settings_store.shown(us.slot_min_lead_hours) == "24"
+    assert await settings_store.save_many(session, {"SLOT_MIN_LEAD_HOURS": "24"}) == []
+    assert await settings_store.save_many(session, {"SLOT_MIN_LEAD_HOURS": "12"}) == [
+        "SLOT_MIN_LEAD_HOURS"]
+    assert us.slot_min_lead_hours == 12.0
+    assert slots.lead_time() == timedelta(hours=12)
