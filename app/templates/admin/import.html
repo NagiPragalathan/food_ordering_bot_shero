@@ -60,12 +60,23 @@
             Every dish found is already at the sheet's prices: nothing to update.</p>
         {% endif %}
 
+        {% if prices.near %}
+        <details class="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-700" data-price-near>
+          <summary class="cursor-pointer font-medium">
+            {{ prices.near | length }} sheet dish(es) matched by a near name: look these over</summary>
+          <p class="mt-2">Same category, same size, the name differs only in its bracketed notes.</p>
+          <ul class="mt-2 list-disc space-y-0.5 pl-5">
+            {% for name in prices.near[:shown] %}<li>{{ name }}</li>{% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+
         {% if prices.not_found %}
         <details class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-price-missing>
           <summary class="cursor-pointer font-medium">
             {{ prices.not_found | length }} sheet dish(es) not found on the menu: left alone</summary>
-          <p class="mt-2">Usually a different name on the sheet. Fix the name there, or set the
-            PPP on the Menu page.</p>
+          <p class="mt-2">A different name or pack size on the sheet, or a dish this menu doesn't
+            have. Fix the sheet, or set the PPP on the Menu page.</p>
           <ul class="mt-2 list-disc space-y-0.5 pl-5">
             {% for name in prices.not_found[:shown] %}<li>{{ name }}</li>{% endfor %}
           </ul>

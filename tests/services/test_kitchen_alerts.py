@@ -1,5 +1,5 @@
-"""The kitchen hears about a paid order, with nothing about the customer
-(services/kitchen_alerts.py)."""
+"""The kitchen hears about a paid order, with each dish's quantity and PPP
+and nothing about the customer or the MRP (services/kitchen_alerts.py)."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ pytestmark = pytest.mark.asyncio
 
 # Tue 6 Oct 2026, 18:00 in New York (EDT, UTC-4) = 22:00 UTC.
 SLOT_START = datetime(2026, 10, 6, 22, 0, tzinfo=timezone.utc)
+# The partner's dishes: quantity and PPP, never the $9.75 MRP.
+CARROT = "2 x Carrot Sambar (PPP $6.78 each, $13.56); Total PPP: $13.56"
 
 
 class Sender:
@@ -43,7 +45,9 @@ async def _paid_order(session, customer, outlet, start=SLOT_START) -> Order:
     await session.flush()
     order = Order(order_number="SHO-K-1", customer_id=customer.id, outlet_id=outlet.id,
                   slot_id=slot.id, total=Decimal("20"),
-                  items=[{"name": "Carrot Sambar", "quantity": 2}],
+                  items=[{"retailer_id": "chettinad-sambar-carrot-sambar",
+                          "name": "Carrot Sambar", "quantity": 2, "unit_price": "9.75",
+                          "line_total": "19.50", "unit_ppp": "6.78"}],
                   delivery_address="12 Maple St", slot_label="Tue 6 Oct, 6:00 PM",
                   payment_status=PaymentStatus.PAID, stage=OrderStage.PAID_SLOT_BOOKED)
     order.kitchen_notify_at = kitchen_alerts.notify_time(start, outlet)
@@ -100,11 +104,11 @@ async def test_the_partner_gets_the_order_and_nothing_about_the_customer(
     assert await kitchen_alerts.send_alert(session, order)
     (_, template, values), = sender.sent
     assert template == tpl.KITCHEN_ORDER.name
-    assert values == ("SHO-K-1", "Tue 6 Oct, 6:00 PM", outlet.name, "2 x Carrot Sambar")
+    assert values == ("SHO-K-1", "Tue 6 Oct, 6:00 PM", outlet.name, CARROT)
     text = fallback.body_text(tpl.KITCHEN_ORDER, values)
     for private in (customer.name, customer.whatsapp_number, order.contact_number,
                     "12 Maple St", "Apt 4", "21075", "20.00", "Customer", "Address",
-                    "Amount"):
+                    "Amount", "MRP", "9.75", "19.50"):
         assert private not in text
 
 
@@ -124,8 +128,7 @@ async def test_until_meta_approves_it_the_team_template_goes_with_the_customer_b
     assert await kitchen_alerts.send_alert(session, order)
     (_, template, values), = sender.sent
     assert template == tpl.ORDER_ALERT.name
-    assert values == ("SHO-K-1", "-", "-", "Tue 6 Oct, 6:00 PM", outlet.name, "-",
-                      "2 x Carrot Sambar")
+    assert values == ("SHO-K-1", "-", "-", "Tue 6 Oct, 6:00 PM", outlet.name, "-", CARROT)
 
 
 async def test_with_neither_approved_the_partner_template_goes(
@@ -187,9 +190,13 @@ async def test_large_cart_sends_every_item(session, customer, outlet, monkeypatc
     sender = Sender()
     monkeypatch.setattr(kitchen_alerts, "current_sender", lambda: sender)
     assert await kitchen_alerts.send_alert(session, order)
-    combined = "".join(values[-1] for _, _, values in sender.sent)
+    assert len(sender.sent) > 1
+    parts = [values[-1] for _, _, values in sender.sent]
+    assert parts[0].startswith(f"(1/{len(parts)}) ") and all(len(p) <= 300 for p in parts)
+    # Every dish whole in one message, never cut between two.
     for item in order.items:
-        assert f"{item['quantity']} x {item['name']}" in combined
+        dish = f"{item['quantity']} x {item['name']} (PPP not set)"
+        assert sum(dish + ";" in p + ";" for p in parts) == 1
 
 
 async def test_payment_immediately_notifies_only_assigned_partner(session, customer, outlet, far_outlet, monkeypatch):
@@ -216,3 +223,44 @@ async def test_payment_immediately_notifies_only_assigned_partner(session, custo
     assert sender.sent[0][0] == outlet.kitchen_whatsapp
     assert order.kitchen_notified_at is not None
     assert order.stage == OrderStage.SENT_TO_KITCHEN
+
+
+async def test_each_dish_carries_its_ppp_and_never_the_mrp(session, customer, outlet):
+    """The client: "Include menu items, quantities and applicable Triple-P in
+    the WhatsApp order intimation. MRP must not be displayed." A dish without
+    a PPP says so, and the total says what it leaves out."""
+    order = await _paid_order(session, customer, outlet)
+    order.items = [
+        {"retailer_id": "a", "name": "Poondu (Garlic) Rasam - 450 ml", "quantity": 2,
+         "unit_price": "157.00", "line_total": "314.00", "unit_ppp": "44.00"},
+        {"retailer_id": "b", "name": "Vazhaikkai Podimas - 450 ml", "quantity": 1,
+         "unit_price": "210.00", "line_total": "210.00", "unit_ppp": "68.00"},
+        {"retailer_id": "c", "name": "New Dish", "quantity": 1, "unit_price": "99.00"}]
+    texts = await kitchen_alerts.partner_items(session, order)
+    assert texts == ["2 x Poondu (Garlic) Rasam - 450 ml (PPP $44.00 each, $88.00)",
+                     "1 x Vazhaikkai Podimas - 450 ml (PPP $68.00)",
+                     "1 x New Dish (PPP not set)",
+                     "Total PPP: $156.00, plus 1 dish without a PPP"]
+    joined = " ".join(texts)
+    for mrp in ("157", "314", "210", "99"):
+        assert mrp not in joined
+
+
+async def test_an_order_from_before_takes_the_menus_ppp(session, customer, outlet, menu):
+    """Orders priced before the PPP was kept on the order: the menu's PPP."""
+    order = await _paid_order(session, customer, outlet)
+    order.items = [{"retailer_id": "chettinad-sambar-drumstick-sambar",
+                    "name": "Drumstick Sambar", "quantity": 3, "unit_price": "12.50"}]
+    assert await kitchen_alerts.partner_items(session, order) == [
+        "3 x Drumstick Sambar (PPP $8.16 each, $24.48)", "Total PPP: $24.48"]
+
+
+async def test_an_order_is_priced_with_the_ppp_it_keeps(session, menu):
+    """pricing keeps each dish's PPP on the order line for the partner's
+    message; the customer's price stays the MRP."""
+    from app.services import pricing
+    priced = await pricing.price_cart(
+        session, [{"retailer_id": "chettinad-sambar-drumstick-sambar", "quantity": 2}])
+    (line,) = priced.items_as_dicts()
+    assert line["unit_price"] == "12.50" and line["unit_ppp"] == "8.16"
+    assert priced.dish_total == Decimal("25.00")

@@ -183,3 +183,53 @@ def test_the_import_page_checks_then_updates(session, menu):
     assert menu_item(menu, "Drumstick Sambar").cost_price == Decimal("9.00")
     missing = client.post("/admin/import/prices", data={"sheet_url": ""})
     assert missing.status_code == 303
+
+
+async def test_a_near_name_in_the_same_category_finds_the_dish(session, menu):
+    """DST India's Andhra tab: "Miriyala Charu - 450 ml" is the menu's
+    "Miriyala (Pepper) Charu - 450 ml"; Shero US's "( No Vepudu )" dishes too.
+    Only inside the category, only one to one, and listed for Ops."""
+    menu_item(menu, "Tomato Rasam").name = "Tomato (Thakkali) Rasam - 450 ml"
+    menu_item(menu, "Drumstick Sambar").name = "Drumstick Sambar ( No Side )"
+    await session.flush()
+    head = ["", "1", "{}", "Description", "IMAGE", "PPP", "MRP"]
+    tab = [["", "Chettinad Cuisine - US"],
+           [c.format("Rasam") for c in head],
+           ["", "1", "Tomato Rasam - 450 ml", "", "", "5.00", "9.50"],
+           ["", "2", "Tomato Rasam - 750 ml", "", "", "7.00", "12.00"],
+           ["", "3", "Beans Sambar (Spicy)", "", "", "1.00", "2.00"],
+           [c.format("Sambar") for c in head],
+           ["", "1", "Drumstick Sambar - 16 OZ", "", "", "9.00", "12.50"]]
+    plan, rows = plan_for([("Chettinad US", tab)])
+    await pu.plan(session, rows, plan_=plan)
+    assert {(c.name, c.new_ppp) for c in plan.changes} == {
+        ("Tomato (Thakkali) Rasam - 450 ml", Decimal("5.00")),
+        ("Drumstick Sambar ( No Side )", Decimal("9.00"))}
+    assert plan.near == [
+        "Chettinad / Tomato Rasam - 450 ml is the menu's Tomato (Thakkali) Rasam - 450 ml",
+        "Chettinad / Drumstick Sambar - 16 OZ is the menu's Drumstick Sambar ( No Side )"]
+    # Another size is another dish; the menu's Beans Sambar is in another category.
+    assert plan.not_found == [
+        "Chettinad / Rasam / Tomato Rasam - 750 ml "
+        "(the menu sells another size: Tomato (Thakkali) Rasam - 450 ml)",
+        "Chettinad / Rasam / Beans Sambar (Spicy)"]
+
+
+async def test_one_name_under_two_categories_takes_each_its_own_row(session, menu):
+    """DST India's Chettinad "Chapati - 5 Nos (Plain)" sits under North Indian
+    Special and under Rice & Tiffin, at two prices."""
+    menu_item(menu, "Tomato Rasam").name = "Beans Sambar"
+    await session.flush()
+    head = ["", "1", "{}", "Description", "IMAGE", "PPP", "MRP"]
+    tab = [["", "Chettinad Cuisine - US"],
+           [c.format("Sambar") for c in head],
+           ["", "1", "Beans Sambar", "", "", "7.00", "11.28"],
+           [c.format("Rasam") for c in head],
+           ["", "1", "Beans Sambar", "", "", "6.00", "9.50"]]
+    plan, rows = plan_for([("Chettinad US", tab)])
+    await pu.plan(session, rows, plan_=plan)
+    assert not plan.conflicts
+    assert sorted(c.new_ppp for c in plan.changes) == [Decimal("6.00"), Decimal("7.00")]
+    await pu.apply(session, plan)
+    by_category = {i.category_id: i.cost_price for i in menu.values() if i.name == "Beans Sambar"}
+    assert sorted(by_category.values()) == [Decimal("6.00"), Decimal("7.00")]

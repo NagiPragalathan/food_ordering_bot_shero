@@ -142,8 +142,15 @@ cuisine use the later one.
 A sheet dish is matched to a menu dish **of the same cuisine** by its name,
 ignoring case, spaces and punctuation; then by its name without the size
 ("Beans Sambar - 16 OZ" is the menu's "Beans Sambar") when only one dish
-fits. A dish the sheet lists twice with different prices is left alone. A
-price never lands on a guess: what does not match is listed, unchanged.
+fits; then, inside the same category, by its name without the bracketed
+notes ("Miriyala Charu - 450 ml" is the menu's "Miriyala (Pepper) Charu -
+450 ml"), again only when one dish fits. Those near-name matches are listed
+on the Check to look over. When one name sits under two categories (DST
+India's Chettinad "Chapati - 5 Nos (Plain)" in North Indian Special and in
+Rice & Tiffin), each dish takes the sheet row of its own category; any other
+dish listed twice with different prices is left alone. A price never lands
+on a guess: what does not match is listed, unchanged, and says so when the
+menu sells that dish in another pack size.
 
 ### From Google Sheets
 
@@ -533,7 +540,7 @@ kitchen also updates its Zoho Vendor when Zoho is connected.
 
 New paid orders notify the assigned kitchen immediately using its **Kitchen WhatsApp** number and the `shero_kitchen_order` template: the order code, delivery slot, kitchen and dishes with quantities. The partner never gets the customer's name, number or address, nor the amount (Shero arranges the delivery). Approve this template in Gallabox so notifications reach partners outside an active chat window; until it is approved, the kitchen gets the team's `shero_new_order_alert` with the customer, amount and address shown as "-".
 
-**Kitchens > View orders** shows each partner's order queue and active order count. **Orders** can be filtered by partner and shows dishes, quantities, delivery notes, the kitchen's number and notification status. **WhatsApp alert accepted** means the provider accepted the send; it is not a delivery or read receipt. Failed sends stay pending for the kitchen-alert worker, and **Retry kitchen alert** sends them again after the number or integration is fixed. Existing queued orders keep their previously saved alert time; **Send to kitchen** can send them earlier.
+**Kitchens > View orders** shows each partner's order queue and active order count. **Orders** can be filtered by partner and shows dishes, quantities, delivery notes, the kitchen's number and notification status. The partner's WhatsApp message lists each dish with its quantity and PPP (Triple-P), then the order's PPP total, and never the MRP or anything about the customer. **WhatsApp alert accepted** means the provider accepted the send; it is not a delivery or read receipt. Failed sends stay pending for the kitchen-alert worker, and **Retry kitchen alert** sends them again after the number or integration is fixed. Existing queued orders keep their previously saved alert time; **Send to kitchen** can send them earlier.
 
 See [automatic kitchen allocation](automatic-kitchen-allocation.md) for setup and a testing walkthrough.
 

@@ -416,8 +416,17 @@ Full details are on the admin dashboard.
 - **Trigger:** an order is paid (`kitchen_alerts.send_alert`), or Send to
   kitchen / Retry kitchen alert on the Orders page
 - **Parameters:** `{{1}}` = order_number, `{{2}}` = delivery slot,
-  `{{3}}` = kitchen, `{{4}}` = items (a long cart goes as several messages)
+  `{{3}}` = kitchen, `{{4}}` = items with their quantity and PPP, then the
+  order's PPP total (a long cart goes as several messages, "(1/2)", never
+  splitting a dish)
 - **Buttons:** none
+
+`{{4}}` reads `2 x Poondu (Garlic) Rasam - 450 ml (PPP ₹44.00 each, ₹88.00);
+1 x Vazhaikkai Podimas - 450 ml (PPP ₹68.00); Total PPP: ₹156.00`. The PPP
+(Triple-P) is what Shero pays the partner for the dish, as the order was
+priced (`unit_ppp` on the order's lines); a dish without one says "PPP not
+set". The MRP the customer paid is never shown (the client's Partner Order
+Intimation requirement). The body itself is unchanged, so no new approval.
 
 Nothing about the customer: no name, number or address, and no amount. Until
 Meta approves it, the kitchen gets `shero_new_order_alert` with `{{2}}`,

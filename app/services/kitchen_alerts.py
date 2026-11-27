@@ -2,20 +2,31 @@
 
 The kitchen partner gets the order code, delivery time, kitchen and dishes
 (`shero_kitchen_order`) and nothing about the customer: no name, number or
-address, and no amount. Shero arranges the delivery. The team's alert
-(services/order_alerts.py) still carries the full details.
+address, and nothing the customer paid. Shero arranges the delivery. The
+team's alert (services/order_alerts.py) still carries the full details.
+
+Each dish goes with its quantity and Triple-P (PPP, what Shero pays the
+partner for it), then the order's PPP total - never the MRP:
+
+    2 x Poondu (Garlic) Rasam - 450 ml (PPP ₹44.00 each, ₹88.00);
+    1 x Vazhaikkai Podimas - 450 ml (PPP ₹68.00); Total PPP: ₹156.00
+
+The PPP is the one the order was priced with (`unit_ppp` on its lines, from
+services/pricing.py); an order from before that gets the menu's PPP today.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, time, timezone
+from decimal import Decimal
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import locale
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import DeliverySlot, Order, OrderStage, Outlet, PaymentStatus
+from app.db.models import DeliverySlot, MenuItem, Order, OrderStage, Outlet, PaymentStatus
 from app.integrations.gallabox import template_status
 from app.integrations.gallabox import templates as tpl
 from app.integrations.gallabox.sender import current_sender
@@ -84,10 +95,8 @@ async def send_alert(session: AsyncSession, order: Order, *,
         return False
 
     try:
-        # Send every item, splitting large carts into template-sized sections.
-        raw = " ".join(order_alerts._items(order).split()) or "-"
-        chunks = [raw[i:i + order_alerts.MAX_VALUE]
-                  for i in range(0, len(raw), order_alerts.MAX_VALUE)]
+        # Every dish, a large cart split between whole dishes over messages.
+        chunks = sections(await partner_items(session, order))
         spec = await template()
         for chunk in chunks:
             await current_sender().send_template(
@@ -124,3 +133,62 @@ def values(spec: tpl.TemplateSpec, order: Order, kitchen_name: str,
     if spec is tpl.ORDER_ALERT:
         return number, "-", "-", delivery, kitchen, "-", items
     return number, delivery, kitchen, items
+
+
+async def partner_items(session: AsyncSession, order: Order) -> list[str]:
+    """One text per dish - quantity, name and PPP - then the PPP total."""
+    lines = [line for line in order.items or [] if isinstance(line, dict)]
+    missing = [str(line.get("retailer_id")) for line in lines
+               if line.get("unit_ppp") in (None, "") and line.get("retailer_id")]
+    menu = dict((await session.execute(
+        select(MenuItem.retailer_id, MenuItem.cost_price)
+        .where(MenuItem.retailer_id.in_(missing)))).all()) if missing else {}
+    texts, total, unpriced = [], Decimal("0"), 0
+    for line in lines:
+        try:
+            quantity = max(int(line.get("quantity") or 1), 1)
+        except (TypeError, ValueError):
+            quantity = 1
+        name = " ".join(str(line.get("name") or line.get("retailer_id") or "?").split())
+        ppp = _decimal(line.get("unit_ppp"))
+        if ppp is None:
+            ppp = _decimal(menu.get(str(line.get("retailer_id"))))
+        if ppp is None:
+            unpriced += 1
+            texts.append(f"{quantity} x {name} (PPP not set)")
+            continue
+        total += ppp * quantity
+        each = locale.money(ppp)
+        texts.append(f"{quantity} x {name} (PPP {each})" if quantity == 1 else
+                     f"{quantity} x {name} (PPP {each} each, {locale.money(ppp * quantity)})")
+    if not texts:
+        return ["-"]
+    if unpriced == len(texts):
+        return texts
+    summary = f"Total PPP: {locale.money(total)}"
+    if unpriced:
+        summary += f", plus {unpriced} dish{'' if unpriced == 1 else 'es'} without a PPP"
+    return texts + [summary]
+
+
+def sections(texts: list[str]) -> list[str]:
+    """The texts joined by "; " into as few template values as fit, never
+    splitting a dish (a price cut in two reads wrong); "(1/2)" when several."""
+    room = order_alerts.MAX_VALUE - len("(10/10) ")
+    chunks: list[str] = []
+    for text in texts:
+        text = text if len(text) <= room else text[:room - 1] + "…"
+        if chunks and len(chunks[-1]) + 2 + len(text) <= room:
+            chunks[-1] += "; " + text
+        else:
+            chunks.append(text)
+    if len(chunks) > 1:
+        chunks = [f"({i}/{len(chunks)}) {chunk}" for i, chunk in enumerate(chunks, 1)]
+    return chunks
+
+
+def _decimal(value) -> Decimal | None:
+    try:
+        return Decimal(str(value)) if value not in (None, "") else None
+    except (ArithmeticError, ValueError):
+        return None

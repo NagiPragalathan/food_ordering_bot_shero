@@ -17,7 +17,9 @@ stale cart must never be able to set what we charge.
 
 The menu is this service's own table, managed through the admin dashboard and
 imported from the client's sheet. Customers are charged the sheet's MRP; the
-PPP column is stored as cost and never reaches a customer or Stripe.
+PPP column is stored as cost and never reaches a customer or Stripe. Each
+order line keeps its dish's PPP (`unit_ppp`) for the kitchen partner's order
+message (services/kitchen_alerts.py), which shows the PPP and never the MRP.
 """
 
 from __future__ import annotations
@@ -27,12 +29,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
+from sqlalchemy import select
+
 from app.core import tenants
 from app.core.config import settings
 from app.core.exceptions import (ConfigurationError, IntegrationError,
                                  ItemUnavailableError)
 from app.core.logging import get_logger
-from app.db.models import Outlet, Promotion
+from app.db.models import MenuItem, Outlet, Promotion
 from app.integrations.shiprocket import client as shiprocket
 from app.integrations.uber import direct as uber
 from app.services import menu as menu_service
@@ -66,15 +70,22 @@ class PricedLine:
     quantity: int
     unit_price: Decimal
     line_total: Decimal
+    # The dish's PPP (Triple-P, what Shero pays the kitchen partner) when the
+    # order was priced: the partner's order message shows it, never the MRP.
+    # Kept on the order only; customers, Stripe and Razorpay never see it.
+    unit_ppp: Decimal | None = None
 
     def as_dict(self) -> dict:
-        return {
+        line = {
             "retailer_id": self.retailer_id,
             "name": self.name,
             "quantity": self.quantity,
             "unit_price": str(self.unit_price),
             "line_total": str(self.line_total),
         }
+        if self.unit_ppp is not None:
+            line["unit_ppp"] = str(self.unit_ppp)
+        return line
 
 
 @dataclass
@@ -312,6 +323,11 @@ async def _price_lines(session, cart_items: list[dict]) -> list[PricedLine]:
     retailer_ids = [str(item.get("retailer_id")) for item in cart_items
                     if item.get("retailer_id")]
     catalogue = await menu_service.get_by_retailer_ids(session, retailer_ids)
+    # The partner's price, kept on the order for its message (never on the
+    # customer's ItemOption, which the storefront shows).
+    ppp = dict((await session.execute(
+        select(MenuItem.retailer_id, MenuItem.cost_price)
+        .where(MenuItem.retailer_id.in_(retailer_ids)))).all()) if retailer_ids else {}
 
     lines: list[PricedLine] = []
     missing: list[str] = []
@@ -335,6 +351,7 @@ async def _price_lines(session, cart_items: list[dict]) -> list[PricedLine]:
             quantity=quantity,
             unit_price=unit_price,
             line_total=money(unit_price * quantity),
+            unit_ppp=money(ppp[retailer_id]) if ppp.get(retailer_id) is not None else None,
         ))
 
     if missing:

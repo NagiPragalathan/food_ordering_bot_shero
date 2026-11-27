@@ -25,9 +25,16 @@ Matching, inside the cuisine:
   2. else the name without its size ("Medu Vada - 8 Nos ( No Chutney )" is
      the menu's "Medu Vada ( No Chutney )"), only onto a menu dish whose own
      name has no size - so "Pongal - 750 ml" never lands on "Pongal - 450 ml"
-     - and only when exactly one dish and one sheet row have it.
-Anything else is listed as not found and left alone: a price never lands on
-a guess.
+     - and only when exactly one dish and one sheet row have it;
+  3. else, inside the same category, the name without its bracketed notes
+     (DST India's Andhra tab: "Miriyala Charu - 450 ml" is the menu's
+     "Miriyala (Pepper) Charu - 450 ml"), sizes still equal or the menu dish
+     sizeless as in 2, again only when exactly one dish and one sheet row
+     have it. These are listed on the Check for Ops to look over.
+A dish the sheet lists twice with different prices (one name under two
+categories) takes the row of its own category. Anything else is listed as
+not found and left alone: a price never lands on a guess. A row whose dish
+the menu sells in another size says so.
 
 `plan()` works out every change without writing (the Check step);
 `apply()` writes the plan.
@@ -60,6 +67,7 @@ MAX_ROWS = 20_000
 SIZE_RE = re.compile(r"\s*-\s*\d+(?:\.\d+)?\s*(?:oz|ml|nos|no|pcs|pieces|kg|g|ltr|l)\b\.?",
                      re.IGNORECASE)
 LABELS = ("ppp", "mrp", "description", "image")
+PARENS_RE = re.compile(r"\([^()]*\)")
 
 
 class PriceSheetError(ValueError):
@@ -99,6 +107,7 @@ class PricePlan:
     unchanged: int = 0                # menu dishes already at the sheet's prices
     not_found: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
+    near: list[str] = field(default_factory=list)      # matched by rule 3, for review
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -215,23 +224,45 @@ async def plan(session: AsyncSession, rows: list[SheetRow], *,
     result.update_mrp = update_mrp
     result.rows = len(rows)
     dishes = (await session.execute(
-        select(MenuItem, Cuisine.name)
+        select(MenuItem, Category.name, Cuisine.name)
         .join(Category, MenuItem.category_id == Category.id)
         .join(Cuisine, Category.cuisine_id == Cuisine.id))).all()
     exact: dict[tuple[str, str], list[MenuItem]] = defaultdict(list)
     base: dict[tuple[str, str], list[MenuItem]] = defaultdict(list)
+    loose: dict[tuple[str, str, str], list[MenuItem]] = defaultdict(list)
+    sizes: dict[tuple[str, str, str], list[MenuItem]] = defaultdict(list)
     names: dict[str, str] = {}
+    categories: dict[str, str] = {}
     cuisines = set()
-    for item, cuisine in dishes:
-        c = cuisine.lower()
+    for item, category, cuisine in dishes:
+        c, cat = cuisine.lower(), _key(category)
         cuisines.add(c)
         names[str(item.id)] = cuisine
+        categories[str(item.id)] = cat
         exact[(c, _key(item.name))].append(item)
-        if not SIZE_RE.search(item.name or ""):
+        loose[(c, cat, _loose(item.name, sized=True))].append(item)
+        if SIZE_RE.search(item.name or ""):
+            sizes[(c, cat, _loose(item.name, sized=False))].append(item)
+        else:
             base[(c, _base(item.name))].append(item)
     sheet_bases: dict[tuple[str, str], int] = defaultdict(int)
+    sheet_loose: dict[tuple[str, str, str], int] = defaultdict(int)
     for row in rows:
-        sheet_bases[(row.cuisine.lower(), _base(row.name))] += 1
+        c, cat = row.cuisine.lower(), _key(row.category)
+        sheet_bases[(c, _base(row.name))] += 1
+        sheet_loose[(c, cat, _loose(row.name, sized=True))] += 1
+        if SIZE_RE.search(row.name):
+            sheet_loose[(c, cat, _loose(row.name, sized=False))] += 1
+
+    def near(row: SheetRow) -> list[MenuItem]:
+        c, cat = row.cuisine.lower(), _key(row.category)
+        for sized in (True, False):
+            key = (c, cat, _loose(row.name, sized=sized))
+            found = [item for item in loose.get(key) or []
+                     if sized or not SIZE_RE.search(item.name or "")]
+            if len(found) == 1 and sheet_loose[key] == 1:
+                return found
+        return []
 
     wanted: dict[str, tuple[MenuItem, Decimal | None, Decimal, list[SheetRow]]] = {}
     clashing: set[str] = set()
@@ -247,7 +278,18 @@ async def plan(session: AsyncSession, rows: list[SheetRow], *,
             if len(one) == 1 and sheet_bases[(c, _base(row.name))] == 1:
                 hits = one
         if not hits:
-            result.not_found.append(f"{row.cuisine} / {row.category} / {row.name}")
+            hits = near(row)
+            if hits:
+                result.near.append(f"{row.cuisine} / {row.name} is the menu's {hits[0].name}")
+        if not hits:
+            label = f"{row.cuisine} / {row.category} / {row.name}"
+            own_size = _loose(row.name, sized=True)
+            other = [i.name for i in sizes.get(
+                (c, _key(row.category), _loose(row.name, sized=False))) or []
+                if _loose(i.name, sized=True) != own_size]
+            if other:
+                label += f" (the menu sells another size: {', '.join(other[:3])})"
+            result.not_found.append(label)
             continue
         result.matched += 1
         for item in hits:
@@ -264,6 +306,11 @@ async def plan(session: AsyncSession, rows: list[SheetRow], *,
                                "left alone.")
 
     for key, (item, ppp, mrp, sources) in wanted.items():
+        if key in clashing:
+            own = {(r.ppp, r.mrp) for r in sources if _key(r.category) == categories[key]}
+            if len(own) == 1:      # one name under two categories: each its own row
+                ppp, mrp = own.pop()
+                clashing.discard(key)
         if key in clashing:
             result.conflicts.append(
                 f"{names[key]} / {item.name} (sheet rows "
@@ -336,6 +383,12 @@ def _key(name: str) -> str:
 
 def _base(name: str) -> str:
     return _key(SIZE_RE.sub("", name or ""))
+
+
+def _loose(name: str, *, sized: bool) -> str:
+    """The name without its bracketed notes, and without its size unless sized."""
+    text = PARENS_RE.sub(" ", name or "")
+    return _key(text if sized else SIZE_RE.sub("", text))
 
 
 def _text(value) -> str:

@@ -281,9 +281,11 @@ ORDER_ALERT = TemplateSpec(
 )
 
 # To the kitchen partner (Kitchens > Kitchen WhatsApp), every paid order
-# (services/kitchen_alerts.py). Only what the kitchen needs to cook it: no
-# customer name, number or address and no amount - Shero arranges the
-# delivery. Starts and ends on words, every value one line, as ORDER_ALERT.
+# (services/kitchen_alerts.py). Only what the kitchen needs: no customer
+# name, number or address and nothing the customer paid - Shero arranges the
+# delivery. {{4}} is each dish's quantity and PPP (Triple-P), then the PPP
+# total; never the MRP. Starts and ends on words, every value one line, as
+# ORDER_ALERT.
 KITCHEN_ORDER = TemplateSpec(
     name="shero_kitchen_order",
     category="UTILITY",
