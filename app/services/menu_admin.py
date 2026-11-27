@@ -207,7 +207,7 @@ async def create_item(session: AsyncSession, *, category_id: uuid.UUID,
         description=optional_text(description, limit=2000),
         image_url=photo,
         price=parse_price(price) or Decimal("0.00"),
-        cost_price=parse_price(cost_price, field="Cost", required=False),
+        cost_price=parse_price(cost_price, field="PPP", required=False),
         pack_size=optional_text(pack_size, limit=80),
         serves=optional_text(serves, limit=80),
         position=position,
@@ -239,7 +239,7 @@ async def update_item(session: AsyncSession, item: MenuItem, *,
     if price is not None:
         item.price = parse_price(price) or Decimal("0.00")
     if cost_price is not None:
-        item.cost_price = parse_price(cost_price, field="Cost", required=False)
+        item.cost_price = parse_price(cost_price, field="PPP", required=False)
     if description is not None:
         item.description = optional_text(description, limit=2000)
     if pack_size is not None:

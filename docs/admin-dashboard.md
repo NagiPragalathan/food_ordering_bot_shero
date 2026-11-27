@@ -50,7 +50,7 @@ it in bulk, not the only way in.
 
 | Button | What it does |
 |---|---|
-| **Add a dish** | Name, category, price, cost, description, pack size, serves and a photo. It is on sale the moment you save. |
+| **Add a dish** | Name, category, MRP (selling price), PPP (partner purchase price), description, pack size, serves and a photo. It is on sale the moment you save. |
 | **New category** | A section inside the cuisine you are looking at, e.g. "Festival Specials" |
 | **New cuisine** | A whole new tab. Add a category in it before adding dishes - a dish has to live in a category. |
 
@@ -65,12 +65,14 @@ both empty and the dish shows a drawn placeholder.
 
 ### Editing
 
-Each row has a quick edit for the two things that change most - **price** and
-**Available**. Saving there touches nothing else, so it cannot blank a
-description by accident.
+Each row has a quick edit for the things that change most - **MRP**, **PPP**
+(Triple-P, the partner purchase price: what the kitchen partner is paid for
+the dish) and **Available**. Saving there touches nothing else, so it cannot
+blank a description by accident. A dish without a PPP says **no PPP**.
 
-**Edit full details** opens the rest: name, cost, description, pack size,
+**Edit full details** opens the rest: name, MRP, PPP, description, pack size,
 serves and a replacement photo. Leave the photo empty to keep the current one.
+To change many dishes' PPP at once, use **Import → Bulk price update**.
 
 > Renaming a dish **does not** change its id. Carts people are holding right
 > now, paid orders and Stripe records all point at that id, so it stays put.
@@ -96,8 +98,7 @@ things that were wrong to begin with.
 
 ### Also on this page
 
-- Each dish shows its **margin** - price minus cost, from the sheet's PPP
-  column.
+- Each dish shows its **PPP** and **margin** - MRP minus PPP.
 - **Hide from menu** takes a whole cuisine out of WhatsApp without deleting
   anything.
 - **Search** matches dish names within the cuisine you are viewing.
@@ -115,7 +116,34 @@ things that were wrong to begin with.
 
 ## Import
 
-Two ways to load the menu.
+Two ways to load the menu, and one to update its prices.
+
+### Bulk price update: PPP and MRP
+
+For both businesses. Updates the **PPP** - and the **MRP** only when *Also
+update the selling price* is ticked - of dishes **already on the menu**. It
+never adds, renames or hides a dish, so it works over any menu, whether it was
+loaded from a Google Sheet (Shero US) or the ERP's exports (DST India).
+
+1. Paste the Google Sheet link (shared for viewing) or choose an `.xlsx` /
+   `.csv` file, and press **Check the prices**. Nothing is saved yet.
+2. The page lists every dish whose price would change (now → new), the sheet
+   dishes it could not find on the menu, and anything left alone.
+3. **Update N dishes** saves exactly that.
+
+The sheet: one tab per cuisine, each section headed by a row naming **PPP**
+and **MRP** in any column order - Shero US's "# | name | Description | Image |
+PPP | MRP" and DST India's "# | # | name | PPP | MRP | Description | Image"
+both work. The cuisine comes from the title row ("Kerala Cuisine - ..."),
+else the tab name. Tabs named "... Before ..." (old prices) and tabs without
+PPP / MRP rows (a key, an index, an SOP) are skipped; two tabs for one
+cuisine use the later one.
+
+A sheet dish is matched to a menu dish **of the same cuisine** by its name,
+ignoring case, spaces and punctuation; then by its name without the size
+("Beans Sambar - 16 OZ" is the menu's "Beans Sambar") when only one dish
+fits. A dish the sheet lists twice with different prices is left alone. A
+price never lands on a guess: what does not match is listed, unchanged.
 
 ### From Google Sheets
 

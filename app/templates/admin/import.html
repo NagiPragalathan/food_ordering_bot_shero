@@ -11,6 +11,140 @@
 
   <div class="space-y-5 lg:col-span-2">
 
+    {% if prices %}
+    {% call ui.card('Check: what this sheet changes', prices.summary()) %}
+      <div class="space-y-4 text-sm" data-price-check>
+        <p class="text-xs text-stone-500">
+          Read from: {{ prices.tabs_used | join(', ') or 'no tab' }}.
+          {% if prices.tabs_skipped %}Skipped: {{ prices.tabs_skipped | join(', ') }}.{% endif %}
+          Nothing has been changed yet.
+        </p>
+
+        {% if prices.changes %}
+        <div class="overflow-x-auto rounded-lg border border-stone-200">
+          <table class="w-full text-xs" data-price-changes>
+            <thead class="bg-stone-50 text-left text-stone-500">
+              <tr>
+                <th class="px-3 py-2 font-medium">Dish</th>
+                <th class="px-3 py-2 text-right font-medium">PPP now</th>
+                <th class="px-3 py-2 text-right font-medium">New PPP</th>
+                {% if prices.update_mrp %}
+                <th class="px-3 py-2 text-right font-medium">MRP now</th>
+                <th class="px-3 py-2 text-right font-medium">New MRP</th>
+                {% endif %}
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-stone-100">
+              {% for c in prices.changes[:shown] %}
+              <tr>
+                <td class="px-3 py-1.5"><span class="text-stone-400">{{ c.cuisine }} ·</span> {{ c.name }}</td>
+                <td class="px-3 py-1.5 text-right tabular-nums text-stone-500">
+                  {{ locale.money(c.old_ppp) if c.old_ppp is not none else '—' }}</td>
+                <td class="px-3 py-1.5 text-right tabular-nums {% if c.new_ppp != c.old_ppp %}font-semibold text-brand-700{% endif %}">
+                  {{ locale.money(c.new_ppp) if c.new_ppp is not none else '—' }}</td>
+                {% if prices.update_mrp %}
+                <td class="px-3 py-1.5 text-right tabular-nums text-stone-500">{{ locale.money(c.old_mrp) }}</td>
+                <td class="px-3 py-1.5 text-right tabular-nums {% if c.new_mrp != c.old_mrp %}font-semibold text-brand-700{% endif %}">
+                  {{ locale.money(c.new_mrp) }}</td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if prices.changes | length > shown %}
+          <p class="text-xs text-stone-500">…and {{ prices.changes | length - shown }} more.</p>
+        {% endif %}
+        {% else %}
+          <p class="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            Every dish found is already at the sheet's prices: nothing to update.</p>
+        {% endif %}
+
+        {% if prices.not_found %}
+        <details class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-price-missing>
+          <summary class="cursor-pointer font-medium">
+            {{ prices.not_found | length }} sheet dish(es) not found on the menu: left alone</summary>
+          <p class="mt-2">Usually a different name on the sheet. Fix the name there, or set the
+            PPP on the Menu page.</p>
+          <ul class="mt-2 list-disc space-y-0.5 pl-5">
+            {% for name in prices.not_found[:shown] %}<li>{{ name }}</li>{% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+
+        {% if prices.conflicts %}
+        <details class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <summary class="cursor-pointer font-medium">
+            {{ prices.conflicts | length }} dish(es) listed twice with different prices: left alone</summary>
+          <ul class="mt-2 list-disc space-y-0.5 pl-5">
+            {% for name in prices.conflicts[:shown] %}<li>{{ name }}</li>{% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+
+        {% if prices.warnings %}
+        <details class="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-700">
+          <summary class="cursor-pointer font-medium">{{ prices.warnings | length }} note(s)</summary>
+          <ul class="mt-2 list-disc space-y-0.5 pl-5">
+            {% for w in prices.warnings[:shown] %}<li>{{ w }}</li>{% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('admin_import_prices_apply') }}"
+              class="flex flex-wrap items-center gap-3" data-price-apply>
+          <input type="hidden" name="payload" value="{{ payload }}">
+          {% if prices.update_mrp %}<input type="hidden" name="update_mrp" value="on">{% endif %}
+          <button {% if not prices.changes %}disabled{% endif %}
+                  class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white
+                         hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50">
+            Update {{ prices.changes | length }} dish{{ '' if prices.changes | length == 1 else 'es' }}
+          </button>
+          <a href="{{ url_for('admin_import') }}" class="text-sm text-stone-500 hover:underline">Cancel</a>
+        </form>
+      </div>
+    {% endcall %}
+    {% endif %}
+
+    {% call ui.card('Bulk price update: PPP and MRP',
+                    'Updates the dishes already on the menu. Never adds, renames or hides a dish') %}
+      <form method="post" action="{{ url_for('admin_import_prices') }}"
+            enctype="multipart/form-data" class="space-y-4" data-price-upload>
+        <div>
+          <label class="mb-1.5 block text-sm font-medium text-stone-700">Google Sheet link</label>
+          <input name="sheet_url" placeholder="https://docs.google.com/spreadsheets/d/..."
+                 class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none
+                        focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+          <p class="mt-1.5 text-xs text-stone-500">
+            Shared as <strong>Anyone with the link can view</strong>. Or choose a file instead:
+          </p>
+          <input type="file" name="file" accept=".xlsx,.csv"
+                 class="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm
+                        file:mr-3 file:rounded file:border-0 file:bg-stone-100
+                        file:px-3 file:py-1.5 file:text-xs file:font-medium">
+        </div>
+        <p class="text-xs text-stone-500">
+          One tab per cuisine, with a header row naming <strong>PPP</strong> and <strong>MRP</strong>
+          (in any column order) above its dishes. Dishes are matched to the menu by name within
+          their cuisine. Tabs named "Before …" are old prices and skipped.
+        </p>
+        <label class="flex items-start gap-2 text-sm">
+          <input type="checkbox" name="update_mrp"
+                 class="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
+          <span>
+            Also update the selling price (MRP)
+            <span class="block text-xs text-stone-500">
+              Off: only the PPP (partner purchase price) changes; customers' prices stay as they are.
+            </span>
+          </span>
+        </label>
+        <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+          Check the prices
+        </button>
+        <p class="text-xs text-stone-500">Next you see every change before anything is saved.</p>
+      </form>
+    {% endcall %}
+
     {% call ui.card('Upload ERP item exports (Excel)', 'One file = one cuisine: "Shero Home Food - Andhra.xlsx" becomes Andhra') %}
       <form method="post" action="{{ url_for('admin_import_erp') }}"
             enctype="multipart/form-data" class="space-y-4" data-erp-import>
@@ -168,7 +302,8 @@
           <li>A row is a <strong>category</strong> when the 4th column reads
               "Description".</li>
           <li><strong>MRP</strong> is charged to the customer.</li>
-          <li><strong>PPP</strong> is stored as cost, for margin only — never shown.</li>
+          <li><strong>PPP</strong> (partner purchase price) is what the kitchen partner is paid,
+              kept for margin and never shown to customers.</li>
           <li>Re-importing <strong>updates</strong> existing rows rather than
               duplicating them.</li>
         </ul>
@@ -180,6 +315,15 @@
 
 {% block scripts %}
 <script>
+  // Show a price check or update is running (a big sheet takes a moment).
+  document.querySelectorAll('form[data-price-upload], form[data-price-apply]').forEach(form => {
+    form.addEventListener('submit', () => {
+      const button = form.querySelector('button');
+      button.disabled = true;
+      button.textContent = form.hasAttribute('data-price-apply') ? 'Updating…' : 'Checking…';
+    });
+  });
+
   // Confirm before a whole-menu replace, and show the import is running.
   document.querySelectorAll('form[data-erp-import]').forEach(form => {
     form.addEventListener('submit', event => {

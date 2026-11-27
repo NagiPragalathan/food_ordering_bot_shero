@@ -91,13 +91,13 @@
 
         <div class="grid grid-cols-2 gap-3">
           <label class="block text-xs font-medium text-stone-600">
-            Price *
+            MRP (selling price) *
             <input name="price" required inputmode="decimal" placeholder="16.53"
                    class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal tabular-nums
                           outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
           </label>
-          <label class="block text-xs font-medium text-stone-600">
-            Cost
+          <label class="block text-xs font-medium text-stone-600" title="Partner purchase price: what the kitchen partner is paid">
+            PPP (partner price)
             <input name="cost_price" inputmode="decimal" placeholder="10.78"
                    class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal tabular-nums
                           outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
@@ -268,31 +268,41 @@
               <div class="mt-0.5 truncate text-xs text-stone-500">
                 {% if item.pack_size %}{{ item.pack_size }}{% endif %}
                 {% if item.serves %} · {{ item.serves }}{% endif %}
-                {% if item.cost_price %}
-                  · cost {{ locale.money(item.cost_price) }}
+                {% if item.cost_price is not none %}
+                  · PPP {{ locale.money(item.cost_price) }}
                   {% if item.margin_percent %}
                     <span class="text-emerald-700">({{ item.margin_percent }}% margin)</span>
                   {% endif %}
+                {% else %}
+                  · <span class="text-amber-700">no PPP</span>
                 {% endif %}
               </div>
             </div>
 
-            {# Quick edit: price and availability only. It deliberately sends no
+            {# Quick edit: MRP, PPP and availability only. It deliberately sends no
                other field, so saving here cannot blank a description. #}
             <form method="post" action="{{ url_for('admin_menu_item_update', item_id=item.id) }}"
-                  class="flex items-center gap-3">
+                  class="flex items-center gap-3" data-quick-edit>
               <label class="flex items-center gap-1.5 text-xs text-stone-500">
                 <input type="checkbox" name="is_available" {% if item.is_available %}checked{% endif %}
                        class="h-3.5 w-3.5 rounded border-stone-300 text-brand-600 focus:ring-brand-500">
                 Available
               </label>
-              <div class="flex items-center gap-1">
-                <span class="text-sm text-stone-400">{{ locale.symbol() }}</span>
+              <label class="flex items-center gap-1 text-xs text-stone-500" title="Selling price">
+                MRP {{ locale.symbol() }}
                 <input name="price" value="{{ '%.2f' | format(item.price) }}"
-                       inputmode="decimal"
+                       inputmode="decimal" aria-label="MRP"
                        class="w-20 rounded-lg border border-stone-300 px-2 py-1 text-right text-sm tabular-nums
                               outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
-              </div>
+              </label>
+              <label class="flex items-center gap-1 text-xs text-stone-500"
+                     title="Partner purchase price: what the kitchen partner is paid">
+                PPP {{ locale.symbol() }}
+                <input name="cost_price" inputmode="decimal" aria-label="PPP"
+                       value="{% if item.cost_price is not none %}{{ '%.2f' | format(item.cost_price) }}{% endif %}"
+                       class="w-20 rounded-lg border border-stone-300 px-2 py-1 text-right text-sm tabular-nums
+                              outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+              </label>
               <button class="rounded-lg border border-stone-300 px-2.5 py-1 text-xs font-medium hover:bg-stone-100">
                 Save
               </button>
@@ -327,13 +337,13 @@
 
               <div class="grid grid-cols-2 gap-3">
                 <label class="block text-xs font-medium text-stone-600">
-                  Price
+                  MRP (selling price)
                   <input name="price" value="{{ '%.2f' | format(item.price) }}" required inputmode="decimal"
                          class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal tabular-nums
                                 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
                 </label>
-                <label class="block text-xs font-medium text-stone-600">
-                  Cost
+                <label class="block text-xs font-medium text-stone-600" title="Partner purchase price: what the kitchen partner is paid">
+                  PPP (partner price)
                   <input name="cost_price" inputmode="decimal"
                          value="{% if item.cost_price is not none %}{{ '%.2f' | format(item.cost_price) }}{% endif %}"
                          class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal tabular-nums
